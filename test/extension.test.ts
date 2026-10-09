@@ -46,6 +46,7 @@ function host() {
 	const ui: any = {
 		notify: (m: string) => notes.push(m),
 		setStatus: (_k: string, v?: string) => statuses.push(v),
+		onTerminalInput: () => () => {},
 		theme: { fg: (_c: string, t: string) => t, bold: (t: string) => t },
 		custom: async () => undefined,
 		confirm: (title: string, _m: string, opts: any) => dialog(title, false, opts),
