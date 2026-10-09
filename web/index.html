@@ -57,7 +57,7 @@
 			<textarea id="input" rows="1" placeholder="Message pi…" enterkeyhint="send" autocomplete="off"></textarea>
 			<button id="modeBtn" class="mode" hidden title="While pi works: steer interrupts after the current tool, queue waits until it finishes">steer</button>
 			<button id="stopBtn" class="stop" hidden aria-label="Stop">■</button>
-			<button id="micBtn" class="icon-btn mic" aria-label="Dictate" title="Speak instead of typing"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+			<button id="micBtn" class="icon-btn mic" aria-label="Dictate: hold to talk, or tap to start and stop" aria-pressed="false" title="Speak instead of typing: hold to talk, or tap to start and stop"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
 			<button id="sendBtn" class="send" aria-label="Send">↑</button>
 		</div>
 	</footer>
@@ -70,20 +70,41 @@
 		<div id="sheetBody"></div>
 	</div>
 </div>
-<div id="voice" class="voice" hidden role="dialog" aria-label="Voice mode">
-	<div class="v-top">
-		<span id="vSession" class="v-session"></span>
-		<span id="vEngine" class="v-engine"></span>
-		<button id="vEnd" class="v-end">End</button>
-	</div>
-	<button id="vOrb" class="v-orb connecting" aria-live="polite"><span id="vState">Connecting…</span></button>
-	<div id="vHeard" class="v-line you"></div>
-	<div id="vSaid" class="v-line pi"></div>
-	<div id="vNote" class="v-note" aria-live="polite"></div>
-	<div class="v-bottom">
-		<button id="vAttention" class="v-toggle" title="Eyes-free: shortest answers, nothing visual. Can glance: a little more detail.">Eyes-free</button>
-		<button id="vTurns" class="v-toggle" title="Open mic: just talk. Tap to talk: tap the circle to start and finish (noisy places, cycling).">Open mic</button>
-	</div>
+<div id="voice" class="voice" hidden role="dialog" aria-modal="true" aria-label="Voice mode">
+	<header class="v-top">
+		<button id="vSession" class="v-session" aria-label="Switch session">
+			<span id="vDot" class="dot"></span>
+			<span id="vSessionName" class="v-name"></span>
+			<span id="vEngine" class="v-engine"></span>
+		</button>
+		<button id="vEnd" class="v-close" aria-label="End voice mode"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+	</header>
+	<button id="vOrb" class="v-stage connecting" aria-describedby="vState vHint">
+		<canvas id="vCanvas" class="v-canvas" aria-hidden="true"></canvas>
+		<span class="v-icon" aria-hidden="true"></span>
+		<span id="vState" class="v-state" aria-live="polite">Connecting…</span>
+		<span id="vHint" class="v-hint"></span>
+	</button>
+	<section class="v-captions" aria-label="Conversation">
+		<p id="vHeard" class="v-cap you"></p>
+		<p id="vSaid" class="v-cap pi" aria-live="polite"></p>
+	</section>
+	<section id="vAsk" class="v-ask" hidden aria-live="assertive"></section>
+	<p id="vNote" class="v-note" role="status"></p>
+	<footer class="v-controls">
+		<button id="vMute" class="v-mute" aria-pressed="false" aria-label="Mute microphone">
+			<svg class="on" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+			<svg class="off" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 10V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 5 2.2M5 11a7 7 0 0 0 11.4 5.4M19 11a7 7 0 0 1-.6 2.8M12 18v3M4 4l16 16"/></svg>
+		</button>
+		<div class="v-seg" role="group" aria-label="How much to say">
+			<button id="vEyesFree" aria-pressed="true" title="Shortest answers, nothing visual: driving, running, cycling">Eyes-free</button>
+			<button id="vGlance" aria-pressed="false" title="A little more detail; you can look at the screen">Can glance</button>
+		</div>
+		<div class="v-seg" role="group" aria-label="How turns work">
+			<button id="vOpen" aria-pressed="true" title="Just talk; pi notices when you're done">Open mic</button>
+			<button id="vTap" aria-pressed="false" title="Tap the circle to talk and again when done: wind, traffic, noise">Tap to talk</button>
+		</div>
+	</footer>
 	<audio id="vRemote" autoplay playsinline></audio>
 </div>
 <div id="toasts" class="toasts" aria-live="polite"></div>

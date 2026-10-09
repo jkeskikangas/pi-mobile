@@ -186,40 +186,99 @@ textarea#input:focus { border-color: var(--accent); }
 .sheet .row .last { display: block; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet .row .ask { display: block; font-size: 13px; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ── voice ─────────────────────────────────────────────────────────────────── */
+/* ── voice ─────────────────────────────────────────────────────────────────────────── */
 .icon-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.mic.rec { background: var(--err); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: .65; } }
-.dict-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; color: var(--muted); }
-.dict-bar .grow { flex: 1; min-width: 0; }
-.dict-bar .chip { font-size: 12px; padding: 3px 9px; }
-.dict-bar .meter { width: 10px; height: 10px; border-radius: 50%; background: var(--err); flex: none; transform: scale(calc(.6 + var(--lvl, 0) * .9)); transition: transform .1s; }
 
+/* Composer dictation: the mic, and a strip that becomes the recorder while you talk. */
+.mic { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; position: relative; }
+.mic.rec { background: var(--err); color: #fff; border-radius: 50%; }
+.mic.rec::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--err); opacity: .5; animation: mic-ring 1.4s ease-out infinite; }
+@keyframes mic-ring { from { transform: scale(.85); opacity: .6; } to { transform: scale(1.25); opacity: 0; } }
+.dict-bar { display: flex; align-items: center; gap: 10px; margin: 0 8px 6px; padding: 6px 8px 6px 12px; min-height: 44px; border-radius: 14px; font-size: 14px; color: var(--muted); background: var(--panel-2); }
+.dict-bar .grow { flex: 1; min-width: 0; }
+.dict-bar[data-kind="busy"] .grow::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--accent); vertical-align: middle; animation: mic-dot 1s ease-in-out infinite; }
+.dict-bar[data-kind="done"] .grow { color: var(--text); }
+.dict-bar[data-kind="error"] .grow { color: var(--err); }
+@keyframes mic-dot { 50% { opacity: .25; transform: scale(.7); } }
+.dict-bar .chip { font-size: 13px; font-weight: 600; padding: 6px 12px; min-height: 32px; border-radius: 999px; background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+.dict-bar[data-kind="rec"] { padding: 4px; gap: 8px; color: var(--err); background: color-mix(in srgb, var(--err) 10%, var(--panel-2)); }
+.dict-bar .wave { flex: 1; min-width: 0; height: 30px; color: var(--err); }
+.dict-bar .rec-time { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
+.dict-bar .rec-hint { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.rec-x, .rec-done { width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.rec-x { color: var(--muted); }
+.rec-done { background: var(--accent); color: var(--accent-text); }
+.rec-x svg, .rec-done svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 380px) { .dict-bar .rec-hint { display: none; } }
+
+/* Voice mode: always dark and immersive. Focus, legibility at arm's length, and less battery with
+   the screen kept awake on OLED phones. */
 body.voice-on { overflow: hidden; }
-.voice { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; align-items: center; padding: calc(var(--safe-t) + 12px) 20px calc(var(--safe-b) + 20px); gap: 14px; }
-.v-top { width: 100%; display: flex; align-items: center; gap: 10px; }
-.v-session { flex: 1; font-weight: 600; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.v-engine { font-size: 12px; color: var(--muted); }
-.v-end { padding: 8px 16px; border-radius: 999px; background: var(--err); color: #fff; font-weight: 600; }
-/* The whole middle is one big target: usable without looking, with gloves, on a bike mount. */
-.v-orb { flex: 1; width: 100%; max-width: 520px; min-height: 260px; border-radius: 32px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 600; color: var(--text); background: var(--panel-2); transition: background .25s; position: relative; }
-.v-orb::before { content: ""; position: absolute; width: 140px; height: 140px; border-radius: 50%; top: calc(50% - 120px); background: var(--muted); opacity: .25; transition: all .3s; }
-.v-orb span { position: relative; top: 60px; }
-.v-orb.listening::before { background: var(--accent); opacity: .5; animation: breathe 2.4s ease-in-out infinite; }
-.v-orb.hearing::before { background: var(--accent); opacity: .9; transform: scale(1.15); }
-.v-orb.thinking::before { background: var(--accent); opacity: .5; animation: spin-pulse .9s linear infinite; }
-.v-orb.working::before { background: var(--warn); opacity: .55; animation: breathe 1.4s ease-in-out infinite; }
-.v-orb.speaking::before { background: var(--ok); opacity: .8; animation: talk .5s ease-in-out infinite alternate; }
-.v-orb.asking { background: color-mix(in srgb, var(--warn) 22%, var(--panel-2)); }
-.v-orb.asking::before { background: var(--warn); opacity: .9; }
-.v-orb.paused::before { opacity: .15; }
-@keyframes breathe { 50% { transform: scale(1.08); } }
-@keyframes talk { to { transform: scale(1.18); } }
-@keyframes spin-pulse { 50% { transform: scale(.9); opacity: .3; } }
-.v-line { width: 100%; max-width: 520px; font-size: 16px; line-height: 1.35; min-height: 1.35em; }
-.v-line.you { color: var(--muted); font-style: italic; }
-.v-line.pi { font-size: 18px; }
-.v-note { width: 100%; max-width: 520px; font-size: 13px; color: var(--warn); min-height: 1em; }
-.v-bottom { display: flex; gap: 10px; width: 100%; max-width: 520px; }
-.v-toggle { flex: 1; padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); font-size: 15px; font-weight: 600; }
-@media (prefers-reduced-motion: reduce) { .v-orb::before, .mic.rec { animation: none !important; } }
+body.voice-on .sheet { z-index: 60; }
+body.voice-on .toasts { z-index: 70; }
+.voice {
+	--v-bg: #07080b; --v-text: #f2f3f5; --v-muted: #9a9ea8; --v-line: rgba(255, 255, 255, .1);
+	--c1: #5b93f5; --c2: #8b5cf6;
+	position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 10px;
+	padding: calc(var(--safe-t) + 8px) 16px calc(var(--safe-b) + 14px);
+	background: radial-gradient(120% 70% at 50% 38%, color-mix(in srgb, var(--c1) 14%, var(--v-bg)) 0%, var(--v-bg) 62%);
+	color: var(--v-text); color-scheme: dark; transition: background .6s;
+}
+.v-top { width: 100%; max-width: 560px; display: flex; align-items: center; gap: 8px; }
+.v-session { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; text-align: left; }
+.v-session:active { background: var(--v-line); }
+.v-name { font-weight: 650; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-engine { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--v-muted); padding: 2px 7px; border: 1px solid var(--v-line); border-radius: 999px; flex: none; }
+.v-engine:empty { display: none; }
+.v-close { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, .08); flex: none; }
+.v-close svg, .v-mute svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* The stage is one big target: usable without looking, with gloves, on a bike mount. */
+.v-stage { position: relative; flex: 1; width: 100%; max-width: 560px; min-height: 240px; border-radius: 28px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6%; color: inherit; -webkit-tap-highlight-color: transparent; }
+.v-stage:focus-visible { outline: 2px solid var(--c1); outline-offset: 4px; }
+.v-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.v-icon { position: absolute; top: 42%; left: 50%; width: 34px; height: 34px; transform: translate(-50%, -50%); opacity: 0; transition: opacity .3s; background: currentColor; -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+.voice[data-state="paused"] .v-icon { opacity: .8; --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M15 10V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 5 2.2M5 11a7 7 0 0 0 11.4 5.4M19 11a7 7 0 0 1-.6 2.8M12 18v3M4 4l16 16'/%3E%3C/svg%3E"); }
+.v-state { position: relative; font-size: clamp(22px, 6.4vw, 30px); font-weight: 650; letter-spacing: -.01em; text-align: center; }
+.v-hint { position: relative; margin-top: 6px; min-height: 1.3em; font-size: 15px; color: var(--v-muted); text-align: center; transition: opacity .4s; }
+/* State colours, learnable at a glance: blue listens, violet thinks, amber works, green speaks, gold asks, grey is off. */
+.voice[data-state="listening"], .voice[data-state="hearing"] { --c1: #5b93f5; --c2: #22d3ee; }
+.voice[data-state="thinking"] { --c1: #8b9cf5; --c2: #c084fc; }
+.voice[data-state="working"] { --c1: #f5a524; --c2: #f97316; }
+.voice[data-state="speaking"] { --c1: #34d399; --c2: #22d3ee; }
+.voice[data-state="asking"] { --c1: #fbbf24; --c2: #f472b6; }
+.voice[data-state="paused"], .voice[data-state="connecting"], .voice[data-state="offline"] { --c1: #6b7280; --c2: #9ca3af; }
+
+.v-captions { width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 6px; min-height: 4.8em; }
+.v-cap { margin: 0; line-height: 1.38; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; }
+.v-cap.you { font-size: 15px; color: var(--v-muted); -webkit-line-clamp: 2; }
+.v-cap.you:not(:empty)::before { content: "You  "; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--v-muted); opacity: .8; }
+.v-cap.pi { font-size: 19px; font-weight: 500; -webkit-line-clamp: 4; }
+.v-cap.live { opacity: .75; }
+
+/* pi's question, answerable with a tap when you can glance (voice works too). */
+.v-ask { width: 100%; max-width: 560px; padding: 14px; border-radius: 18px; background: rgba(251, 191, 36, .12); border: 1px solid rgba(251, 191, 36, .35); }
+.v-ask h2 { margin: 0 0 4px; font-size: 17px; font-weight: 650; }
+.v-ask p { margin: 0 0 10px; font-size: 14px; color: var(--v-muted); }
+.v-ask .acts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.v-ask button { min-height: 52px; padding: 10px 14px; border-radius: 14px; font-size: 16px; font-weight: 650; background: rgba(255, 255, 255, .1); color: var(--v-text); }
+.v-ask button.yes { background: #fbbf24; color: #1a1300; }
+.v-ask button.danger { background: #ef4444; color: #fff; }
+.v-ask .grace-left { margin-bottom: 8px; color: var(--v-text); }
+.grace-bar { height: 6px; margin: 0 0 12px; border-radius: 3px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+.grace-bar > span { display: block; height: 100%; background: #fbbf24; transition: width .2s linear; }
+.v-note { width: 100%; max-width: 560px; margin: 0; font-size: 13px; color: #fbbf24; min-height: 1em; text-align: center; }
+.v-note:empty { display: none; }
+
+.v-controls { width: 100%; max-width: 560px; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 8px 10px; align-items: center; }
+.v-mute { grid-row: span 2; width: 64px; height: 64px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, .1); color: var(--v-text); }
+.v-mute svg { width: 26px; height: 26px; }
+.v-mute .off, .v-mute[aria-pressed="true"] .on { display: none; }
+.v-mute[aria-pressed="true"] .off { display: block; }
+.v-mute[aria-pressed="true"] { background: #f2f3f5; color: #07080b; }
+.v-seg { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, .07); }
+.v-seg button { min-height: 40px; border-radius: 9px; font-size: 14px; font-weight: 600; color: var(--v-muted); }
+.v-seg button[aria-pressed="true"] { background: rgba(255, 255, 255, .16); color: var(--v-text); }
+@media (min-height: 760px) { .v-mute { width: 72px; height: 72px; } .v-seg button { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .mic.rec::after, .dict-bar[data-kind="busy"] .grow::before { animation: none !important; } .voice { transition: none; } }
+@media (prefers-contrast: more) { .voice { --v-muted: #d4d6db; --v-line: rgba(255, 255, 255, .35); } }

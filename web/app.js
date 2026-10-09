@@ -1419,6 +1419,8 @@
 		agentName,
 		openAgent,
 		autosize,
+		openSheet,
+		sessionsSheet,
 		input: () => $("input"),
 	};
 

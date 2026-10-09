@@ -23,7 +23,34 @@
 		["more", /^(?:more|tell me more|go on|details|more details|what else|continue|and)$/],
 		["quiet", /^(?:quiet|be quiet|shush|shut up|silence|stop talking|enough)$/],
 		["end", /^(?:end voice(?: mode)?|exit voice(?: mode)?|goodbye|bye|that's all|we're done|end call|hang up)$/],
+		["help", /^(?:help|what can i say|what can you do|how does this work|commands)$/],
 	];
+
+	/** What "what can I say?" answers: a few things, spoken, not a manual. */
+	const HELP =
+		"Just talk to pi like a colleague. You can say: what's it doing; stop; tell me more; say that again; switch to another session. When pi asks something, answer out loud, or tap the card.";
+
+	/**
+	 * A listener's backchannel or a stray sound, not a turn: "mm-hmm", "right", a cough. While pi
+	 * speaks these should not interrupt it. Never true when pi is waiting on an answer, where "yeah"
+	 * and "ok" are answers.
+	 */
+	function isBackchannel(text, answering = false) {
+		const t = norm(text);
+		if (!t) return true;
+		if (answering) return false;
+		return /^(?:m+h?m+|mm+ ?hmm+|uh ?huh|uh+|um+|hmm+|ah+|oh+|yeah|yep|yup|ok|okay|right|sure|cool|nice|great|got it|i see|alright|true|exactly)$/.test(t);
+	}
+
+	/**
+	 * Did the microphone just pick up pi's own voice? A transcript that is a piece of what pi was
+	 * saying ("say yes, deploy to confirm") must never count as the developer's consent.
+	 */
+	function isEcho(heard, spoken) {
+		const h = norm(heard);
+		const s = norm(spoken);
+		return h.split(" ").length >= 2 && s.includes(h);
+	}
 
 	/** A local command if the whole utterance is one, else null. Instant: no model round trip. */
 	function parseCommand(text) {
@@ -91,6 +118,23 @@
 		const word = DESTRUCTIVE.exec(option);
 		if (word && !new RegExp(`\\b(${word[1].toLowerCase()}|confirm)`).test(t)) return { needConfirm: word[1].toLowerCase(), option };
 		return { value: option };
+	}
+
+	/**
+	 * Did something the developer actually said name this destructive action? ("deploy the app to
+	 * production" names "Deploy to production?"). Used to confirm with an undo window instead of
+	 * asking a third time. Requires the action word and, when the question names a target such as
+	 * production or main, that target too.
+	 */
+	function requestNames(prompt, said) {
+		const word = actionWord(prompt);
+		if (!word) return false;
+		const s = norm(said);
+		if (!new RegExp(`\\b${word}`).test(s)) return false;
+		// Targets from the question itself; the dialog's body is elaboration ("this ships main").
+		const q = norm(prompt.title || "");
+		const targets = ["production", "prod", "main", "master", "staging", "origin", "live"].filter((t) => new RegExp(`\\b${t}\\b`).test(q));
+		return targets.every((t) => new RegExp(`\\b${t === "prod" ? "prod(?:uction)?" : t}\\b`).test(s));
 	}
 
 	/** How a dialog is asked aloud: the question, then at most two options at a time. */
@@ -206,6 +250,6 @@
 		/\b(prod|production|deploy\w*|release|publish|migrat\w*|drop\s+(?:table|database|schema)|truncate|delete\s+from|update\s+\w+\s+set|rm\s+-\w*r\w*f|git\s+push|--force|reset\s+--hard|kubectl|helm|terraform\s+(?:apply|destroy)|tofu\s+(?:apply|destroy)|psql|mysql|mongosh?|redis-cli|database_url|aws\s|gcloud|az\s|ssh\s|scp\s|curl\s+-X\s*(?:POST|PUT|PATCH|DELETE)|npm\s+publish|docker\s+push|stripe|payment|send\w*\s+(?:mail|email|message))\b/i;
 	const isSignificant = (text) => SIGNIFICANT.test(String(text || ""));
 
-	const api = { parseCommand, answerFor, speakPrompt, isDestructive, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
+	const api = { HELP, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
 	globalThis.PiVoiceCore = api;
 })();

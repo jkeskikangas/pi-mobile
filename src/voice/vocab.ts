@@ -18,6 +18,8 @@ export interface Vocabulary {
 	recent: string[];
 	/** Declared names in the code (functions, classes, types, constants), bounded. */
 	symbols?: string[];
+	/** Corrections the developer made to earlier dictations ("get user" → `fetchUser`). */
+	learned?: { from: string; to: string }[];
 }
 
 const SYMBOLS: Record<string, string> = { ".": "dot", "/": "slash", _: "underscore", "-": "dash" };
@@ -132,9 +134,9 @@ export async function repoInfo(cwd: string, maxFiles = 5000): Promise<{ files: s
 	return info;
 }
 
-export async function gatherVocabulary(cwd: string, branch: readonly any[]): Promise<Vocabulary> {
+export async function gatherVocabulary(cwd: string, branch: readonly any[], learned: { from: string; to: string }[] = []): Promise<Vocabulary> {
 	const repo = await repoInfo(cwd);
-	return { project: basename(cwd), branch: repo.branch, files: repo.files, recent: recentNames(branch), symbols: repo.symbols };
+	return { project: basename(cwd), branch: repo.branch, files: repo.files, recent: recentNames(branch), symbols: repo.symbols, learned };
 }
 
 /** Short recogniser hints (Apple contextual strings, transcription prompts): the most likely spoken names. */
@@ -144,6 +146,7 @@ export function recognizerHints(v: Vocabulary, limit = 100): string[] {
 		if (s && s.length >= 3 && s.length <= 60 && out.size < limit) out.add(s);
 	};
 	add(v.project);
+	for (const c of v.learned ?? []) add(c.to.replace(/`/g, ""));
 	for (const w of v.branch?.split(/[/_.-]+/) ?? []) if (w.length > 3) add(w);
 	for (const r of v.recent) add(r.includes("/") ? basename(r) : r);
 	for (const s of (v.symbols ?? []).slice(0, 30)) add(s);

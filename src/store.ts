@@ -78,7 +78,7 @@ function readJson<T>(path: string, fallback: T): T {
 	}
 }
 
-function writePrivate(path: string, text: string): void {
+export function writePrivate(path: string, text: string): void {
 	const tmp = `${path}.${process.pid}.tmp`;
 	writeFileSync(tmp, text, { mode: 0o600 });
 	chmodSync(tmp, 0o600);

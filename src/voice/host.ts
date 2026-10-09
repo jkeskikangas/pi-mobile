@@ -3,7 +3,8 @@
 // note that tells the agent its user is listening rather than reading.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { VoiceConfig } from "../store.ts";
+import { type VoiceConfig, writePrivate } from "../store.ts";
+import { Dictionary } from "./dictionary.ts";
 import { distill, editorText } from "./distill.ts";
 import type { Complete } from "./model.ts";
 import { createCall, chatgptAccountId, DEFAULT_REALTIME_MODEL, type RealtimeCredentials, realtimeSession } from "./realtime.ts";
@@ -52,7 +53,7 @@ export class VoiceHost {
 	}
 
 	async vocabulary() {
-		return gatherVocabulary(this.deps.ctx().cwd, this.branch());
+		return gatherVocabulary(this.deps.ctx().cwd, this.branch(), this.dictionary().top());
 	}
 
 	async hints(): Promise<string[]> {
@@ -146,6 +147,16 @@ export class VoiceHost {
 	/** Speech audio for basic voice mode; throws `tts unavailable` when the phone should speak itself. */
 	speak(p: { text?: unknown }) {
 		return synthesize(String(p.text ?? ""), ttsTarget(this.deps.config()), this.deps.fetch);
+	}
+
+	dictionary(): Dictionary {
+		return new Dictionary(this.deps.stateDir(), writePrivate);
+	}
+
+	/** Learns from how the developer edited a distilled dictation before sending it. */
+	learn(p: { distilled?: unknown; sent?: unknown }) {
+		if (typeof p.distilled !== "string" || typeof p.sent !== "string") throw new Error("distilled and sent text expected");
+		return { learned: this.dictionary().learn(p.distilled.slice(0, 8000), p.sent.slice(0, 8000)) };
 	}
 
 	setListening(p: { on?: unknown; mode?: unknown }) {
