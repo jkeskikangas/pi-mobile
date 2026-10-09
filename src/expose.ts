@@ -10,25 +10,35 @@ export interface Endpoint {
 	url: string;
 }
 
-export function bindHost(expose: Expose): string {
-	return expose === "network" ? "0.0.0.0" : "127.0.0.1";
-}
-
 function isTailscale(ip: string): boolean {
 	const [a, b] = ip.split(".").map(Number);
 	return a === 100 && b >= 64 && b <= 127;
 }
 
-/** Reachable addresses, best first: Tailscale (WireGuard-protected, works off-LAN), then LAN. */
-export function networkEndpoints(port: number, ifaces = networkInterfaces()): Endpoint[] {
-	const tail: Endpoint[] = [];
-	const lan: Endpoint[] = [];
+/** RFC 1918 and Tailscale's CGNAT range: reachable from your LAN or tailnet, never the internet. */
+export function isPrivate(ip: string): boolean {
+	const [a, b] = ip.split(".").map(Number);
+	return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || isTailscale(ip);
+}
+
+export interface Address {
+	ip: string;
+	label: string;
+}
+
+/**
+ * Addresses the hub listens on in `network` mode, best first: Tailscale (WireGuard-protected,
+ * works off-LAN), then LAN. Public addresses are left out on purpose, so a cloud box with a public
+ * interface is not exposed to the internet.
+ */
+export function privateAddresses(ifaces = networkInterfaces()): Address[] {
+	const tail: Address[] = [];
+	const lan: Address[] = [];
 	for (const [name, addrs] of Object.entries(ifaces)) {
 		for (const a of addrs ?? []) {
-			if (a.family !== "IPv4" || a.internal) continue;
-			if (a.address.startsWith("169.254.")) continue;
-			const ep = { label: isTailscale(a.address) ? "tailscale" : `lan ${name}`, url: `http://${a.address}:${port}` };
-			(isTailscale(a.address) ? tail : lan).push(ep);
+			if (a.family !== "IPv4" || a.internal || !isPrivate(a.address)) continue;
+			if (isTailscale(a.address)) tail.push({ ip: a.address, label: "tailscale" });
+			else lan.push({ ip: a.address, label: `lan ${name}` });
 		}
 	}
 	return [...tail, ...lan];

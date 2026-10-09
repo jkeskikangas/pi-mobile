@@ -16,7 +16,7 @@ import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Channel } from "./channel.ts";
 import { b64u, open, randomId, randomKey, ReplayGuard, seal, unb64u } from "./crypto.ts";
-import { bindHost, type Endpoint, networkEndpoints, startCloudflared, type Tunnel } from "./expose.ts";
+import { type Address, type Endpoint, privateAddresses, startCloudflared, type Tunnel } from "./expose.ts";
 import { type AgentEvent, type AgentInfo, type HubEvent, PROTOCOL } from "./protocol.ts";
 import { type Config, type Device, DeviceStore, PushStore, type Role } from "./store.ts";
 import { type PushSubscriptionJSON, sendPush } from "./webpush.ts";
@@ -30,6 +30,7 @@ const RING = 20_000;
 const GLOBAL_EVENTS = new Set(["info", "gone", "prompt", "prompt_end"]);
 const MAX_BODY = 25 * 1024 * 1024;
 const PAIRING_TTL = 10 * 60_000;
+// View-only devices may also listen: spoken briefs, details and status read the session, never change it.
 const VIEW_METHODS = new Set(["snapshot", "toolOutput", "models", "commands"]);
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -79,7 +80,12 @@ export interface HubOptions {
 export class Hub {
 	readonly id = randomId();
 	readonly config: Config;
+	/** Loopback listener: also the election lock and the only one that accepts pi links. */
 	private server: Server;
+	/** `network` mode: one listener per private address, kept in step with the interfaces. */
+	private extra = new Map<string, { server: Server; label: string }>();
+	private ifaceTimer?: NodeJS.Timeout;
+	private readonly handler: (req: IncomingMessage, res: ServerResponse) => void;
 	private agents = new Map<string, AgentConn>();
 	private clients = new Set<StreamClient>();
 	private ring: HubEvent[] = [];
@@ -102,12 +108,13 @@ export class Hub {
 		this.secret = Buffer.from(opts.secret);
 		this.devices = opts.devices ?? new DeviceStore();
 		this.push = opts.push ?? new PushStore();
-		this.server = createServer((req, res) => {
+		this.handler = (req, res) => {
 			this.handle(req, res).catch((e) => {
 				if (!res.headersSent) send(res, 500, { error: String(e?.message ?? e) });
 				else res.destroy();
 			});
-		});
+		};
+		this.server = createServer(this.handler);
 		this.server.on("upgrade", (req, socket) => this.upgrade(req, socket));
 	}
 
@@ -116,12 +123,18 @@ export class Hub {
 		await new Promise<void>((resolve, reject) => {
 			const onError = (e: Error) => reject(e);
 			this.server.once("error", onError);
-			this.server.listen(this.config.port, bindHost(this.config.expose), () => {
+			this.server.listen(this.config.port, "127.0.0.1", () => {
 				this.server.off("error", onError);
 				resolve();
 			});
 		});
 		this.server.unref();
+		if (this.config.expose === "network") {
+			this.syncInterfaces();
+			// Wi-Fi changes, VPNs and `tailscale up` come and go; follow them.
+			this.ifaceTimer = setInterval(() => this.syncInterfaces(), 10_000);
+			this.ifaceTimer.unref();
+		}
 		this.heartbeat = setInterval(() => this.ping(), 15_000);
 		this.heartbeat.unref();
 		this.armIdle();
@@ -140,6 +153,27 @@ export class Hub {
 		}
 	}
 
+	private syncInterfaces(addresses: Address[] = privateAddresses()): void {
+		if (this.closed) return;
+		const want = new Map(addresses.map((a) => [a.ip, a.label]));
+		for (const [ip, l] of this.extra) {
+			if (!want.has(ip)) {
+				l.server.close();
+				this.extra.delete(ip);
+			}
+		}
+		for (const [ip, label] of want) {
+			if (this.extra.has(ip)) continue;
+			const server = createServer(this.handler);
+			const entry = { server, label };
+			this.extra.set(ip, entry);
+			server.on("error", () => {
+				if (this.extra.get(ip) === entry) this.extra.delete(ip);
+			});
+			server.listen(this.port, ip, () => server.unref());
+		}
+	}
+
 	get port(): number {
 		const a = this.server.address();
 		return typeof a === "object" && a ? a.port : this.config.port;
@@ -151,13 +185,20 @@ export class Hub {
 		if (this.config.expose === "cloudflared")
 			return [...pub, ...(this.tunnel ? [{ label: "cloudflared", url: this.tunnel.url }] : []), local];
 		if (this.config.expose === "local") return [...pub, local];
-		return [...pub, ...networkEndpoints(this.port), local];
+		const lan = [...this.extra].map(([ip, l]) => ({ label: l.label, url: `http://${ip}:${this.port}` }));
+		return [...pub, ...lan.filter((e) => e.label === "tailscale"), ...lan.filter((e) => e.label !== "tailscale"), local];
 	}
 
 	close(): void {
 		if (this.closed) return;
 		this.closed = true;
 		clearInterval(this.heartbeat);
+		clearInterval(this.ifaceTimer);
+		for (const l of this.extra.values()) {
+			l.server.close();
+			l.server.closeAllConnections?.();
+		}
+		this.extra.clear();
 		clearTimeout(this.idleTimer);
 		this.tunnel?.stop();
 		for (const c of this.clients) c.res.end();
