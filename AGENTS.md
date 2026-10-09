@@ -1,0 +1,15 @@
+# pi-mobile
+
+A pi extension: an end-to-end encrypted hub inside pi plus a no-build phone web app (`web/`), with voice input and voice mode. Overview and usage: `README.md`.
+
+## Commands
+
+- `npm install`, `npm test` (node test runner, `test/*.test.ts`), `npm run typecheck`.
+- Try it: `pi -e ./src/index.ts`, then `/remote`.
+- Browser end-to-end checks (need a running pi and Playwright): `test/e2e/` (see `docs/voice.md` → Verification).
+
+## Read before changing
+
+- **Any UI in `web/`**: `docs/ui.md` (tokens, icons, `npm run ui` checks) and `docs/design-principles.md` (why it works this way, dictation and voice surfaces, motion, copy, what "done" means).
+- **Voice** (`src/voice/`, `web/voice*.js`): `docs/voice.md` (design, principles, verification) and `docs/voice-research.md`.
+- **Multi-machine work**: `specs/`, `designs/`, `plans/`.
