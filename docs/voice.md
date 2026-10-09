@@ -32,16 +32,18 @@ None of them does both jobs well, and none treats "I am driving" as its own inte
 
 ### Voice mode
 
-1. **Two output channels for every run.** The agent writes as usual: the transcript keeps the full written answer for when you're back at a screen. What you *hear* is a spoken brief written for the ear: the answer first, one idea per sentence, at most three items, numbers rounded ("three of twelve tests fail"), file names by basename, no code, no symbols, no markdown.
-2. **Say less, offer more.** Every brief ends, when there is more, with one offer ("want the failing test names?"). Details are spoken on request, verbalised for the ear (a diff becomes "auth.ts: the token check now calls validateToken, twelve lines").
-3. **Sounds for state, words for news.** Short earcons mark listening, heard-you, working (a soft tick every few seconds), needs-you, done and failed. Speech is reserved for things that change what you do next. "Status?" gets a one-sentence answer at any time, from local state, without waking the agent.
-4. **Commands are instant.** "Stop", "cancel", "repeat", "status", "shorter", "go on", "yes/no", "option two" are recognised locally with no model round trip.
-5. **Questions are answerable by voice.** Any extension dialog (`confirm`, `select`, `input`) that pi raises is read out (two options at a time) and answered by voice. Permission gates are covered too.
-6. **Destructive actions need an explicit spoken confirmation that names the object** ("push three commits to main? say *confirm push*"). A plain "yeah" from a noisy street is not consent.
-7. **Defer what needs eyes.** In eyes-busy contexts the agent is told the user cannot read: it avoids asking for visual review, prefers queuing work over asking clarifying questions, and the voice layer offers "I'll leave the diff for when you're at a screen."
-8. **Barge-in is a first-class signal.** Speaking while pi talks stops the audio immediately (echo cancellation keeps the speaker from triggering it), and what you say next is a new turn.
-9. **Turn-taking fits the context.** Open mic with voice-activity detection in the car or kitchen; tap-to-talk (big screen target, or a headset button where the browser allows it) when it's noisy, windy or you're cycling. Trailing "and…", "um" or "wait" keeps the floor open.
-10. **Preferences stick.** "Be terser", "tell me every test result" last until you change them.
+1. **Talk about intent, not code.** Nobody discusses variable names on a run. Voice conversations are about behaviour, architecture, decisions, trade-offs, risks and what is left. The voice never says identifiers, file names, paths, commands, test names or tool names unless asked; it names parts of the system by what they are ("the login flow", "the phone app"). The agent is told the same, and maps what the user describes onto the code itself.
+2. **Tool activity is not news.** Reads, searches, edits and routine commands stay silent, and routine failures the agent recovers from are its own business. Only *significant* actions reach the ear: anything touching production systems or data, deployments, shared history (push, force, reset), deletions, external services or money. When one fails, the phone plays a failure tone and the voice says what kind of action failed, while pi keeps working.
+3. **Two output channels for every run.** The agent writes as usual: the transcript keeps the full written answer for when you're back at a screen. What you *hear* is a spoken brief written for the ear: the outcome first, one idea per sentence, numbers rounded, no code, no symbols, no markdown. The report behind it is organised by area of the system and significant actions, not by file or tool.
+4. **Say less, offer more.** A brief ends, when there is more, with one offer at the same level ("want to hear why the tests still fail?"). Details are answered on request at the level of behaviour; file names only when you ask "which files".
+5. **Sounds for state, words for news.** Short earcons mark listening, heard-you, working (a soft tick every few seconds), needs-you, done and failed. Speech is reserved for things that change what you do next. "Status?" gets a one-sentence answer at any time from local state, without waking the agent: how long pi has worked, what kind of thing it is doing ("running the tests", never which file), and the last thing it said it was doing.
+6. **Commands are instant.** "Stop", "cancel", "repeat", "status", "shorter", "go on", "yes/no", "option two" are recognised locally with no model round trip.
+7. **Questions are answerable by voice.** Any extension dialog (`confirm`, `select`, `input`) that pi raises is read out (two options at a time) and answered by voice. Permission gates are covered too. A question from another session is announced, and "switch to …" moves there.
+8. **Destructive actions need an explicit spoken confirmation that names the action** ("push three commits to main? say *yes, push*"). A plain "yeah" from a noisy street is not consent.
+9. **Defer what needs eyes.** In eyes-busy contexts the agent is told the user cannot read: it avoids asking for visual review, and the voice says the diff is waiting at a screen.
+10. **Barge-in is a first-class signal.** Speaking while pi talks stops the audio immediately (echo cancellation keeps the speaker from triggering it), and what you say next is a new turn.
+11. **Turn-taking fits the context.** Open mic with semantic end-of-turn detection in the car or kitchen; tap-to-talk (a screen-sized target, or a headset button where the browser allows it) when it's noisy, windy or you're cycling. In basic voice a trailing "and…", "um" or "wait" keeps the floor open.
+12. **Never announce, just act.** The voice does not say "let me check"; it calls pi silently and the working tick carries the wait. Preferences you state ("be terser") stick until you change them.
 
 ## Architecture
 
@@ -60,31 +62,66 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 
 | File | Responsibility |
 |---|---|
-| `src/voice/vocab.ts` | Workspace vocabulary: tracked files, branch words, identifiers and paths in recent session messages, spoken forms of identifiers. |
-| `src/voice/distill.ts` | The intent-distillation prompt and its output parsing; heuristic fallback (backtrack and filler removal, identifier recovery) when no model is reachable. |
-| `src/voice/speech.ts` | Writing for the ear: the spoken-brief prompt; a deterministic `speakable()` that strips markdown, code and paths and verbalises identifiers and numbers; local voice-command recognition. |
-| `src/voice/stt.ts` | STT providers: Apple SpeechAnalyzer helper (compiled once into the state dir), OpenAI transcription; selection and auto-detection. |
+| `src/voice/vocab.ts` | Workspace vocabulary: tracked files, branch words, declared code symbols (`git grep`), names in recent session messages; spoken forms; trigram-indexed fuzzy matching of what was heard to real names. |
+| `src/voice/distill.ts` | The intent-distillation prompt and its output parsing; heuristic fallback (fillers, "scratch that", near-exact names, flags mid-sentence corrections) when no model is reachable. |
+| `src/voice/speech.ts` | Writing for the ear: run digest by area and significant action, the spoken-brief prompt, `speakable()`, activity descriptions, significance rules, the agent's voice note. |
+| `src/voice/host.ts` | The bridge's voice requests: transcribe, distill, brief, details, realtime call setup, listening state. |
+| `src/voice/stt.ts` | STT providers: Apple SpeechAnalyzer helper (compiled once into the state dir), OpenAI transcription; selection. |
 | `src/voice/apple-stt.swift` | On-device recogniser: file or streaming stdin PCM, contextual strings, JSON-lines partials. |
-| `src/voice/mic.ts` | Microphone capture via ffmpeg (avfoundation / pulse / alsa) as 16 kHz PCM with a level meter. |
-| `src/voice/model.ts` | Picks a fast model the user already has credentials for, runs one completion. |
+| `src/voice/mic.ts` | Microphone capture via ffmpeg (avfoundation / pulse / dshow, or a file) as 16 kHz PCM with a level meter. |
+| `src/voice/model.ts` | Fast-model candidates the user has credentials for; one completion, skipping models that fail. |
 | `src/voice/realtime.ts` | Realtime session config (voice-layer instructions and tools) and the SDP relay to OpenAI. |
-| `src/voice/dictation.ts` | Terminal voice input: `/voice` and a shortcut, live widget, review flow. |
-| `web/voice.js` | Phone voice mode: realtime client, cascaded fallback, earcons, wake lock, intents, dialogs by voice. |
-| `web/voice-core.js` | Pure logic shared with tests: voice commands, VAD state machine, ear formatting of events. |
+| `src/voice/dictation.ts` | Terminal voice input: `/voice`, alt+m, live widget, review flow. |
+| `web/voice.js` | Composer dictation and phone voice mode: realtime client, basic-voice cascade, earcons, wake lock, media session, dialogs by voice. |
+| `web/voice-core.js` | Pure logic shared with tests: voice commands, dialog answers, significance, VAD, speech chunking, earcon specs. |
 
 ### Bridge requests added
 
-| Request | Payload → result |
-|---|---|
-| `transcribe` | `{audio: base64, mime, distill?: boolean}` → `{raw, text, notes[], provider}` (STT on the host, then distillation) |
-| `distill` | `{raw}` → `{text, notes[]}` |
-| `brief` | `{since?}` → `{speech, more?}`: the spoken brief of the latest run |
-| `details` | `{topic}` → `{speech}`: on-demand verbalised detail (diff, failing tests, last message) |
-| `voiceSession` | `{sdp, eyesBusy}` → `{sdp, model, provider}`: realtime call set up with the voice-layer config |
-| `voiceState` | `{on, eyesBusy}` → `{ok}`: tells the agent the user is listening by voice |
+| Request | Payload → result | View-only device |
+|---|---|---|
+| `transcribe` | `{audio: base64, mime, distill?, draft?}` → `{raw, text, editor, unclear[], provider, by}` | no |
+| `distill` | `{raw, draft?}` → `{raw, text, editor, unclear[], by}` | no |
+| `brief` | `{mode}` → `{speech, more[], report, by}`: spoken brief of the latest run plus the report for follow-ups | yes |
+| `details` | `{topic, mode}` → `{speech}` | yes |
+| `voiceStatus` | `{}` → `{speech, status, elapsedMs, tools, prompts}` | yes |
+| `voiceSession` | `{sdp, mode}` → `{sdp, model, provider}`: realtime call set up with the voice-layer config | no |
+| `voiceState` | `{on, mode}` → `{ok}`: the agent is told its user is listening (expires after 150 s without a refresh) | no |
 
 ## Platform limits (verified against WebKit/Chromium sources, see research notes)
 
-- iOS stops capturing the mic when a Home Screen PWA goes to the background or locks; a Safari tab with an active capture keeps it longer. Voice mode keeps the screen awake (Wake Lock) and tells you when iOS took the mic away. Android Chrome keeps working with the screen locked while audio is active.
+- Browsers give `getUserMedia` only to secure contexts: phone voice needs the HTTPS address (or `http://127.0.0.1` on the computer).
+- iOS stops capturing the mic when a Home Screen PWA goes to the background or locks; a Safari tab with an active capture keeps it longer. Voice mode keeps the screen awake (Wake Lock) and tells you when iOS took the mic away. Android Chrome exempts audible pages from freezing; verify on the device before relying on it.
 - CarPlay has no path for web apps; the phone's audio plays through the car as usual.
 - The ChatGPT-sign-in realtime endpoint is the one Codex uses; it is undocumented and may change. With `OPENAI_API_KEY` set, the official `api.openai.com/v1/realtime/calls` endpoint is used instead. Without either, voice mode runs the cascaded pipeline (host STT + spoken brief + the phone's own speech synthesis).
+
+## Verification
+
+Unit and integration tests (`npm test`) cover vocabulary matching (including a 5,000-file repo under the time budget), distillation prompts and fallbacks, writing for the ear, significance rules, the realtime session and call relay, the voice host, the phone's voice logic (`web/voice-core.js`: commands, dialog answers with destructive confirmation, VAD, chunking), and the bridge's voice requests over the real encrypted hub protocol, including what a view-only device may do.
+
+End to end, against the real services (October 2026, macOS 26, ChatGPT sign-in, no API key):
+
+```bash
+# isolated agent dir with your auth, a demo repo, pi with the extension
+mkdir -p /tmp/voice-demo && git -C /tmp/voice-demo init   # add a small source file to talk about
+mkdir -p /tmp/piagent/pi-mobile && cp ~/.pi/agent/auth.json /tmp/piagent/
+echo '{"port":7999,"expose":"local","enabled":true}' > /tmp/piagent/pi-mobile/config.json
+tmux new -d -s pivoice -c /tmp/voice-demo "PI_CODING_AGENT_DIR=/tmp/piagent pi -e $PWD/src/index.ts"
+URL=$(PI_CODING_AGENT_DIR=/tmp/piagent node --experimental-strip-types test/e2e/pair.ts)
+node test/e2e/browser.mjs dictate "$URL" speech.wav     # composer dictation
+node test/e2e/browser.mjs voice "$URL" question.wav 60  # voice mode
+# terminal dictation without a live mic:
+PI_MOBILE_MIC=file:speech.wav pi -e ./src/index.ts      # then alt+m … Enter
+```
+
+Observed:
+
+| Path | Spoken | Result |
+|---|---|---|
+| Terminal and phone dictation (Apple on-device STT → distillation) | "Um, so in auth dot ts, make get user by ID return null instead of throwing, no wait, return undefined, and update the validate token check to require twenty characters." Recognised as "So in off.ts, make get user by ID return null…" | "In `src/auth.ts`, make `getUserById` return `undefined` instead of throwing, and update `validateToken` to require 20 characters." 2.5–3.5 s after the mic stops. The terminal merges it with text already typed. |
+| Voice mode, realtime (`gpt-realtime-2` over WebRTC, call opened with the ChatGPT sign-in) | "What does the get user by ID function in auth dot ts do when the user is missing? Just tell me, don't change anything." | `ask_pi` with the user's words; pi read the code; the voice said "It throws an error that says 'no user' followed by the requested ID." about 5 s after the question ended, with no filler before it. |
+| Voice mode, basic (realtime off: phone VAD → host STT → distil → pi → brief → speech synthesis) | same | "When the user is missing, the authentication lookup throws an error saying 'no user' followed by the requested ID." about 5 s after the question ended. |
+| Answering a permission dialog by voice (`test/e2e/deploy-ext.ts`) | "Please deploy the app to production." … "Yeah." … "Yes, deploy." | pi called the deploy tool; its confirm dialog was read out: "This will deploy the current main branch to production. Say 'yes, deploy' to confirm, or say 'no' to cancel." On "Yeah" the voice model tried `answer_question("yes")`; the phone refused it (action not named) and the voice asked again naming the target. "Yes, deploy" confirmed it (the tool logged `confirm=true`); then "Production deployment is complete and the app is live." |
+
+Found and fixed by these runs: a transcription prompt carrying project names was returned *as the transcript* for audio clipped at the start, and the voice turned it into a task nobody asked for. The realtime session now sends no transcription prompt, the voice is told to ask for a repeat rather than guess, and the OpenAI file transcriber discards a leaked prompt. Also: "low" semantic-VAD eagerness never closed the turn on the test audio (now "auto", with `turnDetection: "server"` available), the voice announced itself ("let me check…") before tools (now forbidden), and the voice model was a model the account could not use (candidates now fall through).
+
+Not verifiable here, to check on real devices: microphone behaviour with the iPhone screen locked, the headset play/pause button as tap-to-talk (Media Session), Android Chrome with the screen off, and echo cancellation against the phone speaker for barge-in.

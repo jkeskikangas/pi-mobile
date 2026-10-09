@@ -25,6 +25,7 @@ function host(selectAnswer: string) {
 	const ui: any = {
 		notify: () => {},
 		setStatus: (_k: string, v?: string) => statuses.push(v),
+		onTerminalInput: () => () => {},
 		theme: { fg: (_c: string, t: string) => t, bold: (t: string) => t },
 		select: async () => selectAnswer,
 		confirm: async () => true,
@@ -47,6 +48,7 @@ function host(selectAnswer: string) {
 		registerFlag: () => {},
 		getFlag: () => false,
 		registerCommand: (n: string, c: any) => commands.set(n, c),
+		registerShortcut: () => {},
 		getSessionName: () => "s",
 		getThinkingLevel: () => "off",
 	};

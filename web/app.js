@@ -346,6 +346,7 @@
 
 	function handleEvent(ev) {
 		const agent = ev.agent;
+		window.PiVoice?.onEvent(ev);
 		if (ev.type === "info") {
 			S.agents.set(agent, ev.info);
 			// A session this phone asked herdr to start has arrived: open it.
@@ -1408,6 +1409,18 @@
 		setHeader();
 		streamLoop();
 	}
+
+	// What voice.js needs from the app.
+	window.PiMobile = {
+		S,
+		rpc,
+		call,
+		toast,
+		agentName,
+		openAgent,
+		autosize,
+		input: () => $("input"),
+	};
 
 	main();
 })();

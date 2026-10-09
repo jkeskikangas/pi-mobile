@@ -241,7 +241,9 @@ export function openaiProvider(apiKey: string, fetchImpl: typeof fetch = fetch, 
 			const res = await fetchImpl(`${base}/audio/transcriptions`, { method: "POST", headers: { authorization: `Bearer ${apiKey}` }, body: fd, signal });
 			const body: any = await res.json().catch(() => ({}));
 			if (!res.ok) throw new Error(`OpenAI transcription: ${body?.error?.message ?? `HTTP ${res.status}`}`);
-			return { text: String(body.text ?? ""), provider: "openai" };
+			const text = String(body.text ?? "");
+			// On near-silent audio the transcriber can return its prompt as the transcript; that is no speech.
+			return { text: /Software development dictation\. Names:/i.test(text) ? "" : text, provider: "openai" };
 		},
 		// No streaming over plain HTTP: collect PCM and transcribe on end.
 		live(rate, hints) {

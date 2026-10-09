@@ -18,7 +18,11 @@ import { registerHerdrBlocked } from "./herdr.ts";
 import { closeProcessHub, type LinkState } from "./link.ts";
 import type { AgentInfo } from "./protocol.ts";
 import { qrLines } from "./qr.ts";
-import { type Config, configPath, type Expose, linkSecret, loadConfig, saveConfig } from "./store.ts";
+import { type Config, configPath, type Expose, linkSecret, loadConfig, saveConfig, stateDir } from "./store.ts";
+import { registerDictation } from "./voice/dictation.ts";
+import { VoiceHost } from "./voice/host.ts";
+import { registryComplete } from "./voice/model.ts";
+import { agentVoiceNote } from "./voice/speech.ts";
 
 /** Set by `/remote off` → "Only this session"; lives on globalThis so it survives /new and /reload. */
 const HIDDEN = Symbol.for("pi-mobile.hidden");
@@ -54,6 +58,16 @@ export default function piMobile(pi: ExtensionAPI): void {
 	pi.registerFlag("remote", { type: "boolean", description: "Share this session with your phone (pi-mobile)" });
 	registerHerdrBlocked(pi);
 
+	// Voice: dictation in this terminal (alt+m, /voice), and the host side of the phone's voice mode.
+	const complete = registryComplete(() => ctx!, () => loadConfig().voice?.model);
+	const voice = new VoiceHost({ ctx: () => ctx!, config: () => loadConfig().voice, stateDir, complete });
+	registerDictation(pi, complete);
+	pi.on("before_agent_start", async (e) => {
+		const mode = voice.listeningMode();
+		if (!mode) return;
+		return { systemPrompt: e.systemPrompt + agentVoiceNote(mode) };
+	});
+
 	const footer = (s: LinkState | undefined) => {
 		if (!ctx?.hasUI) return;
 		const t = ctx.ui.theme;
@@ -68,6 +82,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 		if (bridge) return bridge;
 		let lastError = "";
 		const b = new Bridge(pi, c, loadConfig, linkSecret());
+		b.voice = voice;
 		b.onState = (s) => {
 			footer(s);
 			if (s.kind === "error" && s.message !== lastError) {

@@ -185,3 +185,41 @@ textarea#input:focus { border-color: var(--accent); }
 .onboard button.primary { background: var(--accent); color: var(--accent-text); font-weight: 600; }
 .sheet .row .last { display: block; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet .row .ask { display: block; font-size: 13px; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── voice ─────────────────────────────────────────────────────────────────── */
+.icon-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mic.rec { background: var(--err); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .65; } }
+.dict-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; color: var(--muted); }
+.dict-bar .grow { flex: 1; min-width: 0; }
+.dict-bar .chip { font-size: 12px; padding: 3px 9px; }
+.dict-bar .meter { width: 10px; height: 10px; border-radius: 50%; background: var(--err); flex: none; transform: scale(calc(.6 + var(--lvl, 0) * .9)); transition: transform .1s; }
+
+body.voice-on { overflow: hidden; }
+.voice { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; align-items: center; padding: calc(var(--safe-t) + 12px) 20px calc(var(--safe-b) + 20px); gap: 14px; }
+.v-top { width: 100%; display: flex; align-items: center; gap: 10px; }
+.v-session { flex: 1; font-weight: 600; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-engine { font-size: 12px; color: var(--muted); }
+.v-end { padding: 8px 16px; border-radius: 999px; background: var(--err); color: #fff; font-weight: 600; }
+/* The whole middle is one big target: usable without looking, with gloves, on a bike mount. */
+.v-orb { flex: 1; width: 100%; max-width: 520px; min-height: 260px; border-radius: 32px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 600; color: var(--text); background: var(--panel-2); transition: background .25s; position: relative; }
+.v-orb::before { content: ""; position: absolute; width: 140px; height: 140px; border-radius: 50%; top: calc(50% - 120px); background: var(--muted); opacity: .25; transition: all .3s; }
+.v-orb span { position: relative; top: 60px; }
+.v-orb.listening::before { background: var(--accent); opacity: .5; animation: breathe 2.4s ease-in-out infinite; }
+.v-orb.hearing::before { background: var(--accent); opacity: .9; transform: scale(1.15); }
+.v-orb.thinking::before { background: var(--accent); opacity: .5; animation: spin-pulse .9s linear infinite; }
+.v-orb.working::before { background: var(--warn); opacity: .55; animation: breathe 1.4s ease-in-out infinite; }
+.v-orb.speaking::before { background: var(--ok); opacity: .8; animation: talk .5s ease-in-out infinite alternate; }
+.v-orb.asking { background: color-mix(in srgb, var(--warn) 22%, var(--panel-2)); }
+.v-orb.asking::before { background: var(--warn); opacity: .9; }
+.v-orb.paused::before { opacity: .15; }
+@keyframes breathe { 50% { transform: scale(1.08); } }
+@keyframes talk { to { transform: scale(1.18); } }
+@keyframes spin-pulse { 50% { transform: scale(.9); opacity: .3; } }
+.v-line { width: 100%; max-width: 520px; font-size: 16px; line-height: 1.35; min-height: 1.35em; }
+.v-line.you { color: var(--muted); font-style: italic; }
+.v-line.pi { font-size: 18px; }
+.v-note { width: 100%; max-width: 520px; font-size: 13px; color: var(--warn); min-height: 1em; }
+.v-bottom { display: flex; gap: 10px; width: 100%; max-width: 520px; }
+.v-toggle { flex: 1; padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); font-size: 15px; font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .v-orb::before, .mic.rec { animation: none !important; } }

@@ -20,6 +20,8 @@ import {
 } from "./protocol.ts";
 import type { Config } from "./store.ts";
 import { inHerdr, spawnPi } from "./herdr.ts";
+import type { VoiceHost } from "./voice/host.ts";
+import { countWord, describeActivity, firstSentences, speakable } from "./voice/speech.ts";
 
 const AGENT_KEY = Symbol.for("pi-mobile.agent");
 const COUNTER_KEY = Symbol.for("pi-mobile.counter");
@@ -80,6 +82,7 @@ export class Bridge {
 	private infoTimer?: NodeJS.Timeout;
 	private keyCounter = 0;
 	private readonly pi: ExtensionAPI;
+	voice?: VoiceHost;
 	onState: (s: LinkState) => void = () => {};
 	onMessage: (msg: any) => void = () => {};
 
@@ -393,9 +396,63 @@ export class Bridge {
 					.getCommands()
 					.map((c: any) => ({ name: c.name, description: c.description ?? "", source: c.source ?? "" }))
 					.concat([{ name: "compact", description: "Compact the conversation context", source: "remote" }]);
+			case "voiceStatus":
+				return this.voiceStatus();
+			case "transcribe":
+			case "distill":
+			case "brief":
+			case "details":
+			case "voiceSession":
+			case "voiceState": {
+				const v = this.voice;
+				if (!v) throw new Error("voice is not available in this pi");
+				if (m === "transcribe") return v.transcribe(p);
+				if (m === "distill") return v.distill(p);
+				if (m === "brief") return v.brief(p);
+				if (m === "details") return v.details(p);
+				if (m === "voiceSession") return v.voiceSession(p);
+				return v.setListening(p);
+			}
 			default:
 				throw new Error(`unknown request ${m}`);
 		}
+	}
+
+	/** "What is it doing?" in one spoken sentence, from local state: no model, instant. */
+	voiceStatus() {
+		const info = this.info();
+		const prompts = [...this.prompts.values()].map((o) => o.prompt);
+		const tools = [...this.tools.values()];
+		const elapsed = this.runStartedAt ? Date.now() - this.runStartedAt : 0;
+		let speech: string;
+		if (prompts.length) speech = `Pi is waiting for your answer: ${prompts[0].title}`;
+		else if (this.terminalPrompt) speech = "Pi is waiting for input in the terminal.";
+		else if (info.status === "working") {
+			const mins = Math.round(elapsed / 60_000);
+			const took = mins >= 1 ? `for ${mins === 1 ? "a minute" : countWord(mins, "minute")}` : "for a few seconds";
+			const last = tools[tools.length - 1];
+			const now = last ? `, now ${describeActivity(last.name, last.title)}` : "";
+			// What pi last said it is doing tells more than which tool is running.
+			const said = firstSentences(speakable(this.narration()), 1);
+			speech = `Working ${took}${now}.${said && said.split(" ").length <= 30 ? ` It last said: ${said}` : ""}`;
+		} else speech = "Pi is idle.";
+		return {
+			speech,
+			status: info.status,
+			elapsedMs: elapsed,
+			tools: tools.map((t) => ({ name: t.name, title: t.title })),
+			prompts,
+			queued: info.queued,
+			name: info.name,
+		};
+	}
+
+	/** The latest thing pi wrote in this run (streaming text first), for status by voice. */
+	private narration(): string {
+		const partial = contentText((this.partial as any)?.content).trim();
+		if (partial) return partial.split("\n").filter(Boolean).pop() ?? "";
+		const last = this.lastAssistantText();
+		return last.split("\n").filter(Boolean).pop() ?? "";
 	}
 
 	snapshot(limit: number, before?: number) {

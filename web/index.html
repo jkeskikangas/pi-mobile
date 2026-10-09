@@ -27,6 +27,7 @@
 			<span class="chev" aria-hidden="true">▾</span>
 		</button>
 		<button id="modelBtn" class="chip" aria-label="Model and thinking level" hidden></button>
+		<button id="voiceBtn" class="icon-btn voice-btn" aria-label="Voice mode: talk with pi hands-free" title="Voice mode"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg></button>
 		<button id="menuBtn" class="icon-btn" aria-label="Menu">⋯</button>
 	</header>
 	<div id="banner" class="banner" hidden></div>
@@ -47,6 +48,7 @@
 	<footer id="composer" hidden>
 		<div id="suggest" class="suggest" hidden></div>
 		<div id="attachments" class="attachments" hidden></div>
+		<div id="dictBar" class="dict-bar" hidden aria-live="polite"></div>
 		<div class="compose-row">
 			<label class="icon-btn attach" aria-label="Attach image">
 				<span aria-hidden="true">＋</span>
@@ -55,6 +57,7 @@
 			<textarea id="input" rows="1" placeholder="Message pi…" enterkeyhint="send" autocomplete="off"></textarea>
 			<button id="modeBtn" class="mode" hidden title="While pi works: steer interrupts after the current tool, queue waits until it finishes">steer</button>
 			<button id="stopBtn" class="stop" hidden aria-label="Stop">■</button>
+			<button id="micBtn" class="icon-btn mic" aria-label="Dictate" title="Speak instead of typing"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
 			<button id="sendBtn" class="send" aria-label="Send">↑</button>
 		</div>
 	</footer>
@@ -67,8 +70,26 @@
 		<div id="sheetBody"></div>
 	</div>
 </div>
+<div id="voice" class="voice" hidden role="dialog" aria-label="Voice mode">
+	<div class="v-top">
+		<span id="vSession" class="v-session"></span>
+		<span id="vEngine" class="v-engine"></span>
+		<button id="vEnd" class="v-end">End</button>
+	</div>
+	<button id="vOrb" class="v-orb connecting" aria-live="polite"><span id="vState">Connecting…</span></button>
+	<div id="vHeard" class="v-line you"></div>
+	<div id="vSaid" class="v-line pi"></div>
+	<div id="vNote" class="v-note" aria-live="polite"></div>
+	<div class="v-bottom">
+		<button id="vAttention" class="v-toggle" title="Eyes-free: shortest answers, nothing visual. Can glance: a little more detail.">Eyes-free</button>
+		<button id="vTurns" class="v-toggle" title="Open mic: just talk. Tap to talk: tap the circle to start and finish (noisy places, cycling).">Open mic</button>
+	</div>
+	<audio id="vRemote" autoplay playsinline></audio>
+</div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <script src="nacl.js"></script>
 <script src="app.js"></script>
+<script src="voice-core.js"></script>
+<script src="voice.js"></script>
 </body>
 </html>

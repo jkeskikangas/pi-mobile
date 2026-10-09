@@ -13,6 +13,7 @@ No server to install, no account, no third-party relay, no app store. Everything
 | **Input** | Prompt, steer or queue while pi works, stop, slash commands, photos, model and thinking level, compact. |
 | **Dialogs** | Any extension's `select` / `confirm` / `input` (permission gates included) appears on the phone. The terminal dialog stays open; the first answer wins and dismisses the other. |
 | **Attention** | Lock-screen Web Push when pi finishes a long run, asks a question, or waits for terminal input. Payloads are encrypted to your browser, so the push service sees nothing. |
+| **Voice** | Dictation that turns rambling speech into the prompt you meant (terminal and phone), and a hands-free voice mode for when you are driving, running or cooking. See [Voice](#voice). |
 
 They multiply rather than add up:
 
@@ -65,6 +66,42 @@ tailscale serve --bg 7878                                  # private to your tai
 ```
 
 Pair through that address. The app offers to turn notifications on; you can also find the option under **⋯**. On iPhone, add the page to the Home Screen first (iOS 16.4+). The "cloudflared" option in `/remote settings` also gives HTTPS, but its address changes whenever the hub restarts.
+
+## Voice
+
+Two different jobs. Design notes and research: [docs/voice.md](docs/voice.md).
+
+### Voice input: speak instead of typing
+
+In the terminal press **alt+m** (or `/voice`), talk, press **Enter** (or alt+m again). On the phone, tap the **mic** in the composer and tap again when done.
+
+What lands in the editor is not a transcript. It is the message you meant: self-corrections applied ("null, no wait, undefined" → `undefined`), fillers and restarts gone, several asks turned into a short list, and code names recovered from the repository ("get user by ID in off dot ts" → `getUserById` in `src/auth.ts`). Anything genuinely ambiguous is listed under *Unclear* instead of guessed. You review it and send.
+
+```
+/voice raw      the verbatim transcript instead      /voice undo     your text from before
+/voice send     send right after distilling          /voice review   leave it in the editor (default)
+/voice status   recogniser, model, microphone
+```
+
+- **Recognition runs on your computer.** On macOS 26 it is Apple's on-device SpeechAnalyzer: free, private, live partial text while you talk, biased toward your project's names. A small Swift helper compiles on first use (needs Xcode command-line tools). Elsewhere, set `OPENAI_API_KEY` for `gpt-4o-transcribe`. The terminal records through `ffmpeg`.
+- **Distillation** uses a fast model you already have in pi (it skips models your account can't use). The prompt carries your repo's file names, declared symbols and the last reply, so "that" and "the second option" resolve.
+
+### Voice mode: a conversation when you can't look
+
+Tap the **bars icon** in the phone's header. Talk; pi answers out loud. At home (cooking, tidying) the computer works too: open `http://127.0.0.1:7878` in its browser and use its microphone and speakers, no HTTPS needed. It is built for eyes and hands that are busy:
+
+- **Talk about intent, not code.** The voice talks like an engineer on a walk: behaviour, design, decisions, risks, what is left. No identifiers, file names, commands or tool chatter. The full written answer stays in the transcript for later.
+- **Sounds for state, words for news.** A tone when it hears you, a soft tick while pi works, a chime when it is done or needs you. It speaks when something changes what you do next: the outcome, a question, or a *significant* action that failed (production data, deploys, pushes, deletes).
+- **Ask anything, any time.** "What's it doing?", "why did that fail?", "stop", "switch to the api session", "say that again". Talking over pi interrupts it.
+- **Answer pi's questions by voice.** Permission gates and other dialogs are read out, two options at a time. Irreversible actions need the action named: "yes, push", not "yeah".
+- **pi knows you are listening.** While voice mode is on, the agent is told you can't read: outcome first, one clear question when it needs you, nothing to review on screen.
+- **Eyes-free / Can glance** sets how short it is. **Open mic / Tap to talk** picks how turns work (tap mode for wind, traffic, cycling). The circle fills the screen so it can be hit without looking.
+
+Under the hood: a realtime speech model (`gpt-realtime-2`) talks with you directly from the phone over WebRTC, and pi on the computer opens the call with your ChatGPT sign-in (the endpoint Codex uses) or `OPENAI_API_KEY`. No token or audio passes through the computer. If realtime is unavailable it falls back to *basic voice*: voice detection on the phone, recognition on the computer, pi, and the phone's own speech synthesis.
+
+Limits: browsers give the microphone only to HTTPS pages, so voice on the phone needs the HTTPS address (see [Lock-screen notifications](#lock-screen-notifications)); `http://127.0.0.1` works on the computer itself. On iPhone the microphone stops when the screen locks, so voice mode keeps the screen awake (lower the brightness for a run); Android Chrome is more lenient while audio plays, but test it on your phone before relying on it in the car. Web apps can't use CarPlay; the phone's audio plays through the car as usual.
+
+Settings live in `~/.pi/agent/pi-mobile/config.json` under `"voice"`: `stt` (`auto`/`apple`/`openai`), `locale` (e.g. `"fi-FI"`), `model` (`provider/id` for distillation and briefs), `realtime` (`auto`/`off`), `realtimeModel`, `realtimeVoice`, `turnDetection` (`semantic`/`server`), `afterDictation` (`review`/`send`). `PI_MOBILE_MIC` picks the terminal's microphone, or `file:<recording>` for demos.
 
 ## Security model
 

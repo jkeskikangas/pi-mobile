@@ -16,6 +16,8 @@ export interface Vocabulary {
 	files: string[];
 	/** Identifiers and paths mentioned in the recent conversation, most recent first. */
 	recent: string[];
+	/** Declared names in the code (functions, classes, types, constants), bounded. */
+	symbols?: string[];
 }
 
 const SYMBOLS: Record<string, string> = { ".": "dot", "/": "slash", _: "underscore", "-": "dash" };
@@ -82,14 +84,35 @@ export function recentNames(branch: readonly any[], maxMessages = 30, limit = 30
 	return out;
 }
 
-const cache = new Map<string, { at: number; files: string[]; branch?: string }>();
+const cache = new Map<string, { at: number; files: string[]; branch?: string; symbols: string[] }>();
 
-/** Tracked files and branch of the git repo at `cwd` (cached for a minute). Empty outside git. */
-export async function repoInfo(cwd: string, maxFiles = 5000): Promise<{ files: string[]; branch?: string }> {
+// Declarations across common languages: function/class/type/const names, Python defs, Rust/Go fns.
+const DECL =
+	"(function|class|interface|type|enum|const|let|var|def|fn|func|struct|trait|impl|module|object)[[:space:]]+[A-Za-z_$][A-Za-z0-9_$]{2,}";
+
+/** Declared symbol names in tracked files, most frequent first, at most `max`. */
+export function parseSymbols(grepOutput: string, max = 3000): string[] {
+	const counts = new Map<string, number>();
+	for (const line of grepOutput.split("\n")) {
+		const name = line.trim().split(/\s+/)[1];
+		if (!name || name.length < 4 || /^(this|self|true|false|null|undefined|async|await|return|export|default)$/.test(name)) continue;
+		counts.set(name, (counts.get(name) ?? 0) + 1);
+	}
+	// Compound names (getUserById, parse_config) are what speech mangles and people name aloud;
+	// short single words are mostly locals.
+	const weight = (n: string, c: number) => c * (spokenWords(n, false).length > 1 ? 4 : n.length >= 7 ? 1 : 0.25);
+	return [...counts]
+		.sort((a, b) => weight(b[0], b[1]) - weight(a[0], a[1]))
+		.slice(0, max)
+		.map(([n]) => n);
+}
+
+/** Tracked files, branch and declared symbols of the git repo at `cwd` (cached for a minute). Empty outside git. */
+export async function repoInfo(cwd: string, maxFiles = 5000): Promise<{ files: string[]; branch?: string; symbols: string[] }> {
 	const hit = cache.get(cwd);
 	if (hit && Date.now() - hit.at < 60_000) return hit;
 	const opts = { cwd, maxBuffer: 32 * 1024 * 1024, timeout: 4000 };
-	const [files, branch] = await Promise.all([
+	const [files, branch, symbols] = await Promise.all([
 		run("git", ["ls-files", "--cached", "--others", "--exclude-standard"], opts).then(
 			(r) => r.stdout.split("\n").filter(Boolean).slice(0, maxFiles),
 			() => [] as string[],
@@ -98,15 +121,20 @@ export async function repoInfo(cwd: string, maxFiles = 5000): Promise<{ files: s
 			(r) => r.stdout.trim() || undefined,
 			() => undefined,
 		),
+		// Exit code 1 means no match; a huge repo is cut off by maxBuffer/timeout, which is fine.
+		run("git", ["grep", "-h", "-I", "-o", "-E", "--untracked", DECL], { ...opts, maxBuffer: 16 * 1024 * 1024 }).then(
+			(r) => parseSymbols(r.stdout),
+			(e) => (typeof e?.stdout === "string" ? parseSymbols(e.stdout) : []),
+		),
 	]);
-	const info = { at: Date.now(), files, branch: branch === "HEAD" ? undefined : branch };
+	const info = { at: Date.now(), files, branch: branch === "HEAD" ? undefined : branch, symbols };
 	cache.set(cwd, info);
 	return info;
 }
 
 export async function gatherVocabulary(cwd: string, branch: readonly any[]): Promise<Vocabulary> {
 	const repo = await repoInfo(cwd);
-	return { project: basename(cwd), branch: repo.branch, files: repo.files, recent: recentNames(branch) };
+	return { project: basename(cwd), branch: repo.branch, files: repo.files, recent: recentNames(branch), symbols: repo.symbols };
 }
 
 /** Short recogniser hints (Apple contextual strings, transcription prompts): the most likely spoken names. */
@@ -118,6 +146,7 @@ export function recognizerHints(v: Vocabulary, limit = 100): string[] {
 	add(v.project);
 	for (const w of v.branch?.split(/[/_.-]+/) ?? []) if (w.length > 3) add(w);
 	for (const r of v.recent) add(r.includes("/") ? basename(r) : r);
+	for (const s of (v.symbols ?? []).slice(0, 30)) add(s);
 	const dirs = new Map<string, number>();
 	for (const f of v.files) for (const d of f.split("/").slice(0, -1)) dirs.set(d, (dirs.get(d) ?? 0) + 1);
 	for (const [d] of [...dirs].sort((a, b) => b[1] - a[1]).slice(0, 20)) add(d);
@@ -125,19 +154,48 @@ export function recognizerHints(v: Vocabulary, limit = 100): string[] {
 	return [...out];
 }
 
-function lev(a: string, b: string): number {
+/** Edit distance, or `max + 1` as soon as it must exceed `max`. */
+function lev(a: string, b: string, max = Infinity): number {
 	if (a === b) return 0;
-	const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+	if (Math.abs(a.length - b.length) > max) return max + 1;
+	const prev = new Int32Array(b.length + 1);
+	for (let j = 0; j <= b.length; j++) prev[j] = j;
 	for (let i = 1; i <= a.length; i++) {
 		let diag = prev[0];
 		prev[0] = i;
+		let rowMin = prev[0];
+		const ca = a.charCodeAt(i - 1);
 		for (let j = 1; j <= b.length; j++) {
 			const tmp = prev[j];
-			prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+			const v = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (ca === b.charCodeAt(j - 1) ? 0 : 1));
+			prev[j] = v;
+			if (v < rowMin) rowMin = v;
 			diag = tmp;
 		}
+		if (rowMin > max) return max + 1;
 	}
 	return prev[b.length];
+}
+
+const MAX_FUZZY_FILES = 2000;
+
+/** Files worth fuzzy-matching, at most `max`: near what the conversation mentions, then shallow paths. */
+export function salientFiles(v: Vocabulary, max = MAX_FUZZY_FILES): string[] {
+	if (v.files.length <= max) return v.files;
+	const dirs = new Set(v.recent.filter((r) => r.includes("/")).map((r) => r.split("/").slice(0, -1).join("/")));
+	const mentioned = new Set(v.recent.map((r) => basename(r)));
+	const rank = (f: string) => (mentioned.has(basename(f)) ? 0 : dirs.has(f.split("/").slice(0, -1).join("/")) ? 1 : 2 + f.split("/").length);
+	return v.files
+		.map((f, i) => ({ f, r: rank(f), i }))
+		.sort((a, b) => a.r - b.r || a.i - b.i)
+		.slice(0, max)
+		.map((x) => x.f);
+}
+
+function trigrams(s: string): Set<string> {
+	const out = new Set<string>();
+	for (let i = 0; i + 3 <= s.length; i++) out.add(s.slice(i, i + 3));
+	return out;
 }
 
 export interface NameMatch {
@@ -156,36 +214,62 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace
  * with windows of transcript words, letters only, so recogniser splits and merges ("userbide",
  * "orthodotts") still match.
  */
-export function matchNames(transcript: string, v: Vocabulary, limit = 40): NameMatch[] {
+export function matchNames(transcript: string, v: Vocabulary, limit = 40, minScore = 0.66): NameMatch[] {
 	const words = norm(transcript).split(" ").filter(Boolean);
 	if (!words.length) return [];
 	const candidates = new Map<string, string>();
 	for (const r of v.recent) candidates.set(r, r);
-	for (const f of v.files) {
+	for (const s of (v.symbols ?? []).slice(0, 2000)) if (!candidates.has(s)) candidates.set(s, s);
+	for (const f of salientFiles(v)) {
 		if (!candidates.has(basename(f))) candidates.set(basename(f), f);
 		const stem = basename(f).replace(/\.[^.]+$/, "");
 		if (stem.length >= 4 && !candidates.has(stem)) candidates.set(stem, f);
 	}
-	const windows: { text: string; letters: string }[] = [];
-	for (let i = 0; i < words.length; i++)
-		for (let n = 1; n <= 6 && i + n <= words.length; n++) {
-			const text = words.slice(i, i + n).join(" ");
-			windows.push({ text, letters: text.replace(/ /g, "") });
-		}
-	const best = new Map<string, NameMatch>();
+	// Spoken forms, indexed by letter trigrams so each transcript window is compared only with forms
+	// that share enough of its sound.
+	const forms: { form: string; key: string; target: string; tris: number }[] = [];
+	const index = new Map<string, number[]>();
 	for (const [key, target] of candidates) {
-		const forms = new Set([spokenWords(key).join(""), spokenWords(key, false).join("")]);
-		for (const form of forms) {
+		for (const form of new Set([spokenWords(key).join(""), spokenWords(key, false).join("")])) {
 			if (form.length < 4) continue;
-			for (const w of windows) {
-				if (Math.abs(w.letters.length - form.length) > Math.max(2, form.length * 0.4)) continue;
-				const d = lev(w.letters, form);
-				const score = 1 - d / Math.max(form.length, w.letters.length);
-				if (score < 0.66) continue;
-				const prev = best.get(target);
-				if (!prev || score > prev.score) best.set(target, { name: target === key ? key : target, heard: w.text, score });
+			const tris = trigrams(form);
+			const id = forms.push({ form, key, target, tris: tris.size }) - 1;
+			for (const t of tris) {
+				const list = index.get(t);
+				if (list) list.push(id);
+				else index.set(t, [id]);
 			}
 		}
 	}
+	const best = new Map<string, NameMatch>();
+	const counts = new Int32Array(forms.length);
+	const touched: number[] = [];
+	const seenWindows = new Set<string>();
+	for (let i = 0; i < words.length; i++)
+		for (let n = 1; n <= 6 && i + n <= words.length; n++) {
+			const text = words.slice(i, i + n).join(" ");
+			const letters = text.replace(/ /g, "");
+			if (letters.length < 4 || seenWindows.has(letters)) continue;
+			seenWindows.add(letters);
+			const wt = trigrams(letters);
+			touched.length = 0;
+			for (const t of wt) {
+				const list = index.get(t);
+				if (!list) continue;
+				for (const id of list) if (counts[id]++ === 0) touched.push(id);
+			}
+			for (const id of touched) {
+				const shared = counts[id];
+				counts[id] = 0;
+				const f = forms[id];
+				if (shared < Math.max(1, Math.min(f.tris, wt.size) * (minScore < 0.66 ? 0.2 : 0.3))) continue;
+				if (Math.abs(letters.length - f.form.length) > Math.max(2, f.form.length * 0.4)) continue;
+				const longest = Math.max(f.form.length, letters.length);
+				const score = 1 - lev(letters, f.form, Math.floor(longest * (1 - minScore))) / longest;
+				if (score < minScore) continue;
+				const prev = best.get(f.target);
+				if (!prev || score > prev.score) best.set(f.target, { name: f.target, heard: text, score });
+			}
+		}
 	return [...best.values()].sort((a, b) => b.score - a.score || b.heard.length - a.heard.length).slice(0, limit);
 }

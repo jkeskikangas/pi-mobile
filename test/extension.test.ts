@@ -76,6 +76,7 @@ function host() {
 		registerFlag: () => {},
 		getFlag: (n: string) => n === "remote",
 		registerCommand: () => {},
+		registerShortcut: () => {},
 		getSessionName: () => undefined,
 		getThinkingLevel: () => thinking,
 		setThinkingLevel: (l: string) => {
@@ -87,7 +88,9 @@ function host() {
 	};
 	remoteControl(pi);
 	const fire = async (name: string, event: any = {}) => {
-		for (const fn of handlers.get(name) ?? []) await fn({ type: name, ...event }, ctx);
+		const results: any[] = [];
+		for (const fn of handlers.get(name) ?? []) results.push(await fn({ type: name, ...event }, ctx));
+		return results;
 	};
 	return { fire, ctx, sent, statuses, notes, localDialogs, thinking: () => thinking, setIdle: (v: boolean) => (idle = v) };
 }
@@ -260,6 +263,42 @@ test("answering in the terminal closes the phone's prompt; selects validate opti
 	h.localDialogs.at(-1)!.resolve("b");
 	assert.equal(await choice, "b");
 	assert.equal((await phone.waitFor((e) => e.type === "prompt_end")).by, "terminal");
+});
+
+test("voice: status by ear, spoken brief, and the agent knows its user is listening", async () => {
+	assert.equal((await call("voiceStatus")).speech, "Pi is idle.");
+	await h.fire("agent_start");
+	await h.fire("tool_execution_start", { toolCallId: "v1", toolName: "bash", args: { command: "npm test -- auth" } });
+	const status = await call("voiceStatus");
+	assert.match(status.speech, /^Working for a few seconds, now running the tests\./);
+	assert.doesNotMatch(status.speech, /npm|auth/, "no commands or names by voice");
+	await h.fire("tool_execution_end", { toolCallId: "v1", toolName: "bash", isError: false });
+	await h.fire("agent_settled", { aborted: false });
+
+	// No model reachable in this fake host: the brief falls back to the local rules.
+	const b = await call("brief", { mode: "eyes-busy" });
+	assert.equal(b.speech, "Done.");
+	assert.equal(b.by, "heuristic");
+	assert.match(b.report, /REQUEST: fix the bug/);
+
+	const voiceNote = async () => (await h.fire("before_agent_start", { systemPrompt: "BASE", prompt: "x" })).find((r) => r?.systemPrompt)?.systemPrompt;
+	assert.equal(await voiceNote(), undefined, "no voice note while nobody listens");
+	await call("voiceState", { on: true, mode: "eyes-busy" });
+	const note = await voiceNote();
+	assert.match(note, /^BASE\n\n# Voice session/);
+	assert.match(note, /cannot look at a screen/);
+	await call("voiceState", { on: false });
+	assert.equal(await voiceNote(), undefined);
+	await assert.rejects(call("voiceSession", { sdp: "nope" }), /bad offer/);
+});
+
+test("voice: a view-only device may listen but not dictate or open a voice call", async () => {
+	const viewer = new Phone();
+	await viewer.pair(processHub()!.createPairing("view").links[0].url, "viewer");
+	const vcall = (m: string, p: unknown = {}) => viewer.rpc("agent", { agent, m, p });
+	assert.equal((await vcall("voiceStatus")).speech, "Pi is idle.");
+	assert.ok((await vcall("brief", {})).speech);
+	for (const m of ["transcribe", "distill", "voiceSession", "voiceState"]) await assert.rejects(vcall(m, {}), /view-only/, m);
 });
 
 test("terminal notifications are mirrored to the phone", async () => {

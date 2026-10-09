@@ -33,7 +33,7 @@ const GLOBAL_EVENTS = new Set(["info", "gone", "prompt", "prompt_end"]);
 const MAX_BODY = 25 * 1024 * 1024;
 const PAIRING_TTL = 10 * 60_000;
 // View-only devices may also listen: spoken briefs, details and status read the session, never change it.
-const VIEW_METHODS = new Set(["snapshot", "toolOutput", "models", "commands"]);
+const VIEW_METHODS = new Set(["snapshot", "toolOutput", "models", "commands", "voiceStatus", "brief", "details"]);
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
 	".js": "text/javascript; charset=utf-8",
@@ -405,7 +405,8 @@ export class Hub {
 				"content-type": MIME[extname(file)] ?? "application/octet-stream",
 				"cache-control": "no-cache",
 				"content-security-policy":
-					"default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+					// media-src blob: lets voice mode keep a silent media session (headset button) alive.
+					"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
 			});
 			res.end(body);
 		} catch {

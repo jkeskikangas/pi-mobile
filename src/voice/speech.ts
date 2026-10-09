@@ -98,34 +98,84 @@ function editPaths(args: any): string[] {
 	return [...out];
 }
 
+/**
+ * Tool activity worth a listener's attention: anything touching production, data, deployment,
+ * shared history, external services or money. Everything else is the agent's own business.
+ */
+export const SIGNIFICANT =
+	/\b(prod|production|deploy\w*|release|publish|migrat\w*|drop\s+(?:table|database|schema)|truncate|delete\s+from|update\s+\w+\s+set|rm\s+-\w*r\w*f|git\s+push|--force|reset\s+--hard|kubectl|helm|terraform\s+(?:apply|destroy)|tofu\s+(?:apply|destroy)|psql|mysql|mongosh?|redis-cli|database_url|aws\s|gcloud|az\s|ssh\s|scp\s|curl\s+-X\s*(?:POST|PUT|PATCH|DELETE)|npm\s+publish|docker\s+push|stripe|payment|send\w*\s+(?:mail|email|message))\b/i;
+
+export function isSignificant(text: string): boolean {
+	return SIGNIFICANT.test(text);
+}
+
+/** Changed files grouped by the part of the system they belong to: "voice (3 files)". */
+export function changedAreas(edits: RunDigest["edits"]): { area: string; files: number; lines: number }[] {
+	const areas = new Map<string, { area: string; files: number; lines: number }>();
+	for (const e of edits) {
+		const parts = e.path.split("/").filter(Boolean);
+		const dirs = parts.slice(0, -1).filter((p) => !/^(src|lib|app|pkg|internal|source)$/.test(p));
+		// The nearest meaningful folder; under only generic ones (src/auth.ts), the file's own subject.
+		const area = dirs.length ? dirs.slice(-1)[0] : (parts.at(-1) ?? "project").replace(/\.[^.]+$/, "").replace(/^index$/, "project root");
+		const a = areas.get(area) ?? { area, files: 0, lines: 0 };
+		a.files++;
+		a.lines += e.added + e.removed;
+		areas.set(area, a);
+	}
+	return [...areas.values()].sort((x, y) => y.lines - x.lines);
+}
+
+/**
+ * The run as a report for the voice layer: what was asked, what changed and where (by area),
+ * significant actions and failures that matter, and the agent's own written reply. Plain tool
+ * chatter (reads, searches, routine commands) is left out on purpose.
+ */
 export function digestText(d: RunDigest): string {
 	const lines = [`REQUEST: ${d.request || "(none)"}`];
-	if (d.aborted) lines.push("STOPPED by the user before finishing.");
-	if (d.edits.length)
-		lines.push(`FILES CHANGED: ${d.edits.map((e) => `${e.path} (+${e.added} -${e.removed})`).join(", ")}`);
-	for (const c of d.commands.slice(-6)) lines.push(`COMMAND ${c.ok ? "ok" : "FAILED"}: ${c.command}${c.ok ? "" : `\n  last output: ${c.tail.replace(/\n/g, "\n  ")}`}`);
-	for (const e of d.errors.slice(-4)) lines.push(`ERROR: ${e}`);
+	if (d.aborted) lines.push("STOPPED by the developer before finishing.");
+	if (d.edits.length) {
+		const total = d.edits.reduce((s, e) => s + e.added + e.removed, 0);
+		lines.push(
+			`AREAS CHANGED: ${changedAreas(d.edits)
+				.map((a) => `${a.area} (${a.files} file${a.files > 1 ? "s" : ""})`)
+				.join(", ")}; ${d.edits.length} files, about ${total} lines in total`,
+		);
+	}
+	const significant = d.commands.filter((c) => isSignificant(c.command));
+	for (const c of significant.slice(-4)) lines.push(`SIGNIFICANT ACTION ${c.ok ? "succeeded" : "FAILED"}: ${c.command}${c.ok ? "" : `\n  last output: ${c.tail.replace(/\n/g, "\n  ")}`}`);
+	const failed = d.commands.filter((c) => !c.ok && !significant.includes(c));
+	if (failed.length)
+		lines.push(
+			`FAILED COMMANDS (routine; matters only if the reply says the work is not done): ${failed
+				.slice(-3)
+				.map((c) => `${c.command} → ${c.tail.split("\n").slice(-2).join(" / ")}`)
+				.join("; ")}`,
+		);
+	for (const e of d.errors.slice(-3)) lines.push(`ERROR: ${e}`);
 	lines.push(`AGENT'S WRITTEN REPLY:\n${d.final.length > 6000 ? `${d.final.slice(0, 3000)}\n…\n${d.final.slice(-3000)}` : d.final || "(none)"}`);
+	if (d.edits.length) lines.push(`FILES (only if the developer asks which files): ${d.edits.map((e) => e.path).join(", ")}`);
 	return lines.join("\n");
 }
 
 export type Attention = "eyes-busy" | "glance";
 
-export const BRIEF_SYSTEM = (mode: Attention) => `You turn a coding agent's written report into what a voice assistant says aloud to the developer. ${
+export const BRIEF_SYSTEM = (mode: Attention) => `You turn a coding agent's report into what a voice assistant says aloud to the developer. ${
 	mode === "eyes-busy"
 		? "The developer is driving, running, cycling or cooking: they cannot look at a screen and are only half listening."
 		: "The developer is listening on their phone and may glance at the screen."
 } The full written report stays in their transcript for later.
 
+Talk the way two engineers talk on a walk: about behaviour, design, decisions, risks and what is left, not about code. Say what the work does or changes for the system or its users ("login now rejects expired tokens"), not which functions, files, variables, commands or tools were involved.
+
 Rules for the spoken brief:
-- Lead with the outcome in the first sentence: done, partly done, blocked, failed, or a question for them.
-- ${mode === "eyes-busy" ? "At most 2 short sentences, about 30 words in total." : "At most 3 short sentences, about 50 words in total."} One idea per sentence. Plain spoken language, contractions are fine.
-- If the agent asks the developer something, end with that question, phrased so it can be answered with yes, no, or one short phrase. Offer at most two options.
-- No code, no symbols, no markdown, no URLs, no full paths. Name a file by its base name the way a person says it ("auth dot ts"); name a function in words ("get user by ID"). Round numbers ("about forty lines", "three of twelve tests failed").
-- Never pad: no greetings, no "the agent", no restating the request, no "let me know".
-- Do not invent anything that the report does not say.
-${mode === "eyes-busy" ? "- If something needs visual review (a diff, a UI), say it is waiting for them at a screen.\n" : ""}
-Then, only if there is meaningful detail they might want, add a line "MORE:" with up to two short topics they could ask about, e.g. "MORE: the failing test names; the changed files".`;
+- Lead with the outcome: done, partly done, blocked, failed, or a decision they need to make.
+- ${mode === "eyes-busy" ? "At most 2 short sentences, about 30 words in total." : "At most 3 short sentences, about 50 words in total."} One idea per sentence. Plain spoken language; contractions are fine.
+- No identifiers, file names, paths, commands, test names, tool names, code, symbols, URLs or markdown. Name a part of the system by what it is ("the authentication module", "the phone app"). Round numbers.
+- Tool activity is not news. Mention it only when it matters: a significant action (production, data, deployment, pushing, deleting, external services, money) or a failure that changes the outcome.
+- If the agent asks the developer something, end with that question, answerable with yes, no or a short phrase, with at most two options. If it is a design decision, give the trade-off in a few words.
+- Never pad: no greetings, no "the agent", no restating the request, no "let me know". Do not invent anything the report does not say.
+${mode === "eyes-busy" ? "- Anything that needs visual review (a diff, a UI) waits until they are at a screen; say so in a few words.\n" : ""}
+Then, only if there is meaningful detail they might want, add a line "MORE:" with up to two short topics they could ask about, phrased at the same level, e.g. "MORE: why the tests still fail; the alternative design".`;
 
 export interface Brief {
 	speech: string;
@@ -184,7 +234,44 @@ export function countWord(n: number, noun: string): string {
 	return `${n <= 10 ? SMALL[n] : String(n)} ${noun}${n === 1 ? "" : "s"}`;
 }
 
-function firstSentences(text: string, n: number): string {
+/**
+ * A running tool as a spoken activity, by category and never by name or path: "running the tests",
+ * "changing code". Significant commands say what kind they are ("a database command").
+ */
+export function describeActivity(name: string, title: string): string {
+	const t = title.trim();
+	if (/^(bash|shell|exec|run)/i.test(name)) {
+		if (isSignificant(t)) return `running ${significantKind(t)}`;
+		if (/\b(test|tests|jest|vitest|pytest|mocha|playwright|cargo test|go test)\b/i.test(t)) return "running the tests";
+		if (/\b(build|tsc|typecheck|compile|webpack|vite build|cargo build|make)\b/i.test(t)) return "building";
+		if (/\b(lint|eslint|biome|ruff|prettier|fmt|clippy)\b/i.test(t)) return "checking the code style";
+		if (/\b(install|npm ci|pip|uv sync|bundle|cargo add)\b/i.test(t)) return "installing dependencies";
+		if (/^git\b/.test(t)) return "looking at version history";
+		if (/\b(rg|grep|find|ls|cat|sed|head|tail)\b/.test(t)) return "looking through the code";
+		return "running a command";
+	}
+	if (/edit|write|patch/i.test(name)) return "changing code";
+	if (/read/i.test(name)) return "reading code";
+	if (/grep|search|find|glob/i.test(name)) return "searching the code";
+	if (/web|fetch/i.test(name)) return "researching on the web";
+	if (/spawn|agent|task/i.test(name)) return "working with a helper agent";
+	return "working";
+}
+
+export function significantKind(text: string): string {
+	const t = text.toLowerCase();
+	if (/\b(psql|mysql|mongo|redis-cli|database_url|drop|truncate|delete from|update \w+ set)\b/.test(t)) return /\bprod/.test(t) ? "a production database command" : "a database command";
+	if (/\b(deploy|release|publish|docker push|npm publish)/.test(t)) return "a deployment";
+	if (/git\s+push|--force|reset\s+--hard/.test(t)) return "a change to shared version history";
+	if (/\b(kubectl|helm|terraform|tofu)\b/.test(t)) return "an infrastructure change";
+	if (/\b(aws|gcloud|az)\s/.test(t)) return "a cloud command";
+	if (/\b(ssh|scp)\s/.test(t)) return "a command on another machine";
+	if (/rm\s+-\w*r/.test(t)) return "a deletion";
+	if (/\bprod/.test(t)) return "a production command";
+	return "a command that needs care";
+}
+
+export function firstSentences(text: string, n: number): string {
 	const s = text.match(/[^.!?]+[.!?]+(\s|$)/g) ?? (text ? [text] : []);
 	return s.slice(0, n).join("").trim();
 }
@@ -230,10 +317,10 @@ export function agentVoiceNote(mode: Attention): string {
 The user is following this session by voice through their phone${
 		mode === "eyes-busy" ? " and cannot look at a screen (they may be driving, running, cycling or cooking)" : ""
 	}. A separate voice layer reads them a short spoken summary of each of your replies.
-- Their messages are speech transcripts: expect recognition errors, especially in code names, and map them to the real names in the workspace. If a request is genuinely ambiguous, ask one short question rather than guessing on anything risky.
-- Start your final message with the outcome in one plain sentence, then details. When you need a decision, end with one question answerable with yes, no, or a short phrase, with at most two options.
+- They talk about intent, behaviour, architecture and trade-offs, not identifiers: map what they describe onto the code yourself. Their messages are speech transcripts, so expect recognition errors. If a request is genuinely ambiguous in a way that matters, ask one short question rather than guessing on anything risky.
+- Start your final message with the outcome in one plain sentence, at the level of behaviour and design (what now works, what changed for users or the system, what is left), then details. When you need a decision, end with one question answerable with yes, no or a short phrase, with at most two options and the trade-off in a few words.
 - Do not ask them to read code, diffs or long output now; ${
 		mode === "eyes-busy" ? "leave visual review for when they are back at a screen and say so." : "keep anything they must review short."
 	}
-- Before anything irreversible or outward-facing (pushing, deploying, deleting data, force operations, sending messages, spending money), stop and ask for explicit confirmation that names the action.`;
+- Before anything irreversible or outward-facing (production systems or data, deploying, pushing, deleting, force operations, sending messages, spending money), stop and ask for explicit confirmation that names the action.`;
 }

@@ -1,0 +1,90 @@
+// The phone's voice logic (web/voice-core.js), loaded the way the browser loads it.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+// A browser script, not a module: importing runs it and it sets globalThis.PiVoiceCore.
+const script = "../web/voice-core.js";
+await import(script);
+const V = (globalThis as any).PiVoiceCore;
+
+test("short utterances are instant local commands; longer ones go to pi", () => {
+	assert.deepEqual(V.parseCommand("Stop!"), { kind: "stop" });
+	assert.deepEqual(V.parseCommand("pi, stop"), { kind: "stop" });
+	assert.deepEqual(V.parseCommand("hey pi what's it doing?"), { kind: "status" });
+	assert.deepEqual(V.parseCommand("Say that again"), { kind: "repeat" });
+	assert.deepEqual(V.parseCommand("tell me more"), { kind: "more" });
+	assert.deepEqual(V.parseCommand("be brief"), { kind: "shorter" });
+	assert.deepEqual(V.parseCommand("goodbye"), { kind: "end" });
+	assert.equal(V.parseCommand("stop using the old config loader in the hub"), null);
+	assert.equal(V.parseCommand("run the tests"), null);
+});
+
+test("yes/no answers; destructive actions must be named", () => {
+	const plain = { kind: "confirm", title: "Apply the formatting changes?" };
+	assert.deepEqual(V.answerFor(plain, "yeah go ahead"), { value: true });
+	assert.deepEqual(V.answerFor(plain, "no"), { value: false });
+	assert.deepEqual(V.answerFor(plain, "what was that about"), { unclear: true });
+	const push = { kind: "confirm", title: "Push 3 commits to main?" };
+	assert.deepEqual(V.answerFor(push, "yeah"), { needConfirm: "push" });
+	assert.deepEqual(V.answerFor(push, "yes, push it"), { value: true });
+	assert.deepEqual(V.answerFor(push, "confirm"), { value: true });
+	assert.deepEqual(V.answerFor(push, "no don't"), { value: false });
+	assert.equal(V.speakPrompt(push), 'Push 3 commits to main? Say "yes, push" to confirm, or no.');
+	assert.equal(V.speakPrompt(plain), "Apply the formatting changes? Yes or no?");
+});
+
+test("choices by ordinal or by name, two at a time", () => {
+	const p = { kind: "select", title: "Which fix?", options: ["Cache the lookup", "Add an index", "Rewrite the query", "Delete the table"] };
+	assert.deepEqual(V.answerFor(p, "the second one"), { value: "Add an index" });
+	assert.deepEqual(V.answerFor(p, "option 3"), { value: "Rewrite the query" });
+	assert.deepEqual(V.answerFor(p, "let's add the index"), { value: "Add an index" });
+	assert.deepEqual(V.answerFor(p, "last"), { needConfirm: "delete", option: "Delete the table" });
+	assert.deepEqual(V.answerFor(p, "never mind"), { value: undefined });
+	assert.deepEqual(V.answerFor(p, "hmm"), { unclear: true });
+	assert.equal(V.speakPrompt(p), 'Which fix? one: Cache the lookup. two: Add an index. Or say "more options". There are 4.');
+	assert.equal(V.speakPrompt(p, 1), "three: Rewrite the query. four: Delete the table.");
+	assert.deepEqual(V.answerFor({ kind: "input", title: "Branch name?" }, "feature voice"), { value: "feature voice" });
+});
+
+test("only significant tool activity reaches the listener", () => {
+	for (const t of ["psql $DATABASE_URL -c 'select 1'", "git push origin main", "kubectl apply -f prod.yaml", "npm publish", "rm -rf build", "./deploy.sh staging"])
+		assert.equal(V.isSignificant(t), true, t);
+	for (const t of ["npm test", "rg getUserById src", "src/auth.ts", "git status", "tsc --noEmit"]) assert.equal(V.isSignificant(t), false, t);
+});
+
+test("a thought that trails off keeps the floor", () => {
+	assert.equal(V.incomplete("refactor the hub and"), true);
+	assert.equal(V.incomplete("so the thing is um"), true);
+	assert.equal(V.incomplete("refactor the hub."), false);
+});
+
+test("VAD: adaptive floor, minimum speech, hangover and extension", () => {
+	const v = new V.Vad({ hangMs: 500, minSpeechMs: 100 });
+	let t = 0;
+	const run = (rms: number, ms: number) => {
+		const evs: string[] = [];
+		for (const end = t + ms; t < end; t += 20) {
+			const e = v.feed(rms, t);
+			if (e) evs.push(e);
+		}
+		return evs;
+	};
+	assert.deepEqual(run(0.005, 1000), []);
+	assert.deepEqual(run(0.2, 60), [], "a click is not speech");
+	assert.deepEqual(run(0.005, 100), []);
+	assert.deepEqual(run(0.2, 300), ["start"]);
+	assert.deepEqual(run(0.005, 300), [], "a short pause keeps the turn");
+	assert.deepEqual(run(0.2, 100), []);
+	v.extend(800);
+	assert.deepEqual(run(0.005, 900), [], "extended while the words trail off");
+	assert.deepEqual(run(0.005, 500), ["end"]);
+	v.setGain(10);
+	assert.deepEqual(run(0.05, 500), [], "our own voice does not trigger it");
+});
+
+test("speech is chunked at sentence and clause boundaries", () => {
+	assert.deepEqual(V.chunks("Done. Two tests fail! Want details?"), ["Done.", "Two tests fail!", "Want details?"]);
+	const long = `${"word ".repeat(30)}, ${"more ".repeat(30)}`;
+	assert.ok(V.chunks(long, 100).every((c: string) => c.length <= 100));
+});

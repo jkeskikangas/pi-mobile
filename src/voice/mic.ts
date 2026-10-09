@@ -5,7 +5,9 @@ import { findFfmpeg } from "./stt.ts";
 
 export const MIC_RATE = 16000;
 
+/** ffmpeg input for the microphone. PI_MOBILE_MIC picks a device, or `file:<path>` plays a recording (demos, tests). */
 export function micInputArgs(platform = process.platform, device = process.env.PI_MOBILE_MIC): string[] {
+	if (device?.startsWith("file:")) return ["-re", "-i", device.slice(5)];
 	if (platform === "darwin") return ["-f", "avfoundation", "-i", `:${device ?? "default"}`];
 	if (platform === "win32") return ["-f", "dshow", "-i", `audio=${device ?? "default"}`];
 	return ["-f", "pulse", "-i", device ?? "default"];

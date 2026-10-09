@@ -39,6 +39,8 @@ export interface VoiceConfig {
 	/** Realtime model and voice. */
 	realtimeModel?: string;
 	realtimeVoice?: string;
+	/** Realtime end-of-turn detection: "semantic" (default, waits for the end of a thought) or "server" (fixed silence). */
+	turnDetection?: "semantic" | "server";
 	/** Terminal voice input: put the distilled text in the editor ("review", default) or send it ("send"). */
 	afterDictation?: "review" | "send";
 }
