@@ -144,7 +144,7 @@
 		$("olderBtn").hidden = true;
 		setHeader();
 		showEmpty(
-			`<h2>Not paired</h2><p>${reason ? `${esc(reason)}.<br>` : ""}In pi on your computer, run <code>/remote</code> and scan the QR code with this phone.</p>`,
+			`<img class="logo" src="icon.svg" alt=""><h2>Connect to pi</h2>${reason ? `<p>${esc(reason)}.</p>` : "<p>Use your pi sessions from this phone.</p>"}<ol><li><span>In pi on your computer, run <code>/remote</code></span></li><li><span>Scan the QR code with this phone's camera</span></li><li><span>Add this page to your Home Screen</span></li></ol>`,
 		);
 	}
 
@@ -234,7 +234,7 @@
 		const b = $("banner");
 		if (on) b.hidden = true;
 		else if (S.device) {
-			b.textContent = "Reconnecting…";
+			b.innerHTML = `<span class="spinner" aria-hidden="true"></span>Reconnecting…`;
 			b.className = "banner";
 			b.hidden = false;
 		}
@@ -279,7 +279,7 @@
 		renderPrompts();
 		renderAttention();
 		if (!agent) {
-			showEmpty("<h2>No shared sessions</h2><p>Run <code>/remote</code> in a pi session on your computer.</p>");
+			showEmpty(`<img class="logo" src="icon.svg" alt=""><h2>No sessions yet</h2><p>Run <code>/remote</code> in pi on your computer and its sessions appear here.</p>`);
 			updateComposer();
 			return;
 		}
@@ -314,7 +314,7 @@
 			renderPrompts();
 			updateComposer();
 			scrollToBottom(true);
-			if (!snap.items.length && !snap.streaming) showEmpty("<p>No messages yet. Say something.</p>");
+			if (!snap.items.length && !snap.streaming) showEmpty(`<h2>Nothing here yet</h2><p>Tell pi what to do in ${esc(snap.info?.name || "this session")}.</p>`);
 		} catch (e) {
 			if (e instanceof Unauthorized) return unpaired(e.message);
 			if (S.view === view) showEmpty(`<p>Could not load the session: ${esc(e.message)}</p>`);
@@ -381,7 +381,10 @@
 				map.set(ev.prompt.id, ev.prompt);
 				navigator.vibrate?.(200);
 			} else map.delete(ev.id);
-			if (agent === S.current) renderPrompts(ev.type === "prompt_end" ? ev : undefined);
+			if (agent === S.current) {
+				renderPrompts(ev.type === "prompt_end" ? ev : undefined);
+				setHeader();
+			}
 			updateTitle();
 			renderAttention();
 			return;
@@ -457,6 +460,32 @@
 		if (text !== undefined) e.textContent = text;
 		return e;
 	}
+	/** An icon from the sprite in index.html. */
+	function icon(name, cls = "") {
+		const NS = "http://www.w3.org/2000/svg";
+		const s = document.createElementNS(NS, "svg");
+		s.setAttribute("class", `i ${cls}`.trim());
+		s.setAttribute("aria-hidden", "true");
+		const u = document.createElementNS(NS, "use");
+		u.setAttribute("href", `#i-${name}`);
+		s.appendChild(u);
+		return s;
+	}
+	/** Scrollable regions must be reachable by keyboard. */
+	function scrollBox(node) {
+		node.tabIndex = 0;
+		return node;
+	}
+	function iconHTML(name, cls = "") {
+		return `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+	}
+	function elapsed(ms) {
+		const s = Math.max(0, Math.floor(ms / 1000));
+		const h = Math.floor(s / 3600);
+		const m = Math.floor((s % 3600) / 60);
+		const ss = String(s % 60).padStart(2, "0");
+		return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+	}
 
 	function renderItem(item) {
 		let node;
@@ -464,27 +493,41 @@
 			case "user": {
 				node = el("div", "msg user");
 				node.textContent = item.text;
-				if (item.images) node.appendChild(el("div", "meta", `📎 ${item.images} image${item.images > 1 ? "s" : ""}`));
+				if (item.images) {
+					const meta = el("div", "meta");
+					meta.append(icon("image", "sm"), `${item.images} image${item.images > 1 ? "s" : ""}`);
+					node.appendChild(meta);
+				}
 				break;
 			}
 			case "assistant":
 				node = el("div", "msg assistant");
 				for (const b of item.blocks) node.appendChild(renderBlock(b));
-				if (item.error && item.stop !== "aborted") node.appendChild(el("div", "err-line", `⚠ ${item.error}`));
-				else if (item.stop === "aborted") node.appendChild(el("div", "err-line", "⏹ stopped"));
+				if (item.error && item.stop !== "aborted") {
+					const e = el("div", "err-line");
+					e.append(icon("alert", "md"), el("span", "", item.error));
+					node.appendChild(e);
+				} else if (item.stop === "aborted") {
+					const e = el("div", "err-line stopped");
+					e.append(icon("stop", "md"), el("span", "", "Stopped"));
+					node.appendChild(e);
+				}
 				break;
 			case "tool":
 				node = toolCard(item.id, item.name, "", "");
 				fillToolResult(node, item);
 				break;
 			case "bash": {
-				node = el("details", "tool");
+				node = el("details", "tool msg");
 				const s = el("summary");
-				s.append(el("span", "tname", "$"), el("span", "ttitle", item.command), el("span", `tstate ${item.exitCode === 0 ? "ok" : "err"}`));
+				const ti = el("span", "ticon");
+				ti.appendChild(icon("terminal"));
+				const st = el("span", "tstate");
+				s.append(ti, el("span", "tname", "You ran"), el("span", "ttitle", item.command), st);
 				const body = el("div", "tbody");
-				body.appendChild(el("pre", "out", item.output || "(no output)"));
+				body.appendChild(scrollBox(el("pre", "out", item.output || "(no output)")));
 				node.append(s, body);
-				node.classList.add("msg");
+				setState(node, item.exitCode === 0 ? "ok" : "err");
 				break;
 			}
 			case "custom":
@@ -493,7 +536,11 @@
 				break;
 			case "summary":
 				node = el("details", "msg summary");
-				node.append(el("summary", "tag", item.kind === "compaction" ? "Context compacted — summary" : "Branch summary"), mdNode(item.text));
+				{
+					const s = el("summary", "tag");
+					s.append(icon("compact", "sm"), item.kind === "compaction" ? "Context compacted · summary" : "Branch summary");
+					node.append(s, mdNode(item.text));
+				}
 				break;
 			default:
 				node = el("div");
@@ -504,12 +551,48 @@
 
 	function renderBlock(b) {
 		if (b.t === "text") return mdNode(b.text);
-		if (b.t === "thinking") {
-			const d = el("details", "thinking");
-			d.append(el("summary", "", "Thinking…"), mdNode(b.text));
-			return d;
-		}
+		if (b.t === "thinking") return thinkingNode(b.text, false);
 		return toolCard(b.id, b.name, b.title, b.args);
+	}
+
+	function thinkingNode(text, live) {
+		const d = el("details", "thinking");
+		const s = el("summary");
+		s.append(icon("sparkle", "sm"), el("span", live ? "shimmer" : "", live ? "Thinking" : "Thought"), icon("chev-right", "chev"));
+		d.appendChild(s);
+		if (text) d.appendChild(mdNode(text));
+		return d;
+	}
+
+	// How a tool call reads in the transcript: an icon and a verb, then its target.
+	const TOOL_LOOK = [
+		[/^read$/, "file", "Read"],
+		[/^(write)$/, "pencil", "Wrote"],
+		[/edit|patch/, "pencil", "Edited"],
+		[/^(bash|shell|exec|powershell)$/, "terminal", "Ran"],
+		[/^ls$/, "folder", "Listed"],
+		[/grep|find|glob|search/, "search", "Searched"],
+		[/web|fetch|url|browse/, "globe", "Fetched"],
+	];
+	function toolLook(name) {
+		const hit = TOOL_LOOK.find(([re]) => re.test(name || ""));
+		if (hit) return { icon: hit[1], verb: hit[2], known: true };
+		const pretty = String(name || "tool").replace(/^mcp__/, "").replace(/[_-]+/g, " ");
+		return { icon: "bolt", verb: pretty.charAt(0).toUpperCase() + pretty.slice(1), known: false };
+	}
+	function setState(card, state) {
+		const st = card.querySelector(".tstate");
+		st.className = `tstate ${state}`;
+		st.replaceChildren();
+		if (state === "ok") st.appendChild(icon("check"));
+		else if (state === "err") st.appendChild(icon("x"));
+		st.setAttribute("aria-label", state === "run" ? "running" : state === "err" ? "failed" : state === "ok" ? "done" : "");
+		card.classList.toggle("running", state === "run");
+		card.classList.toggle("err", state === "err");
+	}
+	function stateOf(card) {
+		const c = card.querySelector(".tstate")?.classList;
+		return c?.contains("run") ? "run" : c?.contains("err") ? "err" : c?.contains("ok") ? "ok" : "";
 	}
 
 	function toolCard(id, name, title, args) {
@@ -517,29 +600,33 @@
 		if (existing && !existing.closest("#transcript")) existing.remove();
 		const d = el("details", "tool");
 		d.id = `t-${id}`;
+		const look = toolLook(name);
 		const s = el("summary");
-		s.append(el("span", "tname", name), el("span", "ttitle", title || ""), el("span", "tstate"));
+		const ti = el("span", "ticon");
+		ti.appendChild(icon(look.icon));
+		s.append(ti, el("span", "tname", look.verb), el("span", "ttitle", title || ""), el("span", "tstate"));
 		const body = el("div", "tbody");
-		if (args) {
-			body.appendChild(el("div", "label", "input"));
-			body.appendChild(el("pre", "out", args));
+		// Known tools say everything in their title; show raw arguments only for the others.
+		if (args && !(look.known && title)) {
+			const more = el("details", "args");
+			more.append(el("summary", "", "Arguments"), scrollBox(el("pre", "out", args)));
+			body.appendChild(more);
 		}
 		d.append(s, body);
 		return d;
 	}
 
 	function fillToolResult(card, item) {
-		card.querySelector(".tstate").className = `tstate ${item.isError ? "err" : "ok"}`;
-		card.classList.toggle("err", item.isError);
+		setState(card, item.isError ? "err" : "ok");
 		const body = card.querySelector(".tbody");
 		body.querySelectorAll(".result").forEach((n) => n.remove());
 		const box = el("div", "result");
 		if (item.diff) {
-			box.appendChild(el("div", "label", "diff"));
+			box.appendChild(el("div", "label", "Changes"));
 			box.appendChild(diffNode(item.diff));
 		} else {
-			box.appendChild(el("div", "label", item.isError ? "error" : "output"));
-			box.appendChild(el("pre", "out", item.output || "(no output)"));
+			box.appendChild(el("div", "label", item.isError ? "Error" : "Output"));
+			box.appendChild(scrollBox(el("pre", "out", item.output || "(no output)")));
 			if (item.truncated) {
 				const more = el("button", "more", "Show full output");
 				more.onclick = async () => {
@@ -573,8 +660,7 @@
 			const id = res.id.slice(2);
 			const card = document.getElementById(`t-${id}`);
 			if (!card || card === res || !card.closest("#transcript")) continue;
-			card.querySelector(".tstate").className = res.querySelector(".tstate").className;
-			card.classList.toggle("err", res.classList.contains("err"));
+			setState(card, stateOf(res));
 			const result = res.querySelector(".result");
 			if (result) {
 				card.querySelectorAll(".result").forEach((n) => n.remove());
@@ -585,7 +671,7 @@
 	}
 
 	function diffNode(text) {
-		const pre = el("pre", "out diff");
+		const pre = scrollBox(el("pre", "out diff"));
 		for (const line of text.split("\n")) {
 			const c = line[0];
 			const span = el("span", c === "+" ? "a" : c === "-" ? "d" : c === "@" ? "h" : "", line || " ");
@@ -605,7 +691,7 @@
 			card = toolCard(id, name, title, "");
 			$("liveTools").appendChild(card);
 		}
-		card.querySelector(".tstate").className = "tstate run";
+		setState(card, "run");
 		if (output) toolUpdate(id, output);
 	}
 	function toolUpdate(id, output) {
@@ -613,7 +699,7 @@
 		if (!card) return;
 		let live = card.querySelector(".live");
 		if (!live) {
-			live = el("pre", "out live");
+			live = scrollBox(el("pre", "out live"));
 			card.querySelector(".tbody").appendChild(live);
 			card.open = true;
 		}
@@ -623,7 +709,7 @@
 	function toolEnd(id, isError) {
 		const card = document.getElementById(`t-${id}`);
 		if (!card) return;
-		card.querySelector(".tstate").className = `tstate ${isError ? "err" : "ok"}`;
+		setState(card, isError ? "err" : "ok");
 		card.querySelector(".live")?.remove();
 		card.open = isError;
 		if (card.parentElement === $("liveTools")) $("transcript").appendChild(card);
@@ -647,12 +733,12 @@
 		for (const [i, b] of s.blocks.entries()) {
 			if (!b) continue;
 			if (b.t === "text") node.appendChild(mdNode(b.text));
-			else if (b.t === "thinking") {
-				const d = el("details", "thinking");
-				d.open = false;
-				d.append(el("summary", "", "Thinking…"));
-				node.appendChild(d);
-			} else node.appendChild(toolCard(`stream-${s.key}-${i}`, b.name || "tool", "", b.text.slice(-1500)));
+			else if (b.t === "thinking") node.appendChild(thinkingNode("", true));
+			else {
+				const card = toolCard(`stream-${s.key}-${i}`, b.name || "tool", "", b.text.slice(-1500));
+				setState(card, "run");
+				node.appendChild(card);
+			}
 		}
 		node.lastElementChild?.classList.add("cursor");
 		if (!node.children.length) node.appendChild(el("div", "cursor"));
@@ -668,6 +754,7 @@
 	function mdNode(text) {
 		const div = el("div", "md");
 		div.innerHTML = md(String(text || ""));
+		for (const p of div.querySelectorAll("pre, table")) p.tabIndex = 0;
 		return div;
 	}
 	function inline(s) {
@@ -775,30 +862,70 @@
 		return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : p || "";
 	}
 
+	/** One line under the session name that says what is going on. */
+	function statusLine(info) {
+		const ask = [...(S.prompts.get(info.agent)?.values() || [])][0];
+		if (ask) return { text: `Needs you · ${ask.title}`, cls: "waiting" };
+		if (info.status === "waiting") return { text: "Needs you in the terminal", cls: "waiting" };
+		if (info.status === "working") return { text: `Working${info.since ? ` · ${elapsed(Date.now() - info.since)}` : ""}${info.queued ? " · message queued" : ""}`, cls: "working" };
+		const bits = [info.task || shortPath(info.cwd)];
+		if (info.context?.percent != null) bits.push(`${Math.round(info.context.percent)}% context`);
+		if (info.cost) bits.push(`$${info.cost.toFixed(2)}`);
+		return { text: bits.filter(Boolean).join(" · "), cls: "" };
+	}
+
+	function workLine(info) {
+		return `Working${info.since ? ` · ${elapsed(Date.now() - info.since)}` : ""}${info.queued ? " · message queued" : ""}`;
+	}
+
 	function setHeader() {
 		const info = S.agents.get(S.current);
 		const dot = $("statusDot");
+		$("menuBtn").hidden = !S.device;
+		$("voiceBtn").hidden = !S.device || !info;
+		const others = sortedAgents().filter((a) => a.agent !== S.current && urgency(a) === 0).length;
+		$("top").classList.toggle("bare", !S.device);
 		if (!info) {
 			$("sessionName").textContent = S.device ? (S.agents.size ? "Choose a session" : "pi mobile") : "pi mobile";
-			$("sessionSub").textContent = S.device?.host || "";
+			const sub = $("sessionSub");
+			sub.textContent = S.device?.host || "";
+			sub.className = "session-sub";
 			dot.className = "dot gone";
 			$("modelBtn").hidden = true;
+			$("sessionBtn").setAttribute("aria-label", "Sessions");
 			updateTitle();
 			return;
 		}
 		$("sessionName").textContent = info.name;
-		const ctx = info.context?.percent != null ? ` · ${Math.round(info.context.percent)}% ctx` : "";
-		const cost = info.cost ? ` · $${info.cost.toFixed(2)}` : "";
-		$("sessionSub").textContent = `${info.task || shortPath(info.cwd)}${ctx}${cost}`;
-		dot.className = `dot ${info.status}`;
+		const line = statusLine(info);
+		const sub = $("sessionSub");
+		sub.textContent = line.text;
+		sub.className = `session-sub ${line.cls}`;
+		dot.className = `dot ${line.cls === "waiting" ? "waiting" : info.status}`;
+		$("sessionBtn").setAttribute("aria-label", `${info.name}: ${line.text}. Switch session${others ? `, ${others} other${others > 1 ? "s" : ""} need you` : ""}`);
 		const mb = $("modelBtn");
 		if (info.model) {
-			mb.textContent = `${info.model.name || info.model.id}${info.model.reasoning && info.thinking ? ` · ${info.thinking}` : ""}`;
+			mb.innerHTML = `<span class="label">${esc(shortModel(info.model.name || info.model.id))}</span>`;
+			mb.setAttribute("aria-label", `Model ${info.model.name || info.model.id}${info.thinking ? `, thinking ${info.thinking}` : ""}. Change`);
 			mb.hidden = false;
 		} else mb.hidden = true;
 		updateComposer();
 		updateTitle();
 	}
+
+	function shortModel(name) {
+		return String(name).replace(/\s*\(.*\)\s*$/, "").replace(/^Claude\s+/, "");
+	}
+
+	// Elapsed times tick while something runs.
+	setInterval(() => {
+		const info = S.agents.get(S.current);
+		if (info?.status === "working") {
+			const line = statusLine(info);
+			$("sessionSub").textContent = line.text;
+			$("workText").textContent = workLine(info);
+		}
+	}, 1000);
 
 	function updateTitle() {
 		let waiting = 0;
@@ -819,7 +946,11 @@
 
 	function promptNode(p) {
 		const card = el("div", "prompt");
-		card.appendChild(el("div", "ptitle", p.title));
+		card.setAttribute("role", "group");
+		card.setAttribute("aria-label", `pi asks: ${p.title}`);
+		const eyebrow = el("div", "eyebrow");
+		eyebrow.append(icon("alert"), "pi asks");
+		card.append(eyebrow, el("div", "ptitle", p.title));
 		if (p.message) card.appendChild(el("div", "pmsg", p.message));
 		const canAct = S.device?.role === "control";
 		const answer = async (value, btn) => {
@@ -843,11 +974,12 @@
 		} else if (p.kind === "select") {
 			act.classList.add("col");
 			for (const o of p.options || []) {
-				const b = el("button", "", o);
+				const b = el("button");
+				b.append(el("span", "", o), icon("chev-right"));
 				b.onclick = () => answer(o);
 				act.appendChild(b);
 			}
-			const cancel = el("button", "", "Cancel");
+			const cancel = el("button", "ghost", "Cancel");
 			cancel.onclick = () => answer(undefined);
 			act.appendChild(cancel);
 		} else {
@@ -865,11 +997,13 @@
 			act.append(ok, cancel);
 		}
 		if (canAct) card.appendChild(act);
-		const foot = el("div", "pfoot", canAct ? "Also open in the terminal — first answer wins." : "Waiting for an answer (view-only device).");
+		const foot = el("div", "pfoot");
+		const footText = el("span", "", canAct ? "Also open in the terminal · first answer wins" : "Waiting for an answer · view-only device");
+		foot.append(icon("terminal"), footText);
 		if (p.expiresAt) {
 			const tick = () => {
 				const s = Math.max(0, Math.round((p.expiresAt - Date.now()) / 1000));
-				foot.textContent = `${canAct ? "First answer wins" : "View-only"} · times out in ${s}s`;
+				footText.textContent = `${canAct ? "First answer wins" : "View-only"} · times out in ${s}s`;
 				if (s > 0 && card.isConnected) setTimeout(tick, 1000);
 			};
 			tick();
@@ -883,13 +1017,18 @@
 		const info = S.agents.get(S.current);
 		$("composer").hidden = !S.device || !control || !info;
 		$("viewOnly").hidden = !S.device || control || !info;
-		const busy = info && info.status !== "idle";
-		$("stopBtn").hidden = !busy || info.status === "waiting";
-		$("modeBtn").hidden = !busy;
-		$("modeBtn").textContent = S.mode === "followUp" ? "queue" : "steer";
-		$("modeBtn").classList.toggle("queue", S.mode === "followUp");
-		$("input").placeholder = busy ? (S.mode === "followUp" ? "Queue a follow-up…" : "Steer pi…") : "Message pi…";
+		const working = info?.status === "working" && !(S.prompts.get(S.current)?.size > 0);
+		$("workBar").hidden = !working;
+		if (working) $("workText").textContent = workLine(info);
+		$("modeSteer").setAttribute("aria-pressed", String(S.mode !== "followUp"));
+		$("modeQueue").setAttribute("aria-pressed", String(S.mode === "followUp"));
+		$("input").placeholder = working ? (S.mode === "followUp" ? "Queue a follow-up" : "Steer pi") : info ? `Message ${info.name}` : "Message pi";
 		$("sendBtn").disabled = !S.online;
+		updateSend();
+	}
+
+	function updateSend() {
+		$("sendBtn").classList.toggle("ready", !!($("input").value.trim() || S.attachments.length));
 	}
 
 	function autosize() {
@@ -910,6 +1049,7 @@
 			S.attachments = [];
 			renderAttachments();
 			autosize();
+			updateSend();
 			hideSuggest();
 			if (r.delivered === "steer") toast("Steering message queued");
 			else if (r.delivered === "followUp") toast("Follow-up queued");
@@ -960,7 +1100,8 @@
 				const w = el("div", "att");
 				const img = el("img");
 				img.src = a.preview;
-				const x = el("button", "", "×");
+				const x = el("button");
+				x.appendChild(icon("x"));
 				x.setAttribute("aria-label", "Remove image");
 				x.onclick = () => {
 					S.attachments.splice(i, 1);
@@ -971,6 +1112,7 @@
 			}),
 		);
 		box.hidden = !S.attachments.length;
+		updateSend();
 	}
 
 	// ── slash command suggestions ──────────────────────────────────────────────────
@@ -991,6 +1133,7 @@
 		box.replaceChildren(
 			...hits.map((c) => {
 				const b = el("button");
+				b.setAttribute("role", "option");
 				b.append(el("span", "cmd", `/${c.name}`), el("span", "desc", c.description));
 				b.onclick = () => {
 					$("input").value = `/${c.name} `;
@@ -1007,54 +1150,121 @@
 	}
 
 	// ── sheets ─────────────────────────────────────────────────────────────────────
-	function openSheet(build) {
+	let sheetOpener = null;
+	/** Bottom sheet. `head` gives it a title (and subtitle) with a close button. */
+	function openSheet(build, head) {
 		const body = $("sheetBody");
 		body.replaceChildren();
+		if (head) {
+			const h = el("div", "sheet-head");
+			const g = el("div", "grow");
+			const t = el("h2", "", head.title);
+			t.id = "sheetTitle";
+			g.appendChild(t);
+			if (head.subtitle) g.appendChild(el("div", "subtitle", head.subtitle));
+			const x = el("button", "sheet-close");
+			x.setAttribute("aria-label", "Close");
+			x.appendChild(icon("x"));
+			x.onclick = closeSheet;
+			h.append(g, x);
+			body.appendChild(h);
+		}
 		build(body);
+		const panel = $("sheet").querySelector(".sheet-panel");
+		if (head) panel.setAttribute("aria-labelledby", "sheetTitle");
+		else panel.removeAttribute("aria-labelledby");
+		if ($("sheet").hidden) sheetOpener = document.activeElement;
 		$("sheet").hidden = false;
+		panel.scrollTop = 0;
+		(panel.querySelector(".row, .btn, input, button:not(.sheet-close)") || panel.querySelector("button"))?.focus({ preventScroll: true });
 	}
 	function closeSheet() {
+		if ($("sheet").hidden) return;
 		$("sheet").hidden = true;
+		sheetOpener?.focus?.({ preventScroll: true });
+		sheetOpener = null;
+	}
+	function group(parent) {
+		const g = el("div", "group");
+		parent.appendChild(g);
+		return g;
+	}
+	function section(parent, text, count) {
+		const s = el("div", "section", text);
+		if (count) s.appendChild(el("span", "count", `· ${count}`));
+		parent.appendChild(s);
+	}
+	/** A list row: leading icon, title, optional subtitle, trailing element. */
+	function row(g, { lead, title, sub, extra, trail, cls = "", onclick, label }) {
+		const r = el("button", `row ${cls}`.trim());
+		if (lead) r.appendChild(typeof lead === "string" ? icon(lead) : lead);
+		const t = el("span", "grow");
+		t.appendChild(el("span", "title", title));
+		if (sub) t.appendChild(el("span", "sub", sub));
+		if (extra) t.appendChild(extra);
+		r.appendChild(t);
+		if (trail) r.appendChild(trail);
+		if (label) r.setAttribute("aria-label", label);
+		r.onclick = onclick;
+		g.appendChild(r);
+		return r;
 	}
 
 	function sessionsSheet() {
-		openSheet((body) => {
-			body.appendChild(el("h3", "", `Sessions on ${S.device?.host || "this computer"}`));
-			if (!S.agents.size) body.appendChild(el("p", "note", "No pi session is sharing right now. Run /remote in pi."));
-			for (const a of sortedAgents()) {
-				const row = el("button", `row${a.agent === S.current ? " active" : ""}`);
-				const asks = [...(S.prompts.get(a.agent)?.values() || [])];
-				const waiting = asks.length;
-				const g = el("span", "grow");
-				g.append(el("span", "", a.name), el("span", "sub", a.task || shortPath(a.cwd)));
-				if (asks.length) g.appendChild(el("span", "ask", `asks: ${asks[0].title}`));
-				else if (a.status === "waiting") g.appendChild(el("span", "ask", "needs input in the terminal"));
-				else if (a.last) g.appendChild(el("span", "last", a.last));
-				row.append(el("span", `dot ${a.status}`), g);
-				if (waiting) row.appendChild(el("span", "badge", String(waiting)));
-				row.onclick = () => {
-					closeSheet();
-					if (a.agent !== S.current) {
-						S.current = a.agent;
-						loadCurrent();
+		const all = sortedAgents();
+		openSheet(
+			(body) => {
+				if (!all.length) body.appendChild(el("p", "note", "No pi session is shared right now. Run /remote in pi on your computer."));
+				const buckets = [
+					["Needs you", all.filter((a) => urgency(a) === 0)],
+					["Working", all.filter((a) => urgency(a) === 1)],
+					["Idle", all.filter((a) => urgency(a) === 2)],
+				];
+				for (const [name, list] of buckets) {
+					if (!list.length) continue;
+					section(body, name, list.length);
+					const g = group(body);
+					for (const a of list) {
+						const asks = [...(S.prompts.get(a.agent)?.values() || [])];
+						let extra;
+						if (asks.length) extra = el("span", "ask", asks[0].title);
+						else if (a.status === "waiting") extra = el("span", "ask", "Waiting for input in the terminal");
+						else if (a.last) extra = el("span", "last", a.last);
+						const trail = el("span", "");
+						trail.style.display = "contents";
+						if (asks.length) trail.appendChild(el("span", "badge", String(asks.length)));
+						trail.appendChild(a.agent === S.current ? icon("check", "check") : icon("chev-right", "trail"));
+						row(g, {
+							lead: el("span", `lead dot ${a.status}`),
+							title: a.name,
+							sub: a.task || shortPath(a.cwd),
+							extra,
+							trail,
+							cls: a.agent === S.current ? "current" : "",
+							label: `${a.name}, ${name.toLowerCase()}${a.task ? `: ${a.task}` : ""}`,
+							onclick: () => {
+								closeSheet();
+								openAgent(a.agent);
+							},
+						});
 					}
-				};
-				body.appendChild(row);
-			}
-			const starter = [...S.agents.values()].find((a) => a.herdr);
-			if (starter && S.device?.role === "control") {
-				const add = el("button", "row", "＋ New session…");
-				add.onclick = () => newSessionSheet(starter.agent);
-				body.appendChild(add);
-			}
-		});
+				}
+				const starter = all.find((a) => a.herdr);
+				if (starter && S.device?.role === "control") {
+					const add = el("button", "btn");
+					add.append(icon("plus"), "New session");
+					add.onclick = () => newSessionSheet(starter.agent);
+					body.appendChild(add);
+				}
+			},
+			{ title: "Sessions", subtitle: `On ${S.device?.host || "your computer"}` },
+		);
 	}
 
 	/** Starts pi in a herdr tab on this computer: pick a folder, optionally give it a first prompt. */
 	function newSessionSheet(starter) {
 		const folders = [...new Set([...S.agents.values()].map((a) => a.cwd))].sort();
 		openSheet((body) => {
-			body.appendChild(el("h3", "", "New session"));
 			const folder = el("input");
 			folder.value = S.agents.get(S.current)?.cwd || folders[0] || "";
 			folder.placeholder = "/path/to/project";
@@ -1068,8 +1278,8 @@
 			}
 			const prompt = el("textarea");
 			prompt.rows = 3;
-			prompt.placeholder = "First prompt (optional)";
-			const go = el("button", "row primary", "Start pi");
+			prompt.placeholder = "What should pi do? (optional)";
+			const go = el("button", "btn primary", "Start pi");
 			go.onclick = async () => {
 				go.disabled = true;
 				const spawnId = Math.random().toString(36).slice(2, 10);
@@ -1084,13 +1294,17 @@
 					toast(e.message, "error");
 				}
 			};
-			body.append(el("p", "note", "Opens a new herdr tab in that folder."), folder, list, prompt, go);
-		});
+			const f1 = el("label", "field");
+			f1.append(el("span", "", "Folder"), folder, list);
+			const f2 = el("label", "field");
+			f2.append(el("span", "", "First prompt"), prompt);
+			body.append(f1, f2, go);
+		}, { title: "New session", subtitle: "Starts pi in a new herdr tab on your computer" });
 	}
 
 	async function modelSheet() {
 		if (S.device?.role !== "control") return;
-		openSheet((body) => body.appendChild(el("p", "note", "Loading models…")));
+		openSheet((body) => body.appendChild(el("p", "note", "Loading models…")), { title: "Model" });
 		try {
 			S.models = await call("models");
 		} catch (e) {
@@ -1101,10 +1315,13 @@
 		const info = S.agents.get(S.current);
 		openSheet((body) => {
 			if (info?.model?.reasoning) {
-				body.appendChild(el("h3", "", "Thinking"));
-				const lv = el("div", "levels");
+				section(body, "Thinking");
+				const lv = el("div", "chips");
+				lv.setAttribute("role", "group");
+				lv.setAttribute("aria-label", "Thinking level");
 				for (const l of m.levels) {
-					const b = el("button", l === m.thinking ? "active" : "", l);
+					const b = el("button", "", l);
+					b.setAttribute("aria-pressed", String(l === m.thinking));
 					b.onclick = async () => {
 						try {
 							await call("setThinking", { level: l });
@@ -1117,36 +1334,38 @@
 				}
 				body.appendChild(lv);
 			}
-			body.appendChild(el("h3", "", "Model"));
+			section(body, "Model");
+			const g = group(body);
 			for (const x of m.models) {
 				const active = m.current && x.provider === m.current.provider && x.id === m.current.id;
-				const row = el("button", `row${active ? " active" : ""}`);
-				const g = el("span", "grow");
-				g.append(el("span", "", x.name), el("span", "sub", `${x.provider}/${x.id}`));
-				row.appendChild(g);
-				row.onclick = async () => {
-					try {
-						await call("setModel", { provider: x.provider, id: x.id });
-						closeSheet();
-						toast(`Model: ${x.name}`);
-					} catch (e) {
-						toast(e.message, "error");
-					}
-				};
-				body.appendChild(row);
+				row(g, {
+					title: x.name,
+					sub: `${x.provider} · ${x.id}`,
+					cls: `plain${active ? " current" : ""}`,
+					trail: active ? icon("check", "check") : undefined,
+					label: `${x.name}${active ? ", current" : ""}`,
+					onclick: async () => {
+						try {
+							await call("setModel", { provider: x.provider, id: x.id });
+							closeSheet();
+							toast(`Switched to ${x.name}`);
+						} catch (e) {
+							toast(e.message, "error");
+						}
+					},
+				});
 			}
-		});
+		}, { title: "Model", subtitle: info?.name });
 	}
 
 	function menuSheet() {
 		openSheet((body) => {
 			const control = S.device?.role === "control";
-			const add = (label, fn, cls = "") => {
-				const b = el("button", `row ${cls}`, label);
-				b.onclick = fn;
-				body.appendChild(b);
-			};
-			body.appendChild(el("h3", "", "Session"));
+			let g;
+			const add = (label, fn, cls = "", lead = "chev-right", sub) => row(g, { lead, title: label, sub, cls, onclick: fn });
+			const info = S.agents.get(S.current);
+			section(body, info ? `Session · ${info.name}` : "Session");
+			g = group(body);
 			if (control && S.current) {
 				add("Compact context", async () => {
 					closeSheet();
@@ -1156,24 +1375,33 @@
 					} catch (e) {
 						toast(e.message, "error");
 					}
-				});
+				}, "", "compact", "Summarise older messages to free context");
 			}
-			add("Reload transcript", () => {
-				closeSheet();
-				loadCurrent();
-			});
-			body.appendChild(el("h3", "", "Notifications"));
+			add(
+				"Reload transcript",
+				() => {
+					closeSheet();
+					loadCurrent();
+				},
+				"",
+				"refresh",
+			);
+			section(body, "Notifications");
 			if (!pushSupported()) {
 				body.appendChild(
-					el("p", "note", "Lock-screen notifications need this page on HTTPS (in pi: /remote settings → HTTPS address, e.g. your Tailscale Serve address). On iPhone, also add it to the Home Screen first."),
+					el("p", "note", "Lock-screen notifications need this page on HTTPS: in pi, /remote settings → HTTPS address (for example your Tailscale Serve address). On iPhone, add the page to your Home Screen first."),
 				);
-			} else if (S.push.on) add("Turn off notifications", () => setPush(false));
-			else add("Notify me when pi finishes or asks", () => setPush(true));
-			body.appendChild(el("h3", "", "Devices"));
+			} else {
+				g = group(body);
+				if (S.push.on) add("Turn off notifications", () => setPush(false), "", "bell", "You get one when pi finishes or asks");
+				else add("Turn on notifications", () => setPush(true), "", "bell", "When pi finishes or needs you");
+			}
+			section(body, "Devices");
+			g = group(body);
 			if (control) {
-				add("Pair another device…", () => pairSheet("control"));
-				add("Share view-only link…", () => pairSheet("view"));
-				add("Manage devices…", devicesSheet);
+				add("Pair another device", () => pairSheet("control"), "", "qr");
+				add("Share a view-only link", () => pairSheet("view"), "", "eye", "Watch, but not act");
+				add("Manage devices", devicesSheet, "", "phone");
 			}
 			add(
 				"Unpair this device",
@@ -1186,31 +1414,37 @@
 					unpaired("You unpaired this device");
 				},
 				"danger",
+				"logout",
 			);
-			body.appendChild(el("p", "note", `Connected to ${S.device?.host || "?"} · ${S.device?.role === "view" ? "view-only" : "full control"} · end-to-end encrypted`));
-		});
+			const note = el("p", "note");
+			note.append(icon("lock"), `End-to-end encrypted · ${S.device?.role === "view" ? "view-only" : "full control"}`);
+			body.appendChild(note);
+		}, { title: "pi mobile", subtitle: `Connected to ${S.device?.host || "your computer"}` });
 	}
 
 	async function pairSheet(role) {
 		try {
 			const r = await rpc("pair", { role });
 			const here = r.links.find((l) => l.url.startsWith(location.origin)) || r.links[0];
-			openSheet((body) => {
-				body.appendChild(el("h3", "", role === "view" ? "View-only link" : "Pair another device"));
-				body.appendChild(el("p", "note", "Single use, valid 10 minutes. Anyone with this link gets " + (role === "view" ? "read access." : "full control.")));
-				const pre = el("pre", "out", here.url);
-				pre.style.whiteSpace = "pre-wrap";
-				pre.style.wordBreak = "break-all";
-				body.appendChild(pre);
-				const actions = [];
-				if (navigator.share) actions.push(["Share…", () => navigator.share({ url: here.url }).catch(() => {})]);
-				if (navigator.clipboard) actions.push(["Copy", () => navigator.clipboard.writeText(here.url).then(() => toast("Copied"))]);
-				for (const [label, fn] of actions) {
-					const b = el("button", "row", label);
-					b.onclick = fn;
-					body.appendChild(b);
-				}
-			});
+			openSheet(
+				(body) => {
+					body.appendChild(el("p", "note", `Single use, valid for 10 minutes. Whoever opens it gets ${role === "view" ? "read-only access" : "full control"}.`));
+					body.appendChild(el("div", "linkbox", here.url));
+					if (navigator.share) {
+						const b = el("button", "btn primary");
+						b.append(icon("share"), "Share link");
+						b.onclick = () => navigator.share({ url: here.url }).catch(() => {});
+						body.appendChild(b);
+					}
+					if (navigator.clipboard) {
+						const b = el("button", "btn");
+						b.append(icon("copy"), "Copy link");
+						b.onclick = () => navigator.clipboard.writeText(here.url).then(() => toast("Link copied"));
+						body.appendChild(b);
+					}
+				},
+				{ title: role === "view" ? "View-only link" : "Pair another device" },
+			);
 		} catch (e) {
 			toast(e.message, "error");
 		}
@@ -1219,23 +1453,30 @@
 	async function devicesSheet() {
 		try {
 			const list = await rpc("devices");
-			openSheet((body) => {
-				body.appendChild(el("h3", "", "Paired devices"));
-				for (const d of list) {
-					const row = el("button", "row");
-					const g = el("span", "grow");
-					const seen = d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : "never";
-					g.append(el("span", "", `${d.name}${d.id === S.device.d ? " (this)" : ""}`), el("span", "sub", `${d.role} · last seen ${seen}`));
-					row.append(g, el("span", "danger", "Revoke"));
-					row.onclick = async () => {
-						if (!confirm(`Revoke ${d.name}?`)) return;
-						await rpc("revoke", { ids: [d.id] }).catch((e) => toast(e.message, "error"));
-						if (d.id === S.device.d) return unpaired("You revoked this device");
-						devicesSheet();
-					};
-					body.appendChild(row);
-				}
-			});
+			openSheet(
+				(body) => {
+					const g = group(body);
+					for (const d of list) {
+						const seen = d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "never";
+						const trail = el("span", "ask", "Revoke");
+						trail.style.color = "var(--err)";
+						row(g, {
+							lead: d.role === "view" ? "eye" : "phone",
+							title: `${d.name}${d.id === S.device.d ? " · this device" : ""}`,
+							sub: `${d.role === "view" ? "View-only" : "Full control"} · last seen ${seen}`,
+							trail,
+							label: `Revoke ${d.name}`,
+							onclick: async () => {
+								if (!confirm(`Revoke ${d.name}? It loses access immediately.`)) return;
+								await rpc("revoke", { ids: [d.id] }).catch((e) => toast(e.message, "error"));
+								if (d.id === S.device.d) return unpaired("You revoked this device");
+								devicesSheet();
+							},
+						});
+					}
+				},
+				{ title: "Devices", subtitle: `Paired with ${S.device?.host || "your computer"}` },
+			);
 		} catch (e) {
 			toast(e.message, "error");
 		}
@@ -1253,6 +1494,7 @@
 	function renderAttention() {
 		const others = sortedAgents().filter((a) => a.agent !== S.current && urgency(a) === 0);
 		const pill = $("attention");
+		$("onboard").classList.toggle("deferred", others.length > 0);
 		if (!others.length) {
 			pill.hidden = true;
 			return;
@@ -1260,7 +1502,11 @@
 		const first = others[0];
 		const ask = [...(S.prompts.get(first.agent)?.values() || [])][0];
 		const what = ask ? `asks: ${ask.title}` : "needs you";
-		pill.textContent = others.length === 1 ? `⚠ ${first.name} ${what}` : `⚠ ${others.length} sessions need you — ${first.name} ${what}`;
+		const text = el("span", "grow");
+		const b = el("b", "", first.name);
+		text.append(others.length > 1 ? `${others.length} sessions need you · ` : "", b, ` ${what}`);
+		pill.replaceChildren(icon("alert"), text, icon("chev-right", "chev"));
+		pill.setAttribute("aria-label", others.length === 1 ? `${first.name} ${what}. Open` : `${others.length} sessions need you. Show them`);
 		pill.onclick = () => (others.length === 1 ? openAgent(first.agent) : sessionsSheet());
 		pill.hidden = false;
 	}
@@ -1322,7 +1568,10 @@
 
 	// ── misc ───────────────────────────────────────────────────────────────────────
 	function toast(text, level = "info") {
-		const t = el("div", `toast ${level}`, text);
+		const t = el("div", `toast ${level}`);
+		if (level !== "info") t.appendChild(icon(level === "error" ? "alert" : "alert"));
+		t.appendChild(el("span", "", text));
+		t.setAttribute("role", level === "error" ? "alert" : "status");
 		$("toasts").appendChild(t);
 		setTimeout(() => t.remove(), level === "error" ? 6000 : 3000);
 	}
@@ -1358,14 +1607,23 @@
 				toast(e.message, "error");
 			}
 		};
-		$("modeBtn").onclick = () => {
-			S.mode = S.mode === "followUp" ? "steer" : "followUp";
-			store.set(MODE_KEY, S.mode);
-			updateComposer();
-		};
+		for (const [id, mode] of [
+			["modeSteer", "steer"],
+			["modeQueue", "followUp"],
+		]) {
+			$(id).onclick = () => {
+				S.mode = mode;
+				store.set(MODE_KEY, S.mode);
+				updateComposer();
+			};
+		}
+		document.addEventListener("keydown", (e) => {
+			if (e.key === "Escape" && !$("sheet").hidden) closeSheet();
+		});
 		const input = $("input");
 		input.addEventListener("input", () => {
 			autosize();
+			updateSend();
 			suggest();
 		});
 		input.addEventListener("keydown", (e) => {
@@ -1383,6 +1641,7 @@
 				addFiles(files);
 			}
 		});
+		$("attachBtn").onclick = () => $("fileInput").click();
 		$("fileInput").onchange = (e) => {
 			addFiles([...e.target.files]);
 			e.target.value = "";
@@ -1404,7 +1663,7 @@
 		const paired = await pairFromHash();
 		if (paired === "failed") return;
 		if (!S.device) return unpaired();
-		showEmpty("<p>Connecting…</p>");
+		showEmpty(`<span class="spinner" aria-hidden="true"></span><p>Connecting to ${esc(S.device.host || "your computer")}…</p>`);
 		S.current = store.get(AGENT_KEY);
 		setHeader();
 		streamLoop();
@@ -1419,6 +1678,8 @@
 		agentName,
 		openAgent,
 		autosize,
+		openSheet,
+		sessionsSheet,
 		input: () => $("input"),
 	};
 

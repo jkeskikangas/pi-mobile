@@ -188,6 +188,7 @@ export class Bridge {
 			last,
 			herdr: inHerdr() || undefined,
 			spawn: process.env.PI_MOBILE_SPAWN || undefined,
+			since: this.status === "working" && this.runStartedAt ? this.runStartedAt : undefined,
 		};
 	}
 

@@ -27,6 +27,8 @@ export interface AgentInfo {
 	herdr?: boolean;
 	/** Set on a session the phone asked herdr to start, so the phone can open it. */
 	spawn?: string;
+	/** When the current run started (ms epoch), for "Working · 0:42". */
+	since?: number;
 }
 
 export type Block =
