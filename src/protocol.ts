@@ -23,6 +23,10 @@ export interface AgentInfo {
 	queued?: boolean;
 	/** First line of the latest assistant text, for the phone's session list. */
 	last?: string;
+	/** This pi runs inside herdr, so it can start new sessions for the phone. */
+	herdr?: boolean;
+	/** Set on a session the phone asked herdr to start, so the phone can open it. */
+	spawn?: string;
 }
 
 export type Block =

@@ -348,6 +348,11 @@
 		const agent = ev.agent;
 		if (ev.type === "info") {
 			S.agents.set(agent, ev.info);
+			// A session this phone asked herdr to start has arrived: open it.
+			if (S.spawning && ev.info.spawn === S.spawning) {
+				S.spawning = null;
+				openAgent(agent);
+			}
 			if (!S.current) {
 				S.current = agent;
 				loadCurrent();
@@ -1035,6 +1040,50 @@
 				};
 				body.appendChild(row);
 			}
+			const starter = [...S.agents.values()].find((a) => a.herdr);
+			if (starter && S.device?.role === "control") {
+				const add = el("button", "row", "＋ New session…");
+				add.onclick = () => newSessionSheet(starter.agent);
+				body.appendChild(add);
+			}
+		});
+	}
+
+	/** Starts pi in a herdr tab on this computer: pick a folder, optionally give it a first prompt. */
+	function newSessionSheet(starter) {
+		const folders = [...new Set([...S.agents.values()].map((a) => a.cwd))].sort();
+		openSheet((body) => {
+			body.appendChild(el("h3", "", "New session"));
+			const folder = el("input");
+			folder.value = S.agents.get(S.current)?.cwd || folders[0] || "";
+			folder.placeholder = "/path/to/project";
+			folder.setAttribute("list", "folders");
+			const list = el("datalist");
+			list.id = "folders";
+			for (const f of folders) {
+				const o = el("option");
+				o.value = f;
+				list.appendChild(o);
+			}
+			const prompt = el("textarea");
+			prompt.rows = 3;
+			prompt.placeholder = "First prompt (optional)";
+			const go = el("button", "row primary", "Start pi");
+			go.onclick = async () => {
+				go.disabled = true;
+				const spawnId = Math.random().toString(36).slice(2, 10);
+				try {
+					S.spawning = spawnId;
+					await call("spawn", { cwd: folder.value.trim(), prompt: prompt.value, spawnId }, starter);
+					closeSheet();
+					toast("Starting pi…");
+				} catch (e) {
+					S.spawning = null;
+					go.disabled = false;
+					toast(e.message, "error");
+				}
+			};
+			body.append(el("p", "note", "Opens a new herdr tab in that folder."), folder, list, prompt, go);
 		});
 	}
 

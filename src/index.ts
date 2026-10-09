@@ -14,6 +14,7 @@ import { unwatchFile, watchFile } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Bridge } from "./bridge.ts";
+import { registerHerdrBlocked } from "./herdr.ts";
 import { closeProcessHub, type LinkState } from "./link.ts";
 import type { AgentInfo } from "./protocol.ts";
 import { qrLines } from "./qr.ts";
@@ -47,9 +48,11 @@ export default function piMobile(pi: ExtensionAPI): void {
 	let ctx: ExtensionContext | undefined;
 	let closePanel: (() => void) | undefined;
 	let watching = false;
+	let offInput: (() => void) | undefined;
 	const g = globalThis as G;
 
 	pi.registerFlag("remote", { type: "boolean", description: "Share this session with your phone (pi-mobile)" });
+	registerHerdrBlocked(pi);
 
 	const footer = (s: LinkState | undefined) => {
 		if (!ctx?.hasUI) return;
@@ -103,6 +106,15 @@ export default function piMobile(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_e, c) => {
 		ctx = c;
 		sync();
+		// Keystrokes here mean you are at the computer; the hub holds phone notifications meanwhile.
+		offInput?.();
+		offInput =
+			c.mode === "tui"
+				? c.ui.onTerminalInput(() => {
+						bridge?.presence();
+						return undefined;
+					})
+				: undefined;
 		if (!watching) {
 			// `/remote` or `/remote off` in another terminal flips the machine switch; follow it.
 			watching = true;
@@ -111,6 +123,8 @@ export default function piMobile(pi: ExtensionAPI): void {
 	});
 	pi.on("session_shutdown", async (e) => {
 		stop();
+		offInput?.();
+		offInput = undefined;
 		if (watching) unwatchFile(configPath(), sync);
 		watching = false;
 		if (e.reason === "quit") closeProcessHub();

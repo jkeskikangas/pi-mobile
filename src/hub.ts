@@ -26,6 +26,8 @@ const WEB_DIR = fileURLToPath(new URL("../web/", import.meta.url));
 const NACL_JS = createRequire(import.meta.url).resolve("tweetnacl/nacl-fast.min.js");
 // Shared by all sessions; at ten busy agents this still covers a few minutes of reconnect gap.
 const RING = 20_000;
+/** No lock-screen pushes while someone typed into a pi terminal on this machine this recently. */
+const PRESENCE_MS = 2 * 60_000;
 /** Events every phone gets about every session; the rest only for the session it is looking at. */
 const GLOBAL_EVENTS = new Set(["info", "gone", "prompt", "prompt_end"]);
 const MAX_BODY = 25 * 1024 * 1024;
@@ -100,6 +102,7 @@ export class Hub {
 	private heartbeat?: NodeJS.Timeout;
 	private idleTimer?: NodeJS.Timeout;
 	private closed = false;
+	private lastPresence = 0;
 	private readonly opts: HubOptions;
 
 	constructor(opts: HubOptions) {
@@ -240,6 +243,8 @@ export class Hub {
 				clearTimeout(this.idleTimer);
 				ch.send({ t: "welcome", hubId: this.id, pid: process.pid, endpoints: this.endpoints(), clients: this.clientSummary() });
 				this.publish(agentId, { type: "info", info: msg.info });
+			} else if (msg.t === "presence") {
+				this.lastPresence = Date.now();
 			} else if (msg.t === "attention" && agentId) {
 				void this.attention(agentId, msg);
 			} else if (msg.t === "ev" && agentId) {
@@ -315,6 +320,7 @@ export class Hub {
 	 * (RFC 8291), so the push service sees neither the session name nor the text.
 	 */
 	private async attention(agent: string, msg: { title?: string; body?: string; urgent?: boolean }): Promise<void> {
+		if (Date.now() - this.lastPresence < PRESENCE_MS) return; // you are at a terminal here
 		const payload = { title: String(msg.title ?? "pi"), body: String(msg.body ?? ""), agent };
 		await Promise.all(
 			this.push.entries().map(async ([id, sub]) => {

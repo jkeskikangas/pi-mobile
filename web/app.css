@@ -170,6 +170,8 @@ textarea#input:focus { border-color: var(--accent); }
 .sheet .levels button.active { background: var(--accent); color: var(--accent-text); }
 .sheet .danger { color: var(--err); }
 .sheet .note { font-size: 13px; color: var(--muted); margin: 6px 0 12px; }
+.sheet input, .sheet textarea { display: block; width: 100%; font: inherit; padding: 9px 10px; margin: 0 0 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); resize: vertical; }
+.sheet button.row.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); justify-content: center; font-weight: 600; }
 
 .toasts { position: fixed; left: 0; right: 0; top: calc(64px + var(--safe-t)); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; z-index: 20; padding: 0 12px; }
 .toast { background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 12px; font-size: 14px; max-width: 100%; box-shadow: 0 4px 16px rgba(0,0,0,.2); white-space: pre-wrap; overflow-wrap: anywhere; animation: up .18s ease-out; }

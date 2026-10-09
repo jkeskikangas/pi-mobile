@@ -19,6 +19,7 @@ import {
 	toolTitle,
 } from "./protocol.ts";
 import type { Config } from "./store.ts";
+import { inHerdr, spawnPi } from "./herdr.ts";
 
 const AGENT_KEY = Symbol.for("pi-mobile.agent");
 const COUNTER_KEY = Symbol.for("pi-mobile.counter");
@@ -134,6 +135,16 @@ export class Bridge {
 		this.link.send({ t: "attention", title: `${short} ${event}`, body, urgent });
 	}
 
+	private lastPresence = 0;
+
+	/** You typed in this terminal: the hub holds phone notifications while you are at the computer. */
+	presence(): void {
+		const now = Date.now();
+		if (now - this.lastPresence < 15_000) return;
+		this.lastPresence = now;
+		this.link.send({ t: "presence" });
+	}
+
 	private emit(ev: AgentEvent): void {
 		this.link.send({ t: "ev", ev: { ...ev, n: eventCounter(true) } });
 	}
@@ -172,6 +183,8 @@ export class Bridge {
 			cost: Math.round(cost * 10000) / 10000,
 			queued: safe(() => ctx.hasPendingMessages()) ?? false,
 			last,
+			herdr: inHerdr() || undefined,
+			spawn: process.env.PI_MOBILE_SPAWN || undefined,
 		};
 	}
 
@@ -373,6 +386,8 @@ export class Bridge {
 			case "compact":
 				this.ctx.compact(p.instructions ? { customInstructions: String(p.instructions) } : undefined);
 				return { ok: true };
+			case "spawn":
+				return spawnPi({ cwd: String(p.cwd ?? ""), prompt: typeof p.prompt === "string" ? p.prompt : undefined, spawnId: String(p.spawnId ?? "") });
 			case "commands":
 				return this.pi
 					.getCommands()
