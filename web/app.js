@@ -167,7 +167,7 @@
 			const ctrl = new AbortController();
 			streamAbort = ctrl;
 			try {
-				const b = seal(S.key, { t: Date.now(), hub: S.hubId, since: S.seq });
+				const b = seal(S.key, { t: Date.now(), hub: S.hubId, since: S.seq, focus: S.current || undefined });
 				const res = await fetch(`api/stream?d=${encodeURIComponent(S.device.d)}&b=${b}`, { signal: ctrl.signal, cache: "no-store" });
 				if (res.status === 401) return unpaired("This device was revoked or the pairing was lost");
 				if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
@@ -219,6 +219,7 @@
 				const fresh = ev.resync;
 				S.hubId = ev.hubId;
 				S.seq = ev.seq;
+				S.clientId = ev.client;
 				setOnline(true);
 				if (fresh) await resync();
 				continue;
@@ -248,6 +249,7 @@
 			S.push = { key: hub.pushKey, on: !!hub.pushOn };
 			store.set(DEVICE_KEY, S.device);
 			if (!S.agents.has(S.current)) S.current = pickAgent();
+			maybeOnboard();
 			await loadCurrent();
 		} catch (e) {
 			if (e instanceof Unauthorized) return unpaired(e.message);
@@ -258,8 +260,7 @@
 	function pickAgent() {
 		const saved = store.get(AGENT_KEY);
 		if (saved && S.agents.has(saved)) return saved;
-		const all = [...S.agents.values()];
-		return (all.find((a) => a.status === "waiting") || all.find((a) => a.status === "working") || all[0] || {}).agent || null;
+		return sortedAgents()[0]?.agent || null;
 	}
 
 	// ── transcript model ───────────────────────────────────────────────────────────
@@ -276,6 +277,7 @@
 		$("olderBtn").hidden = true;
 		setHeader();
 		renderPrompts();
+		renderAttention();
 		if (!agent) {
 			showEmpty("<h2>No shared sessions</h2><p>Run <code>/remote</code> in a pi session on your computer.</p>");
 			updateComposer();
@@ -286,6 +288,8 @@
 		const view = newView(agent);
 		S.view = view;
 		try {
+			// Detailed events (token stream, tool output) flow only for the session on screen.
+			if (S.clientId) await rpc("focus", { client: S.clientId, agent });
 			const snap = await call("snapshot", { limit: 120 }, agent);
 			if (S.view !== view) return;
 			view.n = snap.n || 0;
@@ -350,6 +354,7 @@
 			}
 			if (agent === S.current) setHeader();
 			updateTitle();
+			renderAttention();
 			return;
 		}
 		if (ev.type === "gone") {
@@ -368,11 +373,11 @@
 			S.prompts.set(agent, map);
 			if (ev.type === "prompt") {
 				map.set(ev.prompt.id, ev.prompt);
-				if (agent !== S.current) toast(`${agentName(agent)} asks: ${ev.prompt.title}`, "warning");
 				navigator.vibrate?.(200);
 			} else map.delete(ev.id);
 			if (agent === S.current) renderPrompts(ev.type === "prompt_end" ? ev : undefined);
 			updateTitle();
+			renderAttention();
 			return;
 		}
 		if (agent !== S.current || !S.view) {
@@ -778,7 +783,7 @@
 		$("sessionName").textContent = info.name;
 		const ctx = info.context?.percent != null ? ` · ${Math.round(info.context.percent)}% ctx` : "";
 		const cost = info.cost ? ` · $${info.cost.toFixed(2)}` : "";
-		$("sessionSub").textContent = `${shortPath(info.cwd)}${ctx}${cost}`;
+		$("sessionSub").textContent = `${info.task || shortPath(info.cwd)}${ctx}${cost}`;
 		dot.className = `dot ${info.status}`;
 		const mb = $("modelBtn");
 		if (info.model) {
@@ -1010,11 +1015,15 @@
 		openSheet((body) => {
 			body.appendChild(el("h3", "", `Sessions on ${S.device?.host || "this computer"}`));
 			if (!S.agents.size) body.appendChild(el("p", "note", "No pi session is sharing right now. Run /remote in pi."));
-			for (const a of S.agents.values()) {
+			for (const a of sortedAgents()) {
 				const row = el("button", `row${a.agent === S.current ? " active" : ""}`);
-				const waiting = S.prompts.get(a.agent)?.size || 0;
+				const asks = [...(S.prompts.get(a.agent)?.values() || [])];
+				const waiting = asks.length;
 				const g = el("span", "grow");
-				g.append(el("span", "", a.name), el("span", "sub", `${shortPath(a.cwd)} · ${a.model?.name || a.model?.id || ""}`));
+				g.append(el("span", "", a.name), el("span", "sub", a.task || shortPath(a.cwd)));
+				if (asks.length) g.appendChild(el("span", "ask", `asks: ${asks[0].title}`));
+				else if (a.status === "waiting") g.appendChild(el("span", "ask", "needs input in the terminal"));
+				else if (a.last) g.appendChild(el("span", "last", a.last));
 				row.append(el("span", `dot ${a.status}`), g);
 				if (waiting) row.appendChild(el("span", "badge", String(waiting)));
 				row.onclick = () => {
@@ -1106,7 +1115,7 @@
 			body.appendChild(el("h3", "", "Notifications"));
 			if (!pushSupported()) {
 				body.appendChild(
-					el("p", "note", "Lock-screen notifications need this page on HTTPS (pi: /remote url <your Tailscale Serve address>, or /remote expose cloudflared). On iPhone, also add it to the Home Screen first."),
+					el("p", "note", "Lock-screen notifications need this page on HTTPS (in pi: /remote settings → HTTPS address, e.g. your Tailscale Serve address). On iPhone, also add it to the Home Screen first."),
 				);
 			} else if (S.push.on) add("Turn off notifications", () => setPush(false));
 			else add("Notify me when pi finishes or asks", () => setPush(true));
@@ -1180,6 +1189,51 @@
 		} catch (e) {
 			toast(e.message, "error");
 		}
+	}
+
+	// ── several sessions ───────────────────────────────────────────────────────────
+	function urgency(a) {
+		return S.prompts.get(a.agent)?.size || a.status === "waiting" ? 0 : a.status === "working" ? 1 : 2;
+	}
+	function sortedAgents() {
+		return [...S.agents.values()].sort((a, b) => urgency(a) - urgency(b));
+	}
+
+	/** A pill for other sessions that are waiting on you; tap to go there. */
+	function renderAttention() {
+		const others = sortedAgents().filter((a) => a.agent !== S.current && urgency(a) === 0);
+		const pill = $("attention");
+		if (!others.length) {
+			pill.hidden = true;
+			return;
+		}
+		const first = others[0];
+		const ask = [...(S.prompts.get(first.agent)?.values() || [])][0];
+		const what = ask ? `asks: ${ask.title}` : "needs you";
+		pill.textContent = others.length === 1 ? `⚠ ${first.name} ${what}` : `⚠ ${others.length} sessions need you — ${first.name} ${what}`;
+		pill.onclick = () => (others.length === 1 ? openAgent(first.agent) : sessionsSheet());
+		pill.hidden = false;
+	}
+
+	/** One-time offer, only where notifications can actually work. */
+	function maybeOnboard() {
+		const box = $("onboard");
+		box.hidden = !(
+			pushSupported() &&
+			S.device?.role === "control" &&
+			!S.push.on &&
+			Notification.permission !== "denied" &&
+			!store.get("pi-mobile-onboarded")
+		);
+		$("onboardYes").onclick = () => {
+			store.set("pi-mobile-onboarded", true);
+			box.hidden = true;
+			setPush(true);
+		};
+		$("onboardNo").onclick = () => {
+			store.set("pi-mobile-onboarded", true);
+			box.hidden = true;
+		};
 	}
 
 	// ── lock-screen notifications ─────────────────────────────────────────────────

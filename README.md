@@ -30,20 +30,29 @@ Or try it once: `pi -e ./src/index.ts --remote`.
 
 ## Use
 
+**On your computer**, in any pi session:
+
 ```
-/remote                  share this session and show a pairing QR code
-/remote view             QR code for a view-only device
-/remote stop             stop sharing this session
-/remote status           hub, addresses, connected phones, shared sessions
-/remote devices          paired devices;  /remote revoke <id|name|all>
-/remote auto on|off      share every pi session automatically
-/remote expose network|local|cloudflared
-/remote url <https://…|off>   HTTPS address in front of the hub (see below)
-/remote port <n>         default 7878
-/remote restart          restart the hub to apply port/exposure/url changes
+/remote
 ```
 
-`pi --remote` shares from startup. The footer shows `📱 remote on` / `📱 1 connected`. Anything sent from the phone is echoed in the terminal as `📱 <device>: …`.
+That's the whole setup. It connects **this machine**: every pi session on it, running or started later, appears on your phone within a couple of seconds. The first time, it shows a QR code. Scan it, the panel closes by itself, and your phone is paired for good. After that, `/remote` shows which sessions are shared and where to open them.
+
+```
+/remote pair [view]   pair another device (view-only: watch, cannot act)
+/remote off           stop sharing — this session only, or every session on the machine
+/remote devices       paired devices; pick one to revoke
+/remote settings      how phones reach this computer, HTTPS address, port
+```
+
+`pi --remote` shares a single session without turning on the machine switch.
+
+**On your phone**, open the paired address (add it to the Home Screen):
+
+- The session list is sorted by who needs you: asking a question, then working, then idle. Each row shows the session's task and latest reply.
+- When a session you are *not* looking at asks something, a pill appears at the top: "⚠ api asks: Allow file change?". Tap it to jump there and answer.
+- Only the session on screen streams its tokens and tool output to the phone. The others send status and questions, so ten busy agents cost little bandwidth or battery.
+- Anything you send from the phone is echoed in the terminal as `📱 <device>: …`.
 
 ### Lock-screen notifications
 
@@ -52,11 +61,10 @@ Browsers allow Web Push only on HTTPS pages. Put an HTTPS address in front of th
 ```bash
 tailscale serve --bg 7878                                  # private to your tailnet
 # then in pi:
-/remote url https://<machine>.<tailnet>.ts.net
-/remote restart
+/remote settings   → HTTPS address → https://<machine>.<tailnet>.ts.net
 ```
 
-Pair through that address, then choose **⋯ → Notify me when pi finishes or asks**. On iPhone, add the page to the Home Screen first (iOS 16.4+). `/remote expose cloudflared` also gives HTTPS, but its address changes whenever the hub restarts.
+Pair through that address. The app offers to turn notifications on; you can also find the option under **⋯**. On iPhone, add the page to the Home Screen first (iOS 16.4+). The "cloudflared" option in `/remote settings` also gives HTTPS, but its address changes whenever the hub restarts.
 
 ## Security model
 

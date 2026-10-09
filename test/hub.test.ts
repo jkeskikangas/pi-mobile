@@ -25,11 +25,11 @@ const info = (agent: string): AgentInfo => ({ agent, pid: 1, sessionId: "sess", 
 
 async function setup() {
 	const port = await freePort();
-	const hub = new Hub({ config: { port, expose: "local", autoStart: false }, secret: SECRET, devices: new DeviceStore(tmp()) });
+	const hub = new Hub({ config: { port, expose: "local", enabled: false }, secret: SECRET, devices: new DeviceStore(tmp()) });
 	await hub.listen();
 	const calls: any[] = [];
 	const link = new HubLink({
-		config: () => ({ port, expose: "local", autoStart: false }),
+		config: () => ({ port, expose: "local", enabled: false }),
 		secret: SECRET,
 		info: () => info("A"),
 		onRequest: (m, p) => {
@@ -70,7 +70,7 @@ test("pairing, encrypted rpc, routing to the linked pi, and streaming with repla
 		assert.equal((await phone.raw(body)).status, 200);
 		assert.equal((await phone.raw(body)).status, 401);
 
-		const hello = await phone.stream();
+		const hello = await phone.stream(undefined, "A");
 		assert.equal(hello.resync, true);
 		link.send({ t: "ev", ev: { type: "notice", level: "info", text: "one", n: 1 } });
 		const ev = await phone.waitFor((e) => e.type === "notice");
@@ -82,7 +82,7 @@ test("pairing, encrypted rpc, routing to the linked pi, and streaming with repla
 		await new Promise((r) => setTimeout(r, 50));
 		const replay = new Phone();
 		Object.assign(replay, { base: phone.base, d: phone.d, key: phone.key });
-		const hello2 = await replay.stream({ hub: hub.id, seq: ev.seq });
+		const hello2 = await replay.stream({ hub: hub.id, seq: ev.seq }, "A");
 		assert.equal(hello2.resync, false);
 		const missed = await replay.waitFor((e) => e.type === "notice" && e.text === "two");
 		assert.ok(missed.seq > ev.seq);
@@ -135,7 +135,7 @@ test("the agent link requires the local secret", async () => {
 
 test("pi processes elect a hub and fail over when its host goes away", async () => {
 	const port = await freePort();
-	const config = () => ({ port, expose: "local" as const, autoStart: false });
+	const config = () => ({ port, expose: "local" as const, enabled: false });
 	const a = new HubLink({ config, secret: SECRET, info: () => info("A"), onRequest: () => "a" });
 	const b = new HubLink({ config, secret: SECRET, info: () => info("B"), onRequest: () => "b" });
 	a.start();
@@ -146,6 +146,13 @@ test("pi processes elect a hub and fail over when its host goes away", async () 
 		assert.ok(first, "one of them hosts the hub");
 		const status = await a.request("status");
 		assert.deepEqual(status.agents.map((x: AgentInfo) => x.agent).sort(), ["A", "B"]);
+
+		// A pi that stops sharing disappears from the hub (no half-open ghost).
+		const c = new HubLink({ config, secret: SECRET, info: () => info("C"), onRequest: () => "c" });
+		c.start();
+		await until(() => c.linked);
+		c.stop();
+		await until(() => false === (first as any).agents.has("C"), 3000);
 
 		closeProcessHub(); // the hosting pi exits
 		await until(() => !a.linked || !b.linked, 2000).catch(() => {});
@@ -166,7 +173,7 @@ test("a port held by something else is reported, not hijacked", async () => {
 	await new Promise((r) => other.once("listening", r));
 	const states: string[] = [];
 	const link = new HubLink({
-		config: () => ({ port, expose: "local", autoStart: false }),
+		config: () => ({ port, expose: "local", enabled: false }),
 		secret: SECRET,
 		info: () => info("A"),
 		onRequest: () => null,
@@ -187,7 +194,7 @@ test("attention reaches subscribed devices as Web Push; dead and revoked subscri
 	const sent: { endpoint: string; payload: any; urgency: string }[] = [];
 	const push = new PushStore(dir);
 	const hub = new Hub({
-		config: { port, expose: "local", autoStart: false },
+		config: { port, expose: "local", enabled: false },
 		secret: SECRET,
 		devices: new DeviceStore(dir),
 		push,
@@ -197,7 +204,7 @@ test("attention reaches subscribed devices as Web Push; dead and revoked subscri
 		},
 	});
 	await hub.listen();
-	const link = new HubLink({ config: () => ({ port, expose: "local", autoStart: false }), secret: SECRET, info: () => info("A"), onRequest: () => null });
+	const link = new HubLink({ config: () => ({ port, expose: "local", enabled: false }), secret: SECRET, info: () => info("A"), onRequest: () => null });
 	link.start();
 	try {
 		await until(() => link.linked);
@@ -223,6 +230,45 @@ test("attention reaches subscribed devices as Web Push; dead and revoked subscri
 		assert.equal(push.entries().length, 0, "revoking a device drops its subscription");
 	} finally {
 		link.stop();
+		hub.close();
+	}
+});
+
+test("ten sessions: one pairing sees all; detailed events flow only for the focused one", async () => {
+	const port = await freePort();
+	const hub = new Hub({ config: { port, expose: "local", enabled: false }, secret: SECRET, devices: new DeviceStore(tmp()) });
+	await hub.listen();
+	const links = Array.from({ length: 10 }, (_, i) => {
+		const l = new HubLink({ config: () => ({ port, expose: "local", enabled: false }), secret: SECRET, info: () => info(`S${i}`), onRequest: () => null });
+		l.start();
+		return l;
+	});
+	try {
+		await until(() => links.every((l) => l.linked));
+		const phone = new Phone();
+		await phone.pair(hub.createPairing("control").links[0].url);
+		assert.equal((await phone.rpc("hub")).agents.length, 10);
+		const hello = await phone.stream(undefined, "S3");
+		for (const [i, l] of links.entries()) {
+			l.send({ t: "ev", ev: { type: "stream", key: `k${i}`, i: 0, kind: "text", delta: "x", n: 1 } });
+			l.send({ t: "ev", ev: { type: "prompt", prompt: { id: `p${i}`, kind: "confirm", title: `q${i}` }, n: 2 } });
+		}
+		await until(() => phone.events.filter((e) => e.type === "prompt").length === 10);
+		assert.deepEqual(
+			phone.events.filter((e) => e.type === "stream").map((e) => e.agent),
+			["S3"],
+			"token streams of the other nine sessions are not sent",
+		);
+		// Switching sessions moves the detail stream with it.
+		await phone.rpc("focus", { client: hello.client, agent: "S7" });
+		phone.events = [];
+		for (const l of links) l.send({ t: "ev", ev: { type: "stream", key: "k", i: 0, kind: "text", delta: "y", n: 3 } });
+		await phone.waitFor((e) => e.type === "stream");
+		await new Promise((r) => setTimeout(r, 100));
+		assert.deepEqual(phone.events.map((e) => e.agent), ["S7"]);
+		phone.close();
+	} finally {
+		for (const l of links) l.stop();
 		hub.close();
 	}
 });

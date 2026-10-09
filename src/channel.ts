@@ -26,6 +26,9 @@ export class Channel {
 		// Not socket.setEncoding(): Node forbids it on sockets taken over from an HTTP upgrade.
 		const decoder = new StringDecoder("utf8");
 		socket.on("data", (chunk: Buffer) => this.feed(decoder.write(chunk)));
+		// Sockets taken over from an HTTP server allow half-open connections: the peer's FIN only
+		// emits "end", never "close", so a departed peer would linger forever without this.
+		socket.on("end", () => this.close());
 		socket.on("close", () => this.shutdown());
 		socket.on("error", () => this.shutdown());
 	}

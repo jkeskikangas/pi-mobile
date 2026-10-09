@@ -1,42 +1,64 @@
 // pi-mobile: continue pi sessions from a phone.
 //
-//   /remote                 share this session and show a pairing QR code
-//   /remote view            QR for a view-only device (watch, cannot act)
-//   /remote stop            stop sharing this session
-//   /remote status          hub, endpoints, connected phones, sessions
-//   /remote devices         paired devices;  /remote revoke <id|name|all>
-//   /remote auto on|off     share every pi session automatically
-//   /remote expose network|local|cloudflared,  /remote port <n>
-//   /remote url <https://…|off>   HTTPS address in front of the hub (needed for lock-screen notifications)
-//   /remote restart         restart the hub (applies port/exposure changes)
+// One switch for the whole machine: `/remote` in any pi shares every pi session on this computer
+// (running ones join within seconds, new ones on start) and shows a pairing QR code until a phone
+// is paired.
+//
+//   /remote            connect this machine; QR if no phone is paired yet, otherwise status
+//   /remote pair       pair another device (`/remote pair view` for a view-only one)
+//   /remote off        stop sharing: this session only, or every session on the machine
+//   /remote devices    paired devices; pick one to revoke
+//   /remote settings   exposure, HTTPS address, port (the hub restarts by itself)
 
+import { unwatchFile, watchFile } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Bridge } from "./bridge.ts";
 import { closeProcessHub, type LinkState } from "./link.ts";
+import type { AgentInfo } from "./protocol.ts";
 import { qrLines } from "./qr.ts";
-import { type Config, type Expose, linkSecret, loadConfig, saveConfig } from "./store.ts";
+import { type Config, configPath, type Expose, linkSecret, loadConfig, saveConfig } from "./store.ts";
 
-const SHARING = Symbol.for("pi-mobile.sharing");
-type G = typeof globalThis & { [SHARING]?: boolean };
-const SUBCOMMANDS = ["view", "stop", "status", "devices", "revoke", "auto", "expose", "port", "url", "restart", "help"];
+/** Set by `/remote off` → "Only this session"; lives on globalThis so it survives /new and /reload. */
+const HIDDEN = Symbol.for("pi-mobile.hidden");
+/** Set by any `/remote off`, so a `--remote` flag does not re-share the session behind the user's back. */
+const FLAG_OFF = Symbol.for("pi-mobile.flag-off");
+type G = typeof globalThis & { [HIDDEN]?: boolean; [FLAG_OFF]?: boolean };
+const SUBCOMMANDS = [
+	{ value: "pair", label: "pair", description: "Pair another device (add 'view' for view-only)" },
+	{ value: "off", label: "off", description: "Stop sharing this session or the whole machine" },
+	{ value: "devices", label: "devices", description: "Paired devices; revoke one" },
+	{ value: "settings", label: "settings", description: "Exposure, HTTPS address, port" },
+];
+const STATUS_ICON: Record<string, string> = { idle: "○", working: "●", waiting: "◐" };
 
-export default function remoteControl(pi: ExtensionAPI): void {
+interface HubStatus {
+	pid: number;
+	expose: Expose;
+	endpoints: { label: string; url: string }[];
+	tunnelError?: string;
+	agents: AgentInfo[];
+	clients: { count: number; names: string[] };
+	devices: { id: string; name: string; role: string; createdAt: number; lastSeenAt?: number }[];
+}
+
+export default function piMobile(pi: ExtensionAPI): void {
 	let bridge: Bridge | undefined;
 	let ctx: ExtensionContext | undefined;
 	let closePanel: (() => void) | undefined;
+	let watching = false;
 	const g = globalThis as G;
 
-	pi.registerFlag("remote", { type: "boolean", description: "Share this session with pi mobile (phone)" });
+	pi.registerFlag("remote", { type: "boolean", description: "Share this session with your phone (pi-mobile)" });
 
-	const status = (s: LinkState | undefined) => {
+	const footer = (s: LinkState | undefined) => {
 		if (!ctx?.hasUI) return;
 		const t = ctx.ui.theme;
 		if (!s) return ctx.ui.setStatus("remote", undefined);
 		if (s.kind === "connecting") return ctx.ui.setStatus("remote", t.fg("dim", "📱 connecting…"));
-		if (s.kind === "error") return ctx.ui.setStatus("remote", t.fg("error", "📱 remote error"));
+		if (s.kind === "error") return ctx.ui.setStatus("remote", t.fg("error", "📱 error"));
 		const n = s.clients.count;
-		ctx.ui.setStatus("remote", n ? t.fg("success", `📱 ${n} connected`) : t.fg("dim", "📱 remote on"));
+		ctx.ui.setStatus("remote", n ? t.fg("success", `📱 ${n} connected`) : t.fg("dim", "📱 shared"));
 	};
 
 	const start = (c: ExtensionContext) => {
@@ -44,21 +66,23 @@ export default function remoteControl(pi: ExtensionAPI): void {
 		let lastError = "";
 		const b = new Bridge(pi, c, loadConfig, linkSecret());
 		b.onState = (s) => {
-			status(s);
+			footer(s);
 			if (s.kind === "error" && s.message !== lastError) {
 				lastError = s.message;
-				c.ui.notify(`pi mobile: ${s.message}`, "error");
+				c.ui.notify(`pi-mobile: ${s.message}`, "error");
 			}
 			if (s.kind === "linked") lastError = "";
 		};
 		b.onMessage = (msg) => {
 			if (msg.t === "paired" && closePanel) {
 				closePanel();
-				ctx?.ui.notify(`📱 Paired ${msg.device.name}${msg.device.role === "view" ? " (view-only)" : ""}`, "info");
+				ctx?.ui.notify(
+					`📱 Paired ${msg.device.name}${msg.device.role === "view" ? " (view-only)" : ""}. Every pi session on this machine is on your phone.`,
+					"info",
+				);
 			}
 		};
 		bridge = b;
-		g[SHARING] = true;
 		b.start();
 		return b;
 	};
@@ -66,24 +90,39 @@ export default function remoteControl(pi: ExtensionAPI): void {
 	const stop = () => {
 		bridge?.stop();
 		bridge = undefined;
-		status(undefined);
+		footer(undefined);
+	};
+
+	const shouldShare = () => !g[HIDDEN] && (loadConfig().enabled || (pi.getFlag("remote") === true && !g[FLAG_OFF]));
+	const sync = () => {
+		if (!ctx) return;
+		if (shouldShare()) start(ctx);
+		else stop();
 	};
 
 	pi.on("session_start", async (_e, c) => {
 		ctx = c;
-		if (g[SHARING] || pi.getFlag("remote") === true || loadConfig().autoStart) start(c);
+		sync();
+		if (!watching) {
+			// `/remote` or `/remote off` in another terminal flips the machine switch; follow it.
+			watching = true;
+			watchFile(configPath(), { interval: 1500, persistent: false }, sync);
+		}
 	});
 	pi.on("session_shutdown", async (e) => {
 		stop();
+		if (watching) unwatchFile(configPath(), sync);
+		watching = false;
 		if (e.reason === "quit") closeProcessHub();
 	});
 
-	const withBridge = <E>(fn: (b: Bridge, e: E, c: ExtensionContext) => void) =>
+	const withBridge =
+		<E>(fn: (b: Bridge, e: E) => void) =>
 		async (e: E, c: ExtensionContext) => {
 			ctx = c;
 			if (!bridge) return;
 			bridge.setContext(c);
-			fn(bridge, e, c);
+			fn(bridge, e);
 		};
 	pi.on("agent_start", withBridge((b) => b.agentStart()));
 	pi.on("agent_settled", withBridge((b, e: any) => b.agentSettled(!!e.aborted)));
@@ -103,68 +142,27 @@ export default function remoteControl(pi: ExtensionAPI): void {
 	pi.on("ui_prompt_end", withBridge((b, e: any) => b.terminalPromptChanged(-1, e.kind, e.title)));
 
 	pi.registerCommand("remote", {
-		description: "Control this pi session from your phone (QR pairing, end-to-end encrypted)",
+		description: "Use every pi session on this machine from your phone (end-to-end encrypted)",
 		getArgumentCompletions: (prefix) => {
-			const items = SUBCOMMANDS.filter((s) => s.startsWith(prefix.trim())).map((s) => ({ value: s, label: s }));
+			const items = SUBCOMMANDS.filter((s) => s.value.startsWith(prefix.trim()));
 			return items.length ? items : null;
 		},
 		handler: async (args, c) => {
 			ctx = c;
-			const [sub = "", ...rest] = args.trim().split(/\s+/).filter(Boolean);
-			const arg = rest.join(" ");
-			switch (sub.toLowerCase()) {
+			const [sub = "", arg = ""] = args.trim().toLowerCase().split(/\s+/);
+			switch (sub) {
 				case "":
-				case "on":
-				case "start":
-					return pairFlow(c, "control");
-				case "view":
-				case "share":
-					return pairFlow(c, "view");
-				case "stop":
+					return connect(c);
+				case "pair":
+					return pair(c, arg === "view" ? "view" : "control");
 				case "off":
-					g[SHARING] = false;
-					stop();
-					return c.ui.notify("Phone access stopped for this session.", "info");
-				case "status":
-					return showStatus(c);
+					return off(c);
 				case "devices":
-					return showDevices(c);
-				case "revoke":
-					return revoke(c, arg);
-				case "auto":
-					return editConfig(c, (cfg) => {
-						cfg.autoStart = arg !== "off";
-						return `Auto-share ${cfg.autoStart ? "on: every new pi session is shared with your phone" : "off"}.`;
-					});
-				case "expose":
-					if (!["network", "local", "cloudflared"].includes(arg))
-						return c.ui.notify("Usage: /remote expose network|local|cloudflared", "warning");
-					return editConfig(c, (cfg) => {
-						cfg.expose = arg as Expose;
-						return `Exposure set to ${arg}. Run /remote restart to apply.`;
-					});
-				case "port": {
-					const port = Number(arg);
-					if (!Number.isInteger(port) || port < 1024 || port > 65535) return c.ui.notify("Usage: /remote port <1024-65535>", "warning");
-					return editConfig(c, (cfg) => {
-						cfg.port = port;
-						return `Port set to ${port}. Run /remote restart in every sharing pi (or restart them) to apply.`;
-					});
-				}
-				case "url":
-					if (arg && arg !== "off" && !/^https:\/\/[^\s/]+/.test(arg))
-						return c.ui.notify("Usage: /remote url https://<host>[:port]  (e.g. your Tailscale Serve address), or /remote url off", "warning");
-					return editConfig(c, (cfg) => {
-						cfg.publicUrl = !arg || arg === "off" ? undefined : arg.replace(/\/+$/, "");
-						return cfg.publicUrl ? `Public URL set to ${cfg.publicUrl}. Run /remote restart to apply.` : "Public URL removed. Run /remote restart to apply.";
-					});
-				case "restart":
-					return restart(c);
+					return devices(c);
+				case "settings":
+					return settings(c);
 				default:
-					return c.ui.notify(
-						"Usage: /remote [view|stop|status|devices|revoke <id|all>|auto on|off|expose network|local|cloudflared|port <n>|url <https://…|off>|restart]",
-						"info",
-					);
+					return c.ui.notify("Usage: /remote [pair [view] | off | devices | settings]", "info");
 			}
 		},
 	});
@@ -175,35 +173,142 @@ export default function remoteControl(pi: ExtensionAPI): void {
 		while (!b.isLinked && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
 		if (b.isLinked) return b;
 		const s = b.linkState;
-		c.ui.notify(`pi mobile: ${s.kind === "error" ? s.message : "could not reach the hub"}`, "error");
+		c.ui.notify(`pi-mobile: ${s.kind === "error" ? s.message : "could not reach the hub"}`, "error");
 		return undefined;
 	}
 
-	async function pairFlow(c: ExtensionCommandContext, role: "control" | "view"): Promise<void> {
+	/** Turns the machine switch on and un-hides this session. */
+	function enable(): void {
+		g[HIDDEN] = false;
+		const cfg = loadConfig();
+		if (!cfg.enabled) saveConfig({ ...cfg, enabled: true });
+	}
+
+	/** `/remote`: connect the machine, then pair (first time) or show where things stand. */
+	async function connect(c: ExtensionCommandContext): Promise<void> {
+		enable();
 		const b = await linked(c);
 		if (!b) return;
-		const pairing = await b.hubRequest<{ links: { label: string; url: string }[]; expiresAt: number }>("pair", { role });
+		const s = await b.hubRequest<HubStatus>("status");
+		if (!s.devices.length) return pair(c, "control");
+		await overview(c, s);
+	}
+
+	async function overview(c: ExtensionCommandContext, s: HubStatus): Promise<void> {
+		const t = c.ui.theme;
+		const [primary, ...others] = s.endpoints;
+		const sessions = [...s.agents].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+		const phones = s.clients.count ? `${s.clients.count} phone${s.clients.count === 1 ? "" : "s"} connected` : "no phone connected right now";
+		await panel(c, [
+			t.bold(`pi-mobile · ${sessions.length} session${sessions.length === 1 ? "" : "s"} shared · ${phones}`),
+			"",
+			`Open on your phone: ${t.fg("accent", primary.url)}  ${t.fg("dim", primary.label)}`,
+			...others.filter((o) => o.label !== "this computer").map((o) => t.fg("dim", `                    ${o.url}  ${o.label}`)),
+			...(s.tunnelError ? [t.fg("error", `tunnel: ${s.tunnelError}`)] : []),
+			"",
+			...sessions.map((a) => {
+				const me = a.pid === process.pid ? t.fg("dim", " (this one)") : "";
+				return `${STATUS_ICON[a.status] ?? "○"} ${a.name}${me}  ${t.fg("dim", a.task ?? "")}`;
+			}),
+			"",
+			t.fg("dim", "/remote pair  another device · /remote off  stop sharing · /remote settings"),
+		]);
+	}
+
+	async function pair(c: ExtensionCommandContext, role: "control" | "view"): Promise<void> {
+		enable();
+		const b = await linked(c);
+		if (!b) return;
+		const pairing = await b.hubRequest<{ links: { label: string; url: string }[] }>("pair", { role });
 		const [primary, ...others] = pairing.links;
-		const header = role === "view" ? "Scan to watch this machine's pi sessions (view-only)" : "Scan to control pi from your phone";
+		const header =
+			role === "view" ? "Scan to watch this machine's pi sessions (view-only)" : "Scan with your phone to use every pi session on this machine";
 		if (c.mode !== "tui") {
 			c.ui.notify(`${header}:\n${pairing.links.map((l) => `${l.label}: ${l.url}`).join("\n")}`, "info");
 			return;
 		}
-		const qr = qrLines(primary.url);
 		const t = c.ui.theme;
-		const lines = [
+		await panel(c, [
 			t.bold(header),
 			"",
-			...qr.lines,
+			...qrLines(primary.url).lines,
 			"",
 			`${t.fg("accent", primary.label)}  ${primary.url}`,
 			...others.filter((o) => o.label !== "this computer").map((o) => t.fg("dim", `${o.label}  ${o.url}`)),
 			"",
 			t.fg("dim", "Single-use code, valid 10 min. Traffic is end-to-end encrypted."),
-			t.fg("dim", primary.label.startsWith("lan") ? "On untrusted Wi-Fi prefer Tailscale or /remote expose cloudflared." : ""),
-			t.fg("dim", "Any key closes this panel; the session stays shared."),
-		];
-		await panel(c, lines);
+			...(primary.label.startsWith("lan") ? [t.fg("dim", "On untrusted Wi-Fi use Tailscale or an HTTPS address (/remote settings).")] : []),
+			t.fg("dim", "Closes by itself once your phone is paired; any key closes it now."),
+		]);
+	}
+
+	async function off(c: ExtensionCommandContext): Promise<void> {
+		const choice = c.hasUI
+			? await c.ui.select("Stop sharing with your phone", ["Only this session", "Every session on this machine", "Cancel"])
+			: "Every session on this machine";
+		if (choice === "Only this session" || choice === "Every session on this machine") g[FLAG_OFF] = true;
+		if (choice === "Only this session") {
+			g[HIDDEN] = true;
+			stop();
+			c.ui.notify("This session is hidden from your phone. /remote shares it again.", "info");
+		} else if (choice === "Every session on this machine") {
+			saveConfig({ ...loadConfig(), enabled: false });
+			g[HIDDEN] = false;
+			stop();
+			c.ui.notify("No pi session on this machine is shared now. Paired phones stay paired; /remote turns sharing back on.", "info");
+		}
+	}
+
+	async function devices(c: ExtensionCommandContext): Promise<void> {
+		const b = await linked(c, 3000);
+		if (!b) return;
+		const s = await b.hubRequest<HubStatus>("status");
+		if (!s.devices.length) return c.ui.notify("No paired devices. /remote pairs one.", "info");
+		const label = (d: HubStatus["devices"][number]) =>
+			`${d.name} · ${d.role === "view" ? "view-only" : "full control"} · last seen ${d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : "never"}`;
+		const pick = await c.ui.select("Paired devices — choose one to revoke", [...s.devices.map(label), "Revoke all", "Done"]);
+		if (!pick || pick === "Done") return;
+		const ids = pick === "Revoke all" ? s.devices.map((d) => d.id) : s.devices.filter((d) => label(d) === pick).map((d) => d.id);
+		const what = pick === "Revoke all" ? "every device" : pick.split(" · ")[0];
+		if (!(await c.ui.confirm(`Revoke ${what}?`, "It loses access immediately and must be paired again."))) return;
+		const removed = await b.hubRequest<{ name: string }[]>("revoke", { ids });
+		c.ui.notify(`Revoked ${removed.map((d) => d.name).join(", ")}.`, "info");
+	}
+
+	async function settings(c: ExtensionCommandContext): Promise<void> {
+		const cfg = loadConfig();
+		const expose = `How phones reach this computer: ${cfg.expose}`;
+		const url = `HTTPS address (for lock-screen notifications): ${cfg.publicUrl ?? "none"}`;
+		const port = `Port: ${cfg.port}`;
+		const pick = await c.ui.select("pi-mobile settings", [expose, url, port, "Done"]);
+		const next: Config = { ...cfg };
+		if (pick === expose) {
+			const e = await c.ui.select("How phones reach this computer", [
+				"network — Wi-Fi and Tailscale (default)",
+				"local — this computer only (SSH forward or your own proxy)",
+				"cloudflared — public HTTPS tunnel (needs cloudflared)",
+			]);
+			if (!e) return;
+			next.expose = e.split(" ")[0] as Expose;
+		} else if (pick === url) {
+			const v = await c.ui.input(`HTTPS address that forwards to port ${cfg.port} (e.g. tailscale serve); empty to remove`, cfg.publicUrl ?? "https://");
+			if (v === undefined) return;
+			const trimmed = v.trim().replace(/\/+$/, "");
+			const empty = !trimmed || trimmed === "https:";
+			if (!empty && !/^https:\/\/[^\s/]+/.test(trimmed)) return c.ui.notify("That is not an https:// address.", "warning");
+			next.publicUrl = empty ? undefined : trimmed;
+		} else if (pick === port) {
+			const v = await c.ui.input("Port (1024–65535)", String(cfg.port));
+			if (v === undefined) return;
+			const n = Number(v);
+			if (!Number.isInteger(n) || n < 1024 || n > 65535) return c.ui.notify("Port must be 1024–65535.", "warning");
+			next.port = n;
+		} else return;
+		saveConfig(next);
+		// Linked pi processes re-read the config when they reconnect, so restarting the hub applies it everywhere.
+		if (bridge?.isLinked) await bridge.hubRequest("restart").catch(() => {});
+		else closeProcessHub();
+		c.ui.notify("Saved. The hub restarts with the new settings and phones reconnect by themselves (pair again if the address changed).", "info");
 	}
 
 	async function panel(c: ExtensionCommandContext, lines: string[]): Promise<void> {
@@ -246,68 +351,9 @@ export default function remoteControl(pi: ExtensionAPI): void {
 		);
 		closePanel = undefined;
 	}
-
-	async function showStatus(c: ExtensionCommandContext): Promise<void> {
-		if (!bridge) {
-			const cfg = loadConfig();
-			return c.ui.notify(`Phone access is off for this session. Config: port ${cfg.port}, expose ${cfg.expose}, auto ${cfg.autoStart ? "on" : "off"}. Run /remote to start.`, "info");
-		}
-		const b = await linked(c, 3000);
-		if (!b) return;
-		const s = await b.hubRequest<any>("status");
-		const t = c.ui.theme;
-		const lines = [
-			t.bold("pi mobile"),
-			`hub: pid ${s.pid}${s.pid === process.pid ? " (this pi)" : ""} · expose ${s.expose}`,
-			...s.endpoints.map((e: any) => `  ${e.label}: ${e.url}`),
-			...(s.tunnelError ? [t.fg("error", `  tunnel: ${s.tunnelError}`)] : []),
-			"",
-			`phones connected: ${s.clients.count}${s.clients.names.length ? ` (${s.clients.names.join(", ")})` : ""}`,
-			`paired devices: ${s.devices.length}`,
-			"",
-			"shared sessions:",
-			...s.agents.map((a: any) => `  ${a.status === "idle" ? "○" : a.status === "working" ? "●" : "◐"} ${a.name} — ${a.cwd} (pid ${a.pid})`),
-		];
-		await panel(c, lines);
-	}
-
-	async function showDevices(c: ExtensionCommandContext): Promise<void> {
-		const b = await linked(c, 3000);
-		if (!b) return;
-		const s = await b.hubRequest<any>("status");
-		if (!s.devices.length) return c.ui.notify("No paired devices. Run /remote to pair one.", "info");
-		const fmt = (ms?: number) => (ms ? new Date(ms).toLocaleString() : "never");
-		await panel(c, [
-			c.ui.theme.bold("Paired devices"),
-			"",
-			...s.devices.map((d: any) => `${d.id}  ${d.name}  ${d.role}  paired ${fmt(d.createdAt)}  last seen ${fmt(d.lastSeenAt)}`),
-			"",
-			c.ui.theme.fg("dim", "Revoke with /remote revoke <id|name|all>"),
-		]);
-	}
-
-	async function revoke(c: ExtensionCommandContext, which: string): Promise<void> {
-		if (!which) return c.ui.notify("Usage: /remote revoke <id|name|all>", "warning");
-		const b = await linked(c, 3000);
-		if (!b) return;
-		const s = await b.hubRequest<any>("status");
-		const ids = s.devices.filter((d: any) => which === "all" || d.id === which || d.name === which).map((d: any) => d.id);
-		if (!ids.length) return c.ui.notify(`No device matches "${which}".`, "warning");
-		const removed = await b.hubRequest<any[]>("revoke", { ids });
-		c.ui.notify(`Revoked ${removed.map((d) => d.name).join(", ")}.`, "info");
-	}
-
-	function editConfig(c: ExtensionCommandContext, edit: (cfg: Config) => string): void {
-		const cfg = loadConfig();
-		const msg = edit(cfg);
-		saveConfig(cfg);
-		c.ui.notify(msg, "info");
-	}
-
-	async function restart(c: ExtensionCommandContext): Promise<void> {
-		const b = bridge && (await linked(c, 3000));
-		if (b) await b.hubRequest("restart").catch(() => {});
-		else closeProcessHub();
-		c.ui.notify("pi-mobile hub restarting with the current config.", "info");
-	}
 }
+
+function rank(a: AgentInfo): number {
+	return a.status === "waiting" ? 0 : a.status === "working" ? 1 : 2;
+}
+

@@ -10,7 +10,10 @@ export interface AgentInfo {
 	agent: string;
 	pid: number;
 	sessionId: string;
+	/** The session's explicit name, else its project folder. */
 	name: string;
+	/** First line of the first prompt: what this session is working on. */
+	task?: string;
 	cwd: string;
 	model?: { provider: string; id: string; name?: string; reasoning?: boolean };
 	thinking?: string;
@@ -18,6 +21,8 @@ export interface AgentInfo {
 	context?: { tokens: number | null; window: number; percent: number | null };
 	cost?: number;
 	queued?: boolean;
+	/** First line of the latest assistant text, for the phone's session list. */
+	last?: string;
 }
 
 export type Block =

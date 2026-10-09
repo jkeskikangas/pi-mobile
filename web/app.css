@@ -175,3 +175,11 @@ textarea#input:focus { border-color: var(--accent); }
 .toast { background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 12px; font-size: 14px; max-width: 100%; box-shadow: 0 4px 16px rgba(0,0,0,.2); white-space: pre-wrap; overflow-wrap: anywhere; animation: up .18s ease-out; }
 .toast.warning { background: var(--warn); color: #000; }
 .toast.error { background: var(--err); color: #fff; }
+
+.attention { display: block; width: calc(100% - 24px); margin: 8px 12px 0; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 22%, var(--panel)); border: 1px solid var(--warn); text-align: left; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.onboard { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--border); font-size: 14px; }
+.onboard span { flex: 1 1 100%; }
+.onboard button { padding: 7px 12px; border-radius: 10px; background: var(--panel-2); }
+.onboard button.primary { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.sheet .row .last { display: block; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet .row .ask { display: block; font-size: 13px; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

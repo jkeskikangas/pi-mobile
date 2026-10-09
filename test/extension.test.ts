@@ -100,12 +100,12 @@ before(async () => {
 	writeFileSync(join(stateDir(), "config.json"), JSON.stringify({ port, expose: "local" }));
 	h = host();
 	await h.fire("session_start", { reason: "startup" });
-	await until(() => !!processHub() && h.statuses.at(-1) === "📱 remote on");
+	await until(() => !!processHub() && h.statuses.at(-1) === "📱 shared");
 	phone = new Phone();
 	await phone.pair(processHub()!.createPairing("control").links[0].url);
-	await phone.stream();
-	await until(() => h.statuses.at(-1) === "📱 1 connected");
 	agent = (await phone.rpc("hub")).agents[0].agent;
+	await phone.stream(undefined, agent);
+	await until(() => h.statuses.at(-1) === "📱 1 connected");
 });
 
 after(async () => {
@@ -120,7 +120,8 @@ const call = (m: string, p: unknown = {}) => phone.rpc("agent", { agent, m, p })
 test("the phone sees the session and its transcript", async () => {
 	const hub = await phone.rpc("hub");
 	assert.equal(hub.agents.length, 1);
-	assert.equal(hub.agents[0].name, "fix the bug");
+	assert.equal(hub.agents[0].name, "project", "named after the project folder");
+	assert.equal(hub.agents[0].task, "fix the bug");
 	assert.equal(hub.agents[0].cost, 0.25);
 	const snap = await call("snapshot");
 	assert.deepEqual(

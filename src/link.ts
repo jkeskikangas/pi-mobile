@@ -179,7 +179,7 @@ function dial(port: number, secret: string): Promise<Channel> {
 		});
 		req.on("response", (res) => {
 			res.resume();
-			reject(new Error(`port ${port} is used by something that is not a pi-mobile hub (HTTP ${res.statusCode}); set another port with /remote port <n>`));
+			reject(new Error(`port ${port} is used by something that is not a pi-mobile hub (HTTP ${res.statusCode}); choose another port in /remote settings`));
 		});
 		req.on("error", reject);
 		req.end();

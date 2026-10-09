@@ -56,9 +56,9 @@ export class Phone {
 	}
 
 	/** Opens the event stream; resolves once the hub's hello arrives. */
-	async stream(since?: { hub: string; seq: number }): Promise<any> {
+	async stream(since?: { hub: string; seq: number }, focus?: string): Promise<any> {
 		this.ctrl = new AbortController();
-		const b = seal(this.key, { t: Date.now(), hub: since?.hub, since: since?.seq });
+		const b = seal(this.key, { t: Date.now(), hub: since?.hub, since: since?.seq, focus });
 		const res = await fetch(`${this.base}/api/stream?d=${this.d}&b=${b}`, { signal: this.ctrl.signal });
 		if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
 		const reader = res.body!.getReader();

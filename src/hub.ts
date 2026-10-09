@@ -8,6 +8,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 import { hostname } from "node:os";
 import { extname, join, normalize } from "node:path";
 import type { Duplex } from "node:stream";
@@ -23,7 +24,10 @@ import { type PushSubscriptionJSON, sendPush } from "./webpush.ts";
 export const LINK_PROTOCOL = "pi-mobile-link";
 const WEB_DIR = fileURLToPath(new URL("../web/", import.meta.url));
 const NACL_JS = createRequire(import.meta.url).resolve("tweetnacl/nacl-fast.min.js");
-const RING = 4000;
+// Shared by all sessions; at ten busy agents this still covers a few minutes of reconnect gap.
+const RING = 20_000;
+/** Events every phone gets about every session; the rest only for the session it is looking at. */
+const GLOBAL_EVENTS = new Set(["info", "gone", "prompt", "prompt_end"]);
 const MAX_BODY = 25 * 1024 * 1024;
 const PAIRING_TTL = 10 * 60_000;
 const VIEW_METHODS = new Set(["snapshot", "toolOutput", "models", "commands"]);
@@ -42,6 +46,9 @@ interface AgentConn {
 }
 
 interface StreamClient {
+	id: string;
+	/** The session this phone is looking at; its detailed events are sent only for that one. */
+	focus?: string;
 	device: Device;
 	res: ServerResponse;
 	queue: unknown[];
@@ -283,7 +290,7 @@ export class Hub {
 		const stamped = { ...ev, agent, seq: ++this.seq } as HubEvent;
 		this.ring.push(stamped);
 		if (this.ring.length > RING) this.ring.splice(0, this.ring.length - RING);
-		for (const c of this.clients) this.enqueue(c, stamped);
+		for (const c of this.clients) if (wants(c, stamped)) this.enqueue(c, stamped);
 	}
 
 	private enqueue(c: StreamClient, ev: unknown): void {
@@ -376,7 +383,7 @@ export class Hub {
 		};
 		this.devices.add(device);
 		this.broadcastToAgents({ t: "paired", device: publicDevice(device) });
-		send(res, 200, { b: seal(pairing.key, { d: device.id, k: device.key, role: device.role, host: hostname() }) });
+		send(res, 200, { b: seal(pairing.key, { d: device.id, k: device.key, role: device.role, host: MACHINE() }) });
 	}
 
 	private authenticate(d: unknown, b: unknown): { device: Device; value: any } | undefined {
@@ -406,13 +413,17 @@ export class Hub {
 			case "hub":
 				return {
 					hubId: this.id,
-					host: hostname(),
+					host: MACHINE(),
 					seq: this.seq,
 					agents: [...this.agents.values()].map((a) => a.info),
 					device: publicDevice(device),
 					pushKey: this.push.vapid.publicKey,
 					pushOn: this.push.entries().some(([id]) => id === device.id),
 				};
+			case "focus": {
+				for (const c of this.clients) if (c.id === p.client && c.device.id === device.id) c.focus = String(p.agent ?? "") || undefined;
+				return { ok: true };
+			}
 			case "push": {
 				const sub = p.subscription as PushSubscriptionJSON | null;
 				if (sub && !(typeof sub.endpoint === "string" && sub.endpoint.startsWith("https://") && sub.keys?.p256dh && sub.keys?.auth))
@@ -457,12 +468,12 @@ export class Hub {
 		});
 		res.flushHeaders();
 		req.socket.setNoDelay(true);
-		const client: StreamClient = { device: auth.device, res, queue: [] };
-		const { hub, since } = auth.value as { hub?: string; since?: number };
+		const { hub, since, focus } = auth.value as { hub?: string; since?: number; focus?: string };
+		const client: StreamClient = { id: randomId(), focus, device: auth.device, res, queue: [] };
 		const first = this.ring[0]?.seq ?? this.seq + 1;
 		const canReplay = hub === this.id && typeof since === "number" && since >= first - 1 && since <= this.seq;
-		client.queue.push({ type: "hello", hubId: this.id, seq: this.seq, resync: !canReplay });
-		if (canReplay) for (const ev of this.ring) if (ev.seq > since) client.queue.push(ev);
+		client.queue.push({ type: "hello", hubId: this.id, seq: this.seq, resync: !canReplay, client: client.id });
+		if (canReplay) for (const ev of this.ring) if (ev.seq > since && wants(client, ev)) client.queue.push(ev);
 		this.flush(client);
 		this.clients.add(client);
 		this.clientsChanged();
@@ -474,6 +485,23 @@ export class Hub {
 		req.on("close", done);
 		res.on("close", done);
 	}
+}
+
+/** A name people recognise: macOS's Computer Name rather than a generated host name. */
+function machineName(): string {
+	if (process.platform === "darwin") {
+		try {
+			const name = execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000 }).trim();
+			if (name) return name;
+		} catch {}
+	}
+	return hostname().replace(/\.local$/, "");
+}
+let machine: string | undefined;
+const MACHINE = () => (machine ??= machineName());
+
+function wants(c: StreamClient, ev: HubEvent): boolean {
+	return GLOBAL_EVENTS.has(ev.type) || ev.agent === c.focus;
 }
 
 function publicDevice(d: Device): Omit<Device, "key"> {

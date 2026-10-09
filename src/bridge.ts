@@ -146,11 +146,15 @@ export class Bridge {
 		const model = ctx.model;
 		let cost = 0;
 		let firstUser = "";
+		let last = "";
 		try {
 			for (const e of sm.getBranch() as any[]) {
 				if (e.type !== "message") continue;
-				if (e.message.role === "assistant") cost += e.message.usage?.cost?.total ?? 0;
-				else if (!firstUser && e.message.role === "user") firstUser = contentText(e.message.content);
+				if (e.message.role === "assistant") {
+					cost += e.message.usage?.cost?.total ?? 0;
+					const text = contentText(e.message.content).trim();
+					if (text) last = text.split("\n")[0].slice(0, 120);
+				} else if (!firstUser && e.message.role === "user") firstUser = contentText(e.message.content);
 			}
 		} catch {}
 		const usage = safe(() => ctx.getContextUsage());
@@ -158,7 +162,8 @@ export class Bridge {
 			agent: agentId(),
 			pid: process.pid,
 			sessionId: safe(() => sm.getSessionId()) ?? "",
-			name: safe(() => this.pi.getSessionName()) || firstUser.split("\n")[0].slice(0, 80) || basename(ctx.cwd),
+			name: safe(() => this.pi.getSessionName()) || basename(ctx.cwd) || ctx.cwd,
+			task: firstUser.split("\n")[0].slice(0, 100) || undefined,
 			cwd: ctx.cwd,
 			model: model ? { provider: model.provider, id: model.id, name: model.name, reasoning: !!model.reasoning } : undefined,
 			thinking: safe(() => this.pi.getThinkingLevel()),
@@ -166,6 +171,7 @@ export class Bridge {
 			context: usage ? { tokens: usage.tokens, window: usage.contextWindow, percent: usage.percent } : undefined,
 			cost: Math.round(cost * 10000) / 10000,
 			queued: safe(() => ctx.hasPendingMessages()) ?? false,
+			last,
 		};
 	}
 

@@ -14,13 +14,33 @@ export interface Config {
 	port: number;
 	/** network: all interfaces (LAN + Tailscale); local: loopback only; cloudflared: loopback + quick tunnel. */
 	expose: Expose;
-	/** Share every new pi session automatically. */
-	autoStart: boolean;
+	/**
+	 * This machine is connected to your phone: every pi session on it is shared (unless hidden with
+	 * /remote off). Running pi processes watch this flag and join or leave within seconds.
+	 */
+	enabled: boolean;
 	/**
 	 * HTTPS address that proxies to the hub (Tailscale Serve, a reverse proxy). Listed first in the
 	 * QR code. Lock-screen notifications need an HTTPS origin.
 	 */
 	publicUrl?: string;
+	voice?: VoiceConfig;
+}
+
+export interface VoiceConfig {
+	/** Speech recognition on this computer: Apple on-device (macOS 26+), OpenAI (OPENAI_API_KEY), or the first that works. */
+	stt?: "auto" | "apple" | "openai";
+	/** `provider/id` of the model that distils dictation and writes spoken briefs (default: a fast model you have). */
+	model?: string;
+	/** Recognition language, e.g. "en-US", "fi-FI" (default: the system language). */
+	locale?: string;
+	/** Voice mode on the phone: realtime speech model via your ChatGPT/Codex sign-in or OPENAI_API_KEY, or the cascaded pipeline. */
+	realtime?: "auto" | "off";
+	/** Realtime model and voice. */
+	realtimeModel?: string;
+	realtimeVoice?: string;
+	/** Terminal voice input: put the distilled text in the editor ("review", default) or send it ("send"). */
+	afterDictation?: "review" | "send";
 }
 
 export interface Device {
@@ -32,7 +52,7 @@ export interface Device {
 	lastSeenAt?: number;
 }
 
-export const DEFAULT_CONFIG: Config = { port: 7878, expose: "network", autoStart: false };
+export const DEFAULT_CONFIG: Config = { port: 7878, expose: "network", enabled: false };
 
 export function stateDir(): string {
 	const base = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
@@ -56,8 +76,12 @@ function writePrivate(path: string, text: string): void {
 	renameSync(tmp, path);
 }
 
+export function configPath(dir = stateDir()): string {
+	return join(dir, "config.json");
+}
+
 export function loadConfig(dir = stateDir()): Config {
-	const raw = readJson<Partial<Config>>(join(dir, "config.json"), {});
+	const raw = readJson<Partial<Config>>(configPath(dir), {});
 	const config: Config = { ...DEFAULT_CONFIG, ...raw };
 	if (!["network", "local", "cloudflared"].includes(config.expose)) config.expose = DEFAULT_CONFIG.expose;
 	if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) config.port = DEFAULT_CONFIG.port;
@@ -65,7 +89,7 @@ export function loadConfig(dir = stateDir()): Config {
 }
 
 export function saveConfig(config: Config, dir = stateDir()): void {
-	writePrivate(join(dir, "config.json"), `${JSON.stringify(config, null, 2)}\n`);
+	writePrivate(configPath(dir), `${JSON.stringify(config, null, 2)}\n`);
 }
 
 /** Devices are re-read when the file changes, so a revoke in any process takes effect in the hub. */
