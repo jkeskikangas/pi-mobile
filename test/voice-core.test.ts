@@ -34,6 +34,18 @@ test("yes/no answers; destructive actions must be named", () => {
 	assert.equal(V.speakPrompt(plain), "Apply the formatting changes? Yes or no?");
 });
 
+test("a request that named the action and its target counts for the undo window", () => {
+	const p = { kind: "confirm", title: "Deploy to production?", message: "This ships the current main branch." };
+	assert.equal(V.requestNames(p, "Please deploy the app to production."), true, "targets come from the question, not its elaboration");
+	assert.equal(V.requestNames({ kind: "confirm", title: "Deploy main to production?" }, "deploy to production"), false, "a target named in the question must be named");
+	const q = { kind: "confirm", title: "Deploy to production?" };
+	assert.equal(V.requestNames(q, "Please deploy the app to production."), true);
+	assert.equal(V.requestNames(q, "deploy it to staging"), false, "wrong target");
+	assert.equal(V.requestNames(q, "yeah"), false);
+	assert.equal(V.requestNames({ kind: "confirm", title: "Push 3 commits to origin/main?" }, "push my changes to main on origin"), true);
+	assert.equal(V.requestNames({ kind: "confirm", title: "Format the file?" }, "format it"), false, "not destructive: the normal flow applies");
+});
+
 test("choices by ordinal or by name, two at a time", () => {
 	const p = { kind: "select", title: "Which fix?", options: ["Cache the lookup", "Add an index", "Rewrite the query", "Delete the table"] };
 	assert.deepEqual(V.answerFor(p, "the second one"), { value: "Add an index" });
@@ -51,6 +63,17 @@ test("only significant tool activity reaches the listener", () => {
 	for (const t of ["psql $DATABASE_URL -c 'select 1'", "git push origin main", "kubectl apply -f prod.yaml", "npm publish", "rm -rf build", "./deploy.sh staging"])
 		assert.equal(V.isSignificant(t), true, t);
 	for (const t of ["npm test", "rg getUserById src", "src/auth.ts", "git status", "tsc --noEmit"]) assert.equal(V.isSignificant(t), false, t);
+});
+
+test("backchannels and coughs don't interrupt; answers and echoes are told apart", () => {
+	for (const t of ["mm-hmm", "Mhm.", "uh huh", "right", "okay", "", "hmm"]) assert.equal(V.isBackchannel(t), true, t);
+	for (const t of ["stop", "wait, no", "what about the tests"]) assert.equal(V.isBackchannel(t), false, t);
+	assert.equal(V.isBackchannel("okay", true), false, "while pi waits on an answer, okay is an answer");
+	assert.equal(V.isEcho("Yes, deploy.", "Deploy to production now? Say “yes, deploy” to confirm."), true);
+	assert.equal(V.isEcho("yes", "Say yes to confirm"), false, "one word is too little to call it an echo");
+	assert.equal(V.isEcho("yes, deploy it now", "Say yes, deploy to confirm"), false);
+	assert.deepEqual(V.parseCommand("What can I say?"), { kind: "help" });
+	assert.match(V.HELP, /stop/);
 });
 
 test("a thought that trails off keeps the floor", () => {

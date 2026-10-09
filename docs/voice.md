@@ -27,8 +27,10 @@ None of them does both jobs well, and none treats "I am driving" as its own inte
 2. **Ground the words in the workspace.** Spoken identifiers are matched to real ones: `get user by id` → `getUserById`, "orthodotts" → `auth.ts`. The vocabulary comes from the repo (tracked file names, the current branch) and the session (identifiers and paths in recent messages). The same vocabulary biases the recogniser.
 3. **Surface ambiguity, never paper over it.** When something you said has two readings, the distilled prompt keeps your words and adds a short `(unclear: …)` note, instead of silently picking one.
 4. **You stay the editor.** The distilled prompt lands in the editor, not in the model. One key swaps to the raw transcript, one key cancels and restores what you had typed.
-5. **Stream what you say while you say it.** A live (dim) transcript and level meter show the mic is hearing you. Distillation runs once, when you stop.
-6. **Free and private by default.** On a Mac the recogniser is Apple's on-device SpeechAnalyzer (macOS 26): no account, no audio leaves the machine, about 2% WER on clean speech, contextual-string biasing. An OpenAI API key (`OPENAI_API_KEY`) switches to `gpt-4o-transcribe` where SpeechAnalyzer is unavailable. Distillation uses a model you already have in pi.
+5. **Stream what you say while you say it.** A live (dim) transcript and level meter show the mic is hearing you. Distillation runs once, when you stop. On the phone, hold the mic and let go (walkie-talkie), or tap to start and stop; a waveform shows it hears you.
+6. **Edit by voice.** With text already in the editor, dictating "make that a list", "drop the second point" or "change X to Y" edits it instead of appending the words.
+7. **Learn from corrections.** When you fix a distilled dictation before sending it, the replaced names ("get user" → `fetchUser`) go into a personal dictionary (`voice-dictionary.json` in the state dir) that biases recognition and distillation from then on.
+8. **Free and private by default.** On a Mac the recogniser is Apple's on-device SpeechAnalyzer (macOS 26): no account, no audio leaves the machine, about 2% WER on clean speech, contextual-string biasing. An OpenAI API key (`OPENAI_API_KEY`) switches to `gpt-4o-transcribe` where SpeechAnalyzer is unavailable. Distillation uses a model you already have in pi.
 
 ### Voice mode
 
@@ -43,7 +45,11 @@ None of them does both jobs well, and none treats "I am driving" as its own inte
 9. **Defer what needs eyes.** In eyes-busy contexts the agent is told the user cannot read: it avoids asking for visual review, and the voice says the diff is waiting at a screen.
 10. **Barge-in is a first-class signal.** Speaking while pi talks stops the audio immediately (echo cancellation keeps the speaker from triggering it), and what you say next is a new turn.
 11. **Turn-taking fits the context.** Open mic with semantic end-of-turn detection in the car or kitchen; tap-to-talk (a screen-sized target, or a headset button where the browser allows it) when it's noisy, windy or you're cycling. In basic voice a trailing "and…", "um" or "wait" keeps the floor open.
-12. **Never announce, just act.** The voice does not say "let me check"; it calls pi silently and the working tick carries the wait. Preferences you state ("be terser") stick until you change them.
+12. **Never announce, just act.** The voice does not say "let me check"; it calls pi silently and the working tick carries the wait. The phone enforces it: when the voice hands a request to pi, whatever it was about to say with it is cut. Preferences you state ("be terser") stick until you change them.
+13. **Soft barge-in.** About half of the sounds that trip a voice detector while an assistant talks are backchannels, coughs or echo. When you make a sound over pi, its voice drops to 20% within ~200 ms; it stops only after ~800 ms of voiced speech (Hume's default) or when your words turn out to mean something ("stop", "no"). "Mm-hmm" and coughs leave pi talking. Nothing you say is dropped unheard: short sounds are transcribed and judged by their words. (The realtime server clears the assistant's audio on any speech regardless of `interrupt_response`, a known API bug, so while pi speaks the phone does turn-taking itself and hands it back to the server's semantic VAD when pi is silent.)
+14. **Ask once, with an undo window.** pi's permission dialogs for irreversible actions normally need the action named ("yes, deploy"). But if *you* just asked for exactly that action and target, the phone (not the model) recognises it from what it heard you say, the voice says "Deploying to production, say stop to cancel", and the dialog is confirmed after four seconds unless you say stop or tap Cancel. One spoken sentence instead of being asked three times.
+15. **pi's own voice is never consent.** Speech heard while pi was talking that repeats pi's words ("say yes, deploy to confirm") is marked as echo: it cannot answer a destructive question or count as an earlier request.
+16. **Help is a question away.** "What can I say?" gets a two-sentence answer; first-time users get a one-sentence spoken intro and rotating example hints that disappear after a few sessions.
 
 ## Architecture
 
@@ -73,7 +79,9 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 | `src/voice/realtime.ts` | Realtime session config (voice-layer instructions and tools) and the SDP relay to OpenAI. |
 | `src/voice/dictation.ts` | Terminal voice input: `/voice`, alt+m, live widget, review flow. |
 | `web/voice.js` | Composer dictation and phone voice mode: realtime client, basic-voice cascade, earcons, wake lock, media session, dialogs by voice. |
-| `web/voice-core.js` | Pure logic shared with tests: voice commands, dialog answers, significance, VAD, speech chunking, earcon specs. |
+| `web/voice-core.js` | Pure logic shared with tests: voice commands and help, dialog answers, the undo-window rule, backchannels and echo, significance, VAD, speech chunking, earcon specs. |
+| `src/voice/dictionary.ts` | The personal dictionary: corrections learned from edits to distilled dictations. |
+| `src/voice/tts.ts` | Optional speech from the computer for basic voice (any OpenAI-compatible `/v1/audio/speech`). |
 
 ### Bridge requests added
 
@@ -129,5 +137,20 @@ Observed:
 | Answering a permission dialog by voice (`test/e2e/deploy-ext.ts`) | "Please deploy the app to production." … "Yeah." … "Yes, deploy." | pi called the deploy tool; its confirm dialog was read out: "This will deploy the current main branch to production. Say 'yes, deploy' to confirm, or say 'no' to cancel." On "Yeah" the voice model tried `answer_question("yes")`; the phone refused it (action not named) and the voice asked again naming the target. "Yes, deploy" confirmed it (the tool logged `confirm=true`); then "Production deployment is complete and the app is live." |
 
 Found and fixed by these runs: a transcription prompt carrying project names was returned *as the transcript* for audio clipped at the start, and the voice turned it into a task nobody asked for. The realtime session now sends no transcription prompt, the voice is told to ask for a repeat rather than guess, and the OpenAI file transcriber discards a leaked prompt. Also: "low" semantic-VAD eagerness never closed the turn on the test audio (now "auto", with `turnDetection: "server"` available), the voice announced itself ("let me check…") before tools (now forbidden), and the voice model was a model the account could not use (candidates now fall through).
+
+Turn-taking, with a scriptable microphone (`test/e2e/turns.mjs`: clips played into a WebAudio stream at chosen moments over a quiet noise floor):
+
+| Measure | Result |
+|---|---|
+| "Mm-hmm" while pi talks | ignored; pi finished its sentence at full volume (0 cancels) |
+| You start talking over pi → pi's voice ducks | 177 ms |
+| You keep talking → pi stops | 1.7 s for "Wait, stop. Is that safe…" (the clip pauses after "stop"); ducked meanwhile |
+| Your interrupting turn | committed and answered |
+| End of question → handed to pi | 1.1–1.2 s; a tone confirms at once |
+| End of question → pi's spoken answer (pi read the code meanwhile) | 4.5–6 s |
+| "Stop." during the undo window, spoken over pi's "say stop to cancel" | transcribed, window cancelled, dialog answered no (`confirm=false`), "Cancelled" |
+| "Please deploy the app to production" with a deploy dialog | "Deploy to production, say stop to cancel", confirmed after 4 s (`confirm=true`), "Deployed to production successfully" |
+
+These runs found and fixed: the server cutting pi's audio on any sound (moved turn-taking to the phone while pi speaks), a short "stop" over pi being discarded as a backchannel (short sounds are now transcribed before judging), and the undo window depending on the model's judgement (now decided on the phone).
 
 Not verifiable here, to check on real devices: microphone behaviour with the iPhone screen locked, the headset play/pause button as tap-to-talk (Media Session), Android Chrome with the screen off, and echo cancellation against the phone speaker for barge-in.

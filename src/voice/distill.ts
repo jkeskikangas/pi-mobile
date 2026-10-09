@@ -24,6 +24,8 @@ Rules:
 5. Resolve references from RECENT CONTEXT ("that", "what you suggested", "the second option") only when the context makes them unambiguous; then name the thing explicitly.
 6. Ambiguity is surfaced, not guessed away. If something that matters has two reasonable readings that context does not settle, write the most likely reading and add a short question for it under UNCLEAR. Do not flag trivia.
 7. Write in the language the speaker used. If the dictation is empty or only noise, output nothing.
+8. Editing by voice. If the dictation is an instruction about the ALREADY TYPED text ("make that a list", "drop the second point", "change X to Y", "shorter", "start over"), apply it to that text and output the edited message; do not append the instruction.
+9. PERSONAL DICTIONARY lists corrections the developer made to earlier dictations: when the same words come up, write them the corrected way.
 
 Output exactly the message. If there are unclear points, end with a line containing only ---unclear--- followed by one "- question" line each.`;
 
@@ -86,6 +88,7 @@ export function distillPrompt(raw: string, v: Vocabulary, branch: readonly any[]
 		`PROJECT: ${v.project}${v.branch ? ` (branch ${v.branch})` : ""}`,
 		names.length ? `WORKSPACE NAMES:\n${names.join("\n")}` : "WORKSPACE NAMES: (none)",
 		files.length ? `PROJECT FILES${v.files.length > files.length ? ` (${files.length} of ${v.files.length})` : ""}:\n${files.join("\n")}` : "",
+		v.learned?.length ? `PERSONAL DICTIONARY:\n${v.learned.map((c) => `"${c.from}" -> ${c.to}`).join("\n")}` : "",
 		symbols.length ? `CODE SYMBOLS${(v.symbols?.length ?? 0) > symbols.length ? " (most used)" : ""}: ${symbols.join(", ")}` : "",
 		last ? `RECENT CONTEXT (the agent's last message, for resolving references):\n${last.length > 2500 ? `…${last.slice(-2500)}` : last}` : "",
 		draft.trim() ? `ALREADY TYPED in the editor (the dictation continues or amends it; output the combined message):\n${draft}` : "",

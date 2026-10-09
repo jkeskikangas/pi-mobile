@@ -201,7 +201,9 @@ test("realtime session: voice layer instructions, tools, semantic turn detection
 	const s: any = realtimeSession({ mode: "eyes-busy", project: "pi-mobile", hints: ["getUserById"], language: "fi-FI" });
 	assert.equal(s.type, "realtime");
 	assert.equal(s.audio.input.turn_detection.type, "semantic_vad");
-	assert.equal(s.audio.input.turn_detection.interrupt_response, true);
+	// The phone decides barge-in and asks for replies itself (soft interruption, backchannels, echo).
+	assert.equal(s.audio.input.turn_detection.interrupt_response, false);
+	assert.equal(s.audio.input.turn_detection.create_response, false);
 	assert.equal(s.audio.input.transcription.language, "fi");
 	assert.equal(s.audio.input.transcription.prompt, undefined, "a transcription prompt leaks into transcripts of short audio");
 	assert.match(s.instructions, /getUserById/, "names go to the voice model instead");
@@ -212,8 +214,10 @@ test("realtime session: voice layer instructions, tools, semantic turn detection
 	const i = voiceInstructions("eyes-busy", "pi-mobile");
 	assert.match(i, /\[PI\]/);
 	assert.match(i, /Never read code/);
-	assert.match(i, /only answer yes when the developer confirms that action by name/);
-	assert.match(i, /Consent given before the question appeared does not count/);
+	assert.match(i, /only answer yes when they confirm the action by name/);
+	assert.match(i, /a bare "yeah" is not enough/);
+	assert.match(i, /Never ask for confirmation yourself before passing a request to pi/);
+	assert.match(i, /earlier_request/);
 	assert.match(i, /ask them to repeat instead of guessing a task/);
 });
 
@@ -327,6 +331,23 @@ test("speech from the computer: a local OpenAI-compatible server, OpenAI, or the
 	assert.deepEqual(r, { audio: "AQID", mime: "audio/mpeg" });
 	assert.equal(body.input, "Done. Two tests fail.");
 	assert.match(body.instructions, /calm/);
+});
+
+test("a personal dictionary is learned from corrections to dictations", async () => {
+	const { corrections, Dictionary } = await import("../src/voice/dictionary.ts");
+	assert.deepEqual(corrections("Make the get user function return undefined.", "Make the `fetchUser` function return undefined."), [{ from: "get user", to: "`fetchUser`" }]);
+	assert.deepEqual(corrections("Please fix the bug.", "Please fix the nasty bug quickly."), [], "ordinary rewording is not learned");
+	assert.deepEqual(corrections("Deploy to the cube cluster.", "Deploy to the kube-prod cluster."), [{ from: "cube", to: "kube-prod" }]);
+	const files = new Map<string, string>();
+	const dict = new Dictionary("/tmp/x", (p, t) => files.set(p, t));
+	(dict as any).list = () => JSON.parse(files.get("/tmp/x/voice-dictionary.json") ?? "[]");
+	dict.learn("call get user", "call `fetchUser`");
+	dict.learn("then get user again", "then `fetchUser` again");
+	assert.deepEqual(dict.top().map((c) => [c.from, c.to, c.count]), [["get user", "`fetchUser`", 2]]);
+	const v = { ...vocab, learned: dict.top() };
+	assert.match(distillPrompt("get user is slow", v, []), /PERSONAL DICTIONARY:\n"get user" -> `fetchUser`/);
+	assert.ok(recognizerHints(v).includes("fetchUser"));
+	assert.match(DISTILL_SYSTEM, /Editing by voice/);
 });
 
 test("PCM is wrapped as WAV", () => {

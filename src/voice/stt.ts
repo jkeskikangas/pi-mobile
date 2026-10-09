@@ -141,6 +141,24 @@ function parseLines(child: ChildProcess, onLine: (obj: any) => void): void {
 	});
 }
 
+let prewarmed = false;
+
+/**
+ * Builds the on-device recogniser and installs its speech model in the background, once per
+ * process, so the first dictation starts instantly instead of after a compile and a download.
+ */
+export function prewarmApple(stateDir: string, locale?: string): void {
+	if (prewarmed || process.platform !== "darwin") return;
+	prewarmed = true;
+	appleHelper(stateDir)
+		.then((bin) => {
+			const child = spawn(bin, ["check", ...(locale ? ["--locale", locale] : [])], { stdio: "ignore" });
+			child.on("error", () => {});
+			child.unref();
+		})
+		.catch(() => {});
+}
+
 export function appleProvider(stateDir: string, locale?: string): SttProvider {
 	const common = (hints: string[]) => [...(hints.length ? ["--words", hints.join("\n")] : []), ...(locale ? ["--locale", locale] : [])];
 	return {

@@ -7,11 +7,12 @@
 //   /voice status        recogniser, model and microphone in use
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadConfig, saveConfig, stateDir } from "../store.ts";
+import { loadConfig, saveConfig, stateDir, writePrivate } from "../store.ts";
+import { Dictionary } from "./dictionary.ts";
 import { distill, editorText } from "./distill.ts";
 import { level, MIC_RATE, type Mic, startMic } from "./mic.ts";
 import { type Complete, registryComplete } from "./model.ts";
-import { chooseStt, type LiveTranscription } from "./stt.ts";
+import { chooseStt, type LiveTranscription, prewarmApple } from "./stt.ts";
 import { gatherVocabulary, recognizerHints } from "./vocab.ts";
 
 const WIDGET = "pi-mobile-voice";
@@ -23,6 +24,7 @@ interface Last {
 	raw: string;
 	distilled: string;
 	before: string;
+	learned?: boolean;
 }
 
 export function registerDictation(pi: ExtensionAPI, complete?: Complete): void {
@@ -34,12 +36,22 @@ export function registerDictation(pi: ExtensionAPI, complete?: Complete): void {
 
 	pi.on("session_start", async (_e, c) => {
 		ctx = c;
+		// Only in a real interactive terminal (not tests, print or RPC modes).
+		const cfg = loadConfig().voice;
+		if (c.mode === "tui" && process.stdout.isTTY && (cfg?.stt ?? "auto") !== "openai") prewarmApple(stateDir(), cfg?.locale);
 	});
 	pi.on("session_shutdown", async () => {
 		rec?.cancel("");
 	});
-	pi.on("input", async () => {
+	pi.on("input", async (e: any) => {
 		if (!rec && ctx?.hasUI) ctx.ui.setWidget(WIDGET, undefined);
+		// What you changed in a dictation before sending it is learned for next time.
+		if (last && !last.learned && typeof e?.text === "string" && e.source !== "extension") {
+			last.learned = true;
+			try {
+				new Dictionary(stateDir(), writePrivate).learn(last.distilled, e.text);
+			} catch {}
+		}
 		return { action: "continue" as const };
 	});
 
@@ -146,7 +158,7 @@ class Recording {
 		try {
 			const cfg = loadConfig().voice;
 			const stt = chooseStt(cfg, stateDir());
-			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[]);
+			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[], new Dictionary(stateDir(), writePrivate).top());
 			this.live = stt.live!(MIC_RATE, recognizerHints(vocab));
 			this.live.onPartial = (t) => {
 				this.partial = t;
@@ -186,7 +198,7 @@ class Recording {
 			if (!raw) return this.cancel("Didn't catch anything. Check the microphone, or speak a little closer.", "warning");
 			this.partial = raw;
 			this.render();
-			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[]);
+			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[], new Dictionary(stateDir(), writePrivate).top());
 			const d = await distill(raw, vocab, this.c.sessionManager.getBranch() as any[], this.complete, {
 				draft: this.before,
 				signal: this.abort.signal,
