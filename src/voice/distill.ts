@@ -19,7 +19,7 @@ export const DISTILL_SYSTEM = `You turn a developer's spoken dictation into the 
 Rules:
 1. Intent, not transcript. Keep the speaker's final intent only: when they revise themselves ("no wait", "actually", "I mean", "scratch that", or simply restating something differently), keep the revision and drop what it replaced. Remove fillers, false starts, repetitions and thinking aloud that does not change the request.
 2. Lose nothing that matters. Keep every concrete detail: names, numbers, versions, constraints ("don't touch X", "keep the API"), ordering, conditions, preferences, priorities and the reason if one was given. Do not add requirements, steps, assumptions, or politeness that were not spoken.
-3. Real names. Speech recognition mangles code names. When a spoken phrase plausibly refers to a name in WORKSPACE NAMES, PROJECT FILES or CODE SYMBOLS (judge by sound, not spelling), write that exact name in backticks (e.g. "get user by id" -> \`getUserById\`, "orthodotts" or "off dot ts" -> \`auth.ts\`). A file or symbol the dictation names that is not in those lists was almost certainly misheard: use the listed name that sounds most alike when one fits the context; if none does, keep the words and ask under UNCLEAR. Write other spoken code (flags, commands) the way it is written ("dash dash force" -> \`--force\`). Never invent names.
+3. Real names. Speech recognition mangles code names. When a spoken phrase plausibly refers to a name in WORKSPACE NAMES, PROJECT FILES or CODE SYMBOLS (judge by sound, not spelling), write that exact name in backticks (e.g. "get user by id" -> \`getUserById\`, "orthodotts" or "off dot ts" -> \`auth.ts\`). A file or symbol the dictation names that is not in those lists was almost certainly misheard: use the listed name that sounds most alike when one fits the context; if none does, keep the words and ask under UNCLEAR. Write other spoken code (paths, flags, commands) the way it is written ("src slash components" -> \`src/components\`, "dash dash force" -> \`--force\`). Never invent names.
 4. Shape for reading. A simple request stays one or two plain sentences. Several asks become a one-line goal followed by a short numbered list in the order they should happen. Keep the speaker's voice: first person, imperative, their register. No headings, no preamble.
 5. Resolve references from RECENT CONTEXT ("that", "what you suggested", "the second option") only when the context makes them unambiguous; then name the thing explicitly.
 6. Ambiguity is surfaced, not guessed away. If something that matters has two reasonable readings that context does not settle, write the most likely reading and add a short question for it under UNCLEAR. Do not flag trivia.
@@ -39,6 +39,36 @@ function lastAssistantText(branch: readonly any[]): string {
 		if (text) return text;
 	}
 	return "";
+}
+
+/**
+ * Removes recogniser loops: a word or phrase (up to ~60 characters) repeated 4+ times in a row is
+ * kept once ("thank you. thank you. thank you. thank you." → "thank you."). Real speech rarely
+ * repeats anything four times; recognisers do on silence and noise.
+ */
+export function collapseRepeats(text: string): string {
+	const tokens = text.trim().split(/\s+/).filter(Boolean);
+	const key = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+	const out: string[] = [];
+	let i = 0;
+	while (i < tokens.length) {
+		let skipped = false;
+		for (let n = 1; n <= 8 && i + n * 4 <= tokens.length; n++) {
+			const unit = tokens.slice(i, i + n);
+			if (unit.join(" ").length > 60) break;
+			const same = (at: number) => unit.every((t, k) => key(t) === key(tokens[at + k] ?? ""));
+			let reps = 1;
+			while (same(i + reps * n)) reps++;
+			if (reps >= 4) {
+				out.push(...tokens.slice(i + (reps - 1) * n, i + reps * n)); // the last copy keeps its punctuation
+				i += reps * n;
+				skipped = true;
+				break;
+			}
+		}
+		if (!skipped) out.push(tokens[i++]);
+	}
+	return out.join(" ");
 }
 
 export function distillPrompt(raw: string, v: Vocabulary, branch: readonly any[], draft = ""): string {
@@ -112,6 +142,7 @@ export async function distill(
 	complete: Complete | undefined,
 	opts: { draft?: string; signal?: AbortSignal } = {},
 ): Promise<Distilled & { error?: string }> {
+	raw = collapseRepeats(raw);
 	if (!raw.trim()) return { text: "", unclear: [], by: "heuristic" };
 	if (complete) {
 		try {

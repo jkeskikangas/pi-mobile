@@ -9,6 +9,7 @@ import type { Complete } from "./model.ts";
 import { createCall, chatgptAccountId, DEFAULT_REALTIME_MODEL, type RealtimeCredentials, realtimeSession } from "./realtime.ts";
 import { type Attention, brief, countWord, digestText, runDigest, speakable } from "./speech.ts";
 import { chooseStt, type SttProvider } from "./stt.ts";
+import { synthesize, ttsTarget } from "./tts.ts";
 import { gatherVocabulary, recognizerHints, sayName } from "./vocab.ts";
 
 const MAX_AUDIO = 20 * 1024 * 1024;
@@ -140,6 +141,11 @@ export class VoiceHost {
 		});
 		const call = await createCall(creds, p.sdp, session, this.deps.fetch);
 		return { sdp: call.sdp, model, provider: creds.kind };
+	}
+
+	/** Speech audio for basic voice mode; throws `tts unavailable` when the phone should speak itself. */
+	speak(p: { text?: unknown }) {
+		return synthesize(String(p.text ?? ""), ttsTarget(this.deps.config()), this.deps.fetch);
 	}
 
 	setListening(p: { on?: unknown; mode?: unknown }) {

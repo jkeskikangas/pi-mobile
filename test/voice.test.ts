@@ -94,6 +94,13 @@ test("distill uses the model and falls back to local cleanup", async () => {
 	assert.equal(failed.text, "So fix the `getUserById.ts` thing.");
 });
 
+test("recogniser loops are collapsed before distillation", async () => {
+	const { collapseRepeats } = await import("../src/voice/distill.ts");
+	assert.equal(collapseRepeats("fix the hub. Thank you. Thank you. Thank you. Thank you. Thank you."), "fix the hub. Thank you.");
+	assert.equal(collapseRepeats("URL URL URL URL URL"), "URL");
+	assert.equal(collapseRepeats("no, no, no, that's wrong"), "no, no, no, that's wrong", "three times is still speech");
+});
+
 test("heuristic cleanup drops fillers and scratched sentences, flags mid-sentence corrections", () => {
 	const a = heuristicDistill("um add a test. scratch that. uh update the readme", vocab);
 	assert.equal(a.text, "Update the `README.md`.");
@@ -300,6 +307,26 @@ test("OpenAI transcription: vocabulary as a prompt, and a leaked prompt is not s
 	assert.equal(sent!.get("model"), "gpt-4o-transcribe");
 	const leaked = await openaiProvider("sk", reply("Software development dictation. Names: getUserById")).transcribe(Buffer.from("x"), "audio/webm", ["getUserById"]);
 	assert.equal(leaked.text, "");
+});
+
+test("speech from the computer: a local OpenAI-compatible server, OpenAI, or the phone's own voice", async () => {
+	const { synthesize, ttsTarget } = await import("../src/voice/tts.ts");
+	assert.equal(ttsTarget({}, {}), undefined);
+	assert.equal(ttsTarget({ tts: "off" }, { OPENAI_API_KEY: "sk" }), undefined);
+	assert.equal(ttsTarget({}, { OPENAI_API_KEY: "sk" })?.model, "gpt-4o-mini-tts");
+	const local = ttsTarget({ ttsUrl: "http://127.0.0.1:17493/v1/" }, { OPENAI_API_KEY: "sk" })!;
+	assert.equal(local.url, "http://127.0.0.1:17493/v1/audio/speech", "a configured local server wins over the API key");
+	assert.equal(local.key, undefined);
+	await assert.rejects(synthesize("hi", undefined), /tts unavailable/);
+	let body: any;
+	const fake = (async (_u: string, init: any) => {
+		body = JSON.parse(init.body);
+		return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "audio/mpeg" } });
+	}) as any;
+	const r = await synthesize("Done. Two tests fail.", ttsTarget({}, { OPENAI_API_KEY: "sk" }), fake);
+	assert.deepEqual(r, { audio: "AQID", mime: "audio/mpeg" });
+	assert.equal(body.input, "Done. Two tests fail.");
+	assert.match(body.instructions, /calm/);
 });
 
 test("PCM is wrapped as WAV", () => {

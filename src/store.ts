@@ -41,6 +41,13 @@ export interface VoiceConfig {
 	realtimeVoice?: string;
 	/** Realtime end-of-turn detection: "semantic" (default, waits for the end of a thought) or "server" (fixed silence). */
 	turnDetection?: "semantic" | "server";
+	/** Basic voice mode's speech from the computer: any OpenAI-compatible /v1 base URL (e.g. Voicebox or Kokoro on this machine). */
+	ttsUrl?: string;
+	ttsKey?: string;
+	ttsModel?: string;
+	ttsVoice?: string;
+	/** "off" keeps OPENAI_API_KEY from being used for speech; the phone then speaks with its own voice. */
+	tts?: "auto" | "off";
 	/** Terminal voice input: put the distilled text in the editor ("review", default) or send it ("send"). */
 	afterDictation?: "review" | "send";
 }

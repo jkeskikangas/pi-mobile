@@ -403,6 +403,7 @@ export class Bridge {
 			case "brief":
 			case "details":
 			case "voiceSession":
+			case "speak":
 			case "voiceState": {
 				const v = this.voice;
 				if (!v) throw new Error("voice is not available in this pi");
@@ -411,6 +412,7 @@ export class Bridge {
 				if (m === "brief") return v.brief(p);
 				if (m === "details") return v.details(p);
 				if (m === "voiceSession") return v.voiceSession(p);
+				if (m === "speak") return v.speak(p);
 				return v.setListening(p);
 			}
 			default:

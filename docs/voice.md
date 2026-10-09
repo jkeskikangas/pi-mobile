@@ -85,6 +85,7 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 | `details` | `{topic, mode}` → `{speech}` | yes |
 | `voiceStatus` | `{}` → `{speech, status, elapsedMs, tools, prompts}` | yes |
 | `voiceSession` | `{sdp, mode}` → `{sdp, model, provider}`: realtime call set up with the voice-layer config | no |
+| `speak` | `{text}` → `{audio: base64, mime}` from `voice.ttsUrl` or OpenAI TTS; `tts unavailable` means the phone speaks itself | no |
 | `voiceState` | `{on, mode}` → `{ok}`: the agent is told its user is listening (expires after 150 s without a refresh) | no |
 
 ## Platform limits (verified against WebKit/Chromium sources, see research notes)
@@ -93,6 +94,10 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 - iOS stops capturing the mic when a Home Screen PWA goes to the background or locks; a Safari tab with an active capture keeps it longer. Voice mode keeps the screen awake (Wake Lock) and tells you when iOS took the mic away. Android Chrome exempts audible pages from freezing; verify on the device before relying on it.
 - CarPlay has no path for web apps; the phone's audio plays through the car as usual.
 - The ChatGPT-sign-in realtime endpoint is the one Codex uses; it is undocumented and may change. With `OPENAI_API_KEY` set, the official `api.openai.com/v1/realtime/calls` endpoint is used instead. Without either, voice mode runs the cascaded pipeline (host STT + spoken brief + the phone's own speech synthesis).
+
+### Other projects looked at
+
+[Voicebox](https://github.com/jamiepine/voicebox) (local voice studio: TTS engines with cloning, Whisper dictation with LLM cleanup, an OpenAI-compatible `/v1/audio/speech`). It has no VAD, barge-in or true streaming, so nothing for the realtime path. Taken from it: collapsing recogniser repetition loops before distillation, the spoken-path rule ("src slash components" → `src/components`), and the OpenAI-compatible speech endpoint as an optional voice for basic mode (`voice.ttsUrl`), so Voicebox or Kokoro can speak on the phone. Left out: its batch Whisper STT (on-device SpeechAnalyzer and realtime transcription are better here), cloning, and speaking on the host's speakers.
 
 ## Verification
 
@@ -120,6 +125,7 @@ Observed:
 | Terminal and phone dictation (Apple on-device STT → distillation) | "Um, so in auth dot ts, make get user by ID return null instead of throwing, no wait, return undefined, and update the validate token check to require twenty characters." Recognised as "So in off.ts, make get user by ID return null…" | "In `src/auth.ts`, make `getUserById` return `undefined` instead of throwing, and update `validateToken` to require 20 characters." 2.5–3.5 s after the mic stops. The terminal merges it with text already typed. |
 | Voice mode, realtime (`gpt-realtime-2` over WebRTC, call opened with the ChatGPT sign-in) | "What does the get user by ID function in auth dot ts do when the user is missing? Just tell me, don't change anything." | `ask_pi` with the user's words; pi read the code; the voice said "It throws an error that says 'no user' followed by the requested ID." about 5 s after the question ended, with no filler before it. |
 | Voice mode, basic (realtime off: phone VAD → host STT → distil → pi → brief → speech synthesis) | same | "When the user is missing, the authentication lookup throws an error saying 'no user' followed by the requested ID." about 5 s after the question ended. |
+| Basic voice with speech from the computer (`voice.ttsUrl` → an OpenAI-compatible test server) | same question | The brief was rendered by the server (`POST /v1/audio/speech`, model `kokoro`, voice `af_heart`) and played on the phone; the voice went back to listening when the audio ended. |
 | Answering a permission dialog by voice (`test/e2e/deploy-ext.ts`) | "Please deploy the app to production." … "Yeah." … "Yes, deploy." | pi called the deploy tool; its confirm dialog was read out: "This will deploy the current main branch to production. Say 'yes, deploy' to confirm, or say 'no' to cancel." On "Yeah" the voice model tried `answer_question("yes")`; the phone refused it (action not named) and the voice asked again naming the target. "Yes, deploy" confirmed it (the tool logged `confirm=true`); then "Production deployment is complete and the app is live." |
 
 Found and fixed by these runs: a transcription prompt carrying project names was returned *as the transcript* for audio clipped at the start, and the voice turned it into a task nobody asked for. The realtime session now sends no transcription prompt, the voice is told to ask for a repeat rather than guess, and the OpenAI file transcriber discards a leaked prompt. Also: "low" semantic-VAD eagerness never closed the turn on the test audio (now "auto", with `turnDetection: "server"` available), the voice announced itself ("let me check…") before tools (now forbidden), and the voice model was a model the account could not use (candidates now fall through).

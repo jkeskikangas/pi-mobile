@@ -296,7 +296,7 @@
 			for (const t of this.timers) clearInterval(t);
 			this.stopRealtime();
 			this.stopCascade();
-			speechSynthesis?.cancel();
+			this.silence();
 			this.stream?.getTracks().forEach((t) => t.stop());
 			this.wake?.release?.().catch(() => {});
 			this.keep?.pause();
@@ -531,7 +531,7 @@
 			if (this.engine === "realtime") {
 				this.rt({ type: "response.cancel" });
 				this.rt({ type: "output_audio_buffer.clear" });
-			} else speechSynthesis.cancel();
+			} else this.silence();
 			this.setState(this.listenState());
 		}
 
@@ -797,7 +797,7 @@
 			this.vad.setGain(this.state === "speaking" ? 4 : 1);
 			const ev = this.vad.feed(rms, performance.now());
 			if (ev === "start") {
-				if (this.state === "speaking") speechSynthesis.cancel();
+				if (this.state === "speaking") this.silence();
 				clearTimeout(this.continueTimer);
 				if (!this.capture) this.capture = [...this.pre];
 				this.setState("hearing");
@@ -806,7 +806,7 @@
 
 		manualTurn() {
 			if (!this.manual) {
-				speechSynthesis.cancel();
+				this.silence();
 				this.manual = true;
 				this.capture = [...this.pre];
 				earcon("listen");
@@ -932,12 +932,48 @@
 			return same.sort((x, y) => rank(x) - rank(y))[0] || null;
 		}
 
-		speak(text) {
+		/** Stops whatever is speaking: the computer's audio or the phone's synthesis. */
+		silence() {
+			speechSynthesis.cancel();
+			if (this.player) {
+				this.player.pause();
+				this.player = null;
+			}
+		}
+
+		/** Speaks with the computer's voice when one is configured (voice.ttsUrl or OPENAI_API_KEY), else the phone's. */
+		async speak(text) {
 			const parts = V.chunks(text);
 			if (!parts.length) return this.setState(this.listenState());
 			this.lastSpoken = text;
 			this.said(text);
-			speechSynthesis.cancel();
+			this.silence();
+			const turn = (this.speakTurn = (this.speakTurn || 0) + 1);
+			if (this.serverTts !== false) {
+				try {
+					const r = await app().call("speak", { text }, this.agent);
+					if (turn !== this.speakTurn || this.closed) return;
+					const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(r.audio), (c) => c.charCodeAt(0))], { type: r.mime }));
+					const player = new Audio(url);
+					this.player = player;
+					this.setState("speaking");
+					player.onended = player.onerror = () => {
+						URL.revokeObjectURL(url);
+						if (this.player === player) this.player = null;
+						if (this.state === "speaking") this.setState(app().S.prompts.get(this.agent)?.size ? "asking" : this.listenState());
+					};
+					await player.play();
+					return;
+				} catch (e) {
+					if (turn !== this.speakTurn) return;
+					// Not configured: stop asking. Other failures: this time only.
+					if (/tts unavailable/.test(e.message)) this.serverTts = false;
+				}
+			}
+			this.speakLocal(parts);
+		}
+
+		speakLocal(parts) {
 			const voice = this.voice();
 			this.setState("speaking");
 			parts.forEach((p, i) => {

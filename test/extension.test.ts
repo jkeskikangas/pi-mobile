@@ -298,7 +298,7 @@ test("voice: a view-only device may listen but not dictate or open a voice call"
 	const vcall = (m: string, p: unknown = {}) => viewer.rpc("agent", { agent, m, p });
 	assert.equal((await vcall("voiceStatus")).speech, "Pi is idle.");
 	assert.ok((await vcall("brief", {})).speech);
-	for (const m of ["transcribe", "distill", "voiceSession", "voiceState"]) await assert.rejects(vcall(m, {}), /view-only/, m);
+	for (const m of ["transcribe", "distill", "voiceSession", "voiceState", "speak"]) await assert.rejects(vcall(m, {}), /view-only/, m);
 });
 
 test("terminal notifications are mirrored to the phone", async () => {
