@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#111214" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="pi mobile">
+<meta name="referrer" content="no-referrer">
+<title>pi mobile</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+	<header id="top">
+		<button id="sessionBtn" class="session-btn" aria-haspopup="dialog" aria-label="Switch session">
+			<span id="statusDot" class="dot"></span>
+			<span class="session-text">
+				<span id="sessionName" class="session-name">pi mobile</span>
+				<span id="sessionSub" class="session-sub"></span>
+			</span>
+			<span class="chev" aria-hidden="true">▾</span>
+		</button>
+		<button id="modelBtn" class="chip" aria-label="Model and thinking level" hidden></button>
+		<button id="menuBtn" class="icon-btn" aria-label="Menu">⋯</button>
+	</header>
+	<div id="banner" class="banner" hidden></div>
+	<main id="scroller">
+		<div id="empty" class="empty" hidden></div>
+		<button id="olderBtn" class="older" hidden>Load earlier messages</button>
+		<div id="transcript" aria-live="polite"></div>
+		<div id="liveTools"></div>
+	</main>
+	<button id="jumpBtn" class="jump" hidden aria-label="Scroll to latest">↓</button>
+	<section id="prompts" aria-live="assertive"></section>
+	<footer id="composer" hidden>
+		<div id="suggest" class="suggest" hidden></div>
+		<div id="attachments" class="attachments" hidden></div>
+		<div class="compose-row">
+			<label class="icon-btn attach" aria-label="Attach image">
+				<span aria-hidden="true">＋</span>
+				<input id="fileInput" type="file" accept="image/*" multiple hidden>
+			</label>
+			<textarea id="input" rows="1" placeholder="Message pi…" enterkeyhint="send" autocomplete="off"></textarea>
+			<button id="modeBtn" class="mode" hidden title="While pi works: steer interrupts after the current tool, queue waits until it finishes">steer</button>
+			<button id="stopBtn" class="stop" hidden aria-label="Stop">■</button>
+			<button id="sendBtn" class="send" aria-label="Send">↑</button>
+		</div>
+	</footer>
+	<div id="viewOnly" class="view-only" hidden>View-only device</div>
+</div>
+<div id="sheet" class="sheet" hidden>
+	<div class="sheet-backdrop" data-close></div>
+	<div class="sheet-panel" role="dialog" aria-modal="true">
+		<div class="sheet-grip" data-close></div>
+		<div id="sheetBody"></div>
+	</div>
+</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="nacl.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

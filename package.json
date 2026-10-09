@@ -1,0 +1,59 @@
+{
+  "name": "pi-mobile",
+  "version": "0.1.0",
+  "description": "Continue every pi session from your phone: end-to-end encrypted, no server or app to install, answer any extension's dialogs, lock-screen Web Push.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "mobile",
+    "remote-control",
+    "phone",
+    "web-push",
+    "e2e"
+  ],
+  "license": "MIT",
+  "author": "Jarno Keskikangas",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jkeskikangas/pi-mobile.git"
+  },
+  "homepage": "https://github.com/jkeskikangas/pi-mobile#readme",
+  "bugs": {
+    "url": "https://github.com/jkeskikangas/pi-mobile/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "src",
+    "web",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "tweetnacl": "^1.0.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.1.0",
+    "@types/node": "^26.6.4",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^7.0.2",
+    "@earendil-works/pi-tui": "^1.1.0"
+  }
+}

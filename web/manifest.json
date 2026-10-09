@@ -1,0 +1,11 @@
+{
+  "name": "pi mobile",
+  "short_name": "pi mobile",
+  "description": "Control your pi coding-agent sessions from your phone",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111214",
+  "theme_color": "#111214",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
