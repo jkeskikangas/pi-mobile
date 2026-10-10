@@ -966,7 +966,9 @@
 		};
 		const act = el("div", "pact");
 		if (p.kind === "confirm") {
-			const yes = el("button", "primary", "Yes");
+			// Irreversible actions are red and say so, the same as in voice mode.
+			const destructive = !!window.PiVoiceCore?.isDestructive?.(p);
+			const yes = el("button", destructive ? "danger" : "primary", destructive ? "Yes, do it" : "Yes");
 			const no = el("button", "", "No");
 			yes.onclick = () => answer(true);
 			no.onclick = () => answer(false);
@@ -1031,10 +1033,12 @@
 		$("sendBtn").classList.toggle("ready", !!($("input").value.trim() || S.attachments.length));
 	}
 
+	/** After any change to the composer text, including dictation filling it in. */
 	function autosize() {
 		const t = $("input");
 		t.style.height = "auto";
 		t.style.height = `${Math.min(t.scrollHeight, window.innerHeight * 0.4)}px`;
+		updateSend();
 	}
 
 	async function send() {
@@ -1588,6 +1592,9 @@
 
 	// ── wiring ─────────────────────────────────────────────────────────────────────
 	function wire() {
+		// The composer grows and shrinks (working bar, dictation, attachments); floating controls follow it.
+		const composer = $("composer");
+		new ResizeObserver(() => document.documentElement.style.setProperty("--composer-h", `${composer.offsetHeight || $("viewOnly").offsetHeight || 0}px`)).observe(composer);
 		$("sessionBtn").onclick = () => S.device && sessionsSheet();
 		$("modelBtn").onclick = modelSheet;
 		$("menuBtn").onclick = () => S.device && menuSheet();
@@ -1680,6 +1687,8 @@
 		autosize,
 		openSheet,
 		sessionsSheet,
+		statusLine,
+		icon,
 		input: () => $("input"),
 	};
 

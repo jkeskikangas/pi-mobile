@@ -652,7 +652,12 @@
 			$("vHint").textContent = this.hint();
 			$("vOrb").setAttribute("aria-label", this.stageAction());
 			$("vSessionName").textContent = app().agentName(this.agent);
-			$("vDot").className = `dot ${info?.status || "gone"}`;
+			// The same status line as the app's header: one truth about the session.
+			const line = info ? app().statusLine(info) : { text: "", cls: "" };
+			$("vSub").textContent = line.text;
+			$("vSub").className = `session-sub ${line.cls}`;
+			$("vDot").className = `dot ${line.cls === "waiting" ? "waiting" : info?.status || "gone"}`;
+			$("vSession").setAttribute("aria-label", `${app().agentName(this.agent)}${line.text ? `: ${line.text}` : ""}. Switch session`);
 			$("vEngine").textContent = this.engine === "cascade" ? "basic" : "";
 			$("vEyesFree").setAttribute("aria-pressed", String(this.attention === "eyes-busy"));
 			$("vGlance").setAttribute("aria-pressed", String(this.attention === "glance"));
@@ -719,13 +724,18 @@
 				return;
 			}
 			const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text });
+			const eyebrow = (text) => {
+				const e = el("div", "eyebrow", "");
+				e.append(app().icon("alert"), text);
+				return e;
+			};
 			if (this.grace?.prompt.id === p.id) {
 				const left = Math.max(0, this.grace.until - Date.now());
 				let bar = box.querySelector(".grace-bar > span");
 				if (box.dataset.grace !== p.id) {
 					box.dataset.grace = p.id;
-					const acts = el("div", "acts");
-					const cancel = el("button", "yes", "Cancel");
+					const acts = el("div", "pact");
+					const cancel = el("button", "primary", "Cancel");
 					cancel.onclick = () => this.cancelGrace();
 					const now = el("button", "", "Do it now");
 					now.onclick = () => this.finishGrace(true);
@@ -733,7 +743,7 @@
 					const track = el("div", "grace-bar");
 					bar = el("span");
 					track.appendChild(bar);
-					box.replaceChildren(el("h2", "", `${p.title.replace(/\?\s*$/, "")}`), el("p", "grace-left", ""), track, acts);
+					box.replaceChildren(eyebrow("Going ahead"), el("div", "ptitle", `${p.title.replace(/\?\s*$/, "")}`), el("p", "grace-left", ""), track, acts);
 				}
 				box.querySelector(".grace-left").textContent = `Going ahead in ${Math.ceil(left / 1000)} s, as you asked. Say “stop” or tap Cancel.`;
 				bar.style.width = `${(left / GRACE_MS) * 100}%`;
@@ -741,7 +751,7 @@
 				return;
 			}
 			delete box.dataset.grace;
-			const acts = el("div", "acts");
+			const acts = el("div", "pact");
 			const answer = async (value, label) => {
 				acts.querySelectorAll("button").forEach((b) => (b.disabled = true));
 				try {
@@ -762,13 +772,19 @@
 			};
 			if (p.kind === "confirm") {
 				const destructive = V.isDestructive(p);
-				button(destructive ? "Yes, do it" : "Yes", destructive ? "danger" : "yes", true);
+				button(destructive ? "Yes, do it" : "Yes", destructive ? "danger" : "primary", true);
 				button("No", "", false);
 			} else if (p.kind === "select") {
+				acts.classList.add("col");
 				for (const o of (p.options || []).slice(0, 6)) button(o, V.isDestructive({ title: o }) ? "danger" : "", o);
-				button("Cancel", "", undefined);
+				button("Cancel", "ghost", undefined);
 			}
-			box.replaceChildren(el("h2", "", p.title), ...(p.message ? [el("p", "", p.message)] : []), ...(acts.children.length ? [acts] : [el("p", "", "Say your answer.")]));
+			box.replaceChildren(
+				eyebrow("pi asks"),
+				el("div", "ptitle", p.title),
+				...(p.message ? [el("div", "pmsg", p.message)] : []),
+				...(acts.children.length ? [acts] : [el("p", "grace-left", "Say your answer.")]),
+			);
 			box.hidden = false;
 		}
 
@@ -1754,6 +1770,14 @@
 	}
 
 	window.PiVoice = {
+		/** Tests only (set window.PiVoiceDebug = [] first): show a state with sample captions. */
+		preview(state, { heard = "", said = "", note = "" } = {}) {
+			if (!window.PiVoiceDebug || !mode) return;
+			mode.heard(heard);
+			mode.said(said);
+			mode.note(note);
+			mode.setState(state);
+		},
 		// After the app has applied the event (prompts, statuses), so voice reads the updated state.
 		onEvent(ev) {
 			if (mode && !mode.closed) setTimeout(() => mode && !mode.closed && mode.onEvent(ev), 0);

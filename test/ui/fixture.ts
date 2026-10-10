@@ -131,6 +131,26 @@ for (const f of fakes) {
 				emit(f, { type: "info", info: f.info });
 				return { ok: true };
 			}
+			// Voice: dictation is "transcribed" after a beat; realtime is unavailable so voice mode runs basic.
+			if (m === "transcribe")
+				return new Promise((r) =>
+					setTimeout(
+						() =>
+							r({
+								raw: "um so in the report make the totals use add not subtract no wait also round to cents",
+								text: "In the report, make the totals use `add` instead of subtract, and round them to cents.",
+								editor: "In the report, make the totals use `add` instead of subtract, and round them to cents.",
+								unclear: [],
+								provider: "fixture",
+								by: "fixture",
+							}),
+						1200,
+					),
+				);
+			if (m === "voiceSession") throw new Error("realtime voice is not set up");
+			if (m === "speak") throw new Error("tts unavailable");
+			if (m === "voiceStatus") return { speech: "pi is idle.", status: f.info.status, elapsedMs: 0, tools: [], prompts: prompts.get(f.info.agent) ?? [] };
+			if (m === "brief") return { speech: "Done. The totals now add instead of subtract.", more: [], report: "", by: "fixture" };
 			if (m === "send") {
 				f.items.push({ k: "user", id: `u${Date.now()}`, text: p.text, images: p.images?.length ?? 0, ts: Date.now() });
 				emit(f, { type: "item", item: f.items.at(-1) });

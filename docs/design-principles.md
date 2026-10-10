@@ -24,15 +24,17 @@ If a change only works with full attention and two hands, it is wrong for this a
 1. **What needs you comes first.** A waiting question outranks everything: the raised question card, the bar for other sessions' questions, the session list grouped Needs you → Working → Idle. Never put a waiting dialog behind navigation.
 2. **One obvious action per state.** Each state has a single primary action (accent fill, at the bottom). Secondary actions are quieter. Destructive answers are red and name what they do ("Yes, do it", "Revoke"), never a bare "OK".
 3. **State in words, colour and sound.** The header says "Working · 0:42"; status dots reinforce it; voice states also have an earcon. Never colour alone.
-4. **Nothing is lost.** Text survives reconnects; dictation offers raw and undo; irreversible voice confirmations have an undo window; errors say what to do next.
-5. **Calm by default.** A toast or an inline line before a modal; a state label before a spinner; animation explains state, never decorates.
-6. **One truth.** The terminal, the phone and the voice say the same thing about a session. The phone never invents state the hub did not send.
-7. **Tokens only.** Every colour, radius, shadow and easing comes from the tokens in `ui.md`. The voice screen's dark palette (§4) is the one sanctioned exception, and it still uses the shape and motion tokens.
+4. **One colour language, everywhere.** A colour means the same thing in the app, in dictation and in voice mode: **blue** is you and what you can tap (your messages, the recorder, listening, primary buttons), **violet** is pi working (the "Working" status, running steps, distilling, the working orb), **teal** is pi speaking, **amber** is pi needing you, **green** is done, **red** is stop, failure and irreversible answers, **grey** is off. The tokens are `--you`, `--busy`, `--speak`, `--needs`, `--ok`, `--danger`/`--err` and `--off` (`ui.md`).
+5. **Nothing is lost.** Text survives reconnects; dictation offers raw and undo; irreversible voice confirmations have an undo window; errors say what to do next.
+6. **Calm by default.** A toast or an inline line before a modal; a state label before a spinner; animation explains state, never decorates.
+7. **One truth.** The terminal, the phone and the voice say the same thing about a session: voice mode's header shows the app's own status line (`statusLine` in `app.js`). The phone never invents state the hub did not send.
+8. **Tokens only.** Every colour, radius, shadow and easing comes from the tokens in `ui.md`. Voice mode is always dark: it applies the app's own dark palette (the `--d-*` tokens), so its header, question card and segmented controls are the app's components.
+9. **One component per job.** A question from pi is the `.prompt` card wherever it appears (transcript or voice mode); a two-way choice is `.seg`; a session header is `.session-btn`. Do not restyle a copy; extend the component.
 
 ## 3. Dictation in the composer
 
 - The mic sits next to Send. **Hold to talk, release to finish** (walkie-talkie); a quick tap toggles and you finish with ✓. Enter or Space toggles from the keyboard. No long-press menu or text selection on the button.
-- While recording, `#dictBar` becomes the recorder: cancel ✕, a live waveform, a timer, a one-line hint, done ✓. It is built once and animated per frame; never rebuild DOM on a timer.
+- While recording, `#dictBar` becomes the recorder, in "you" blue like voice mode listening: cancel ✕, a live waveform, a timer, a one-line hint, done ✓. It is built once and animated per frame; never rebuild DOM on a timer. Distilling shows pi's violet spinner.
 - The result lands in the input **for review**; the phone never sends a dictation by itself. Chips: **raw** (toggles to **distilled**) and **undo**, with one status line ("Distilled from your speech — check it, then send").
 - Busy and error states say what is happening and what to do ("Didn't catch anything. Try again a little closer to the mic.").
 - What the user changes before sending teaches the personal dictionary (`docs/voice.md`); keep the send path calling `learn`.
@@ -41,23 +43,24 @@ If a change only works with full attention and two hands, it is wrong for this a
 
 Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; sound and speech do the real work (behaviour in [voice.md](voice.md)).
 
-- **Always dark and immersive**, whatever the system theme: focus, legibility at arm's length, less battery with the screen kept awake on OLED. Its palette lives on `.voice` (`--v-bg`, `--v-text`, `--v-muted`, `--v-line`).
-- **State colours** come from `.voice[data-state]` as `--c1`/`--c2` and drive the glow, the orb and focus rings. Keep them consistent so they can be learned:
+- **Always dark and immersive**, whatever the system theme: focus, legibility at arm's length, less battery with the screen kept awake on OLED. `.voice` applies the app's dark palette (`--d-*`), so the same tokens and components work inside it.
+- **The header is the app's header**: session name, the app's status line ("Working · 0:42", "Needs you · …") and status dot, plus the engine tag when voice runs without realtime.
+- **State colours** come from `.voice[data-state]` as `--c1`/`--c2` (pairs of the shared state tokens) and drive the glow, the orb and focus rings, in the same colour language as the app:
 
   | State | Colour | Label |
   |---|---|---|
-  | listening, hearing | blue / cyan | Listening |
-  | thinking | violet | Got it |
-  | working | amber / orange | pi is on it, with elapsed time |
-  | speaking | green / cyan | none (the captions carry it) |
-  | asking | gold / pink, pulsing ring | pi needs you |
-  | paused, connecting, offline | grey | Mic off / Tap to talk / Connecting… |
+  | listening, hearing | blue (`--you`) | Listening |
+  | thinking | blue → violet | Got it |
+  | working | violet (`--busy`) | pi is on it, with elapsed time |
+  | speaking | teal (`--speak`) | none (the captions carry it) |
+  | asking | amber (`--needs`), pulsing ring | pi needs you |
+  | paused, connecting, offline | grey (`--off`) | Mic off / Tap to talk / Connecting… |
 
 - **The orb** (`Orb` in `voice.js`, a canvas) follows the voice that matters: yours while listening, pi's while speaking; it breathes while pi works. It is `aria-hidden`; the state label is the accessible truth. Draw only in `requestAnimationFrame`, and stop when hidden.
 - **The stage is one button.** It interrupts pi, unmutes, or talks (tap mode); its `aria-label` names the action it will take now.
 - **Captions** show what you said (muted, "You") and what pi says, live as words arrive. Clamp lines; never scroll.
-- **The question card** (`#vAsk`) offers tap answers when you can glance; destructive answers use `.danger`. During the undo window it shows the action, a shrinking gold bar, Cancel (primary) and Do it now.
-- **Controls at the bottom**: a 64–72 px mute button and two segmented controls (Eyes-free | Can glance, Open mic | Tap to talk) with `aria-pressed`. Header: session switcher and a 44 px close.
+- **The question card** (`#vAsk`) is the app's `.prompt` card: "pi asks", the title, the message, tap answers when you can glance; destructive answers are `.danger` ("Yes, do it") in both places. During the undo window it shows "Going ahead", the action, a shrinking amber bar, Cancel (primary) and Do it now.
+- **Controls at the bottom**: a 64–72 px mute button and two full-width `.seg.wide` segmented controls (Eyes-free | Can glance, Open mic | Tap to talk) with `aria-pressed`. Header: session switcher and a 44 px close. Icons come from the app's sprite.
 - **Sound is part of the UI.** Earcons live in `voice-core.js` `EARCONS` (listen, heard, working tick, attention, done, failed, off). A new state the user must notice gets a sound, not only a colour; keep the set small so each stays learnable.
 
 ## 5. Motion
