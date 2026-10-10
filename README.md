@@ -90,7 +90,7 @@ Tap the **bars icon** in the phone's header. Talk; pi answers out loud. On the c
 - **Answer pi's questions by voice or with a tap.** Irreversible actions need the action named: "yes, push", not "yeah". If you just asked for exactly that, it says "Deploying to production, say stop to cancel" and goes ahead after four seconds unless you stop it.
 - **pi knows you're listening.** While voice mode is on, the agent is told you can't read: outcome first, one clear question when it needs you.
 - **Pick its voice.** Four voices (Marin, Coral, Cedar, Ash: two feminine, two masculine), each with its own delivery and pace and a sample to hear first. The voice changes how pi sounds, never what it says. It is set per phone, from the menu or voice mode.
-- **Built for busy hands.** A screen-sized target for tap-to-talk in wind or traffic, the headset play/pause button as a tap where the phone allows it, and **Eyes-free / Can glance** to set how much it says.
+- **Built for busy hands.** A screen-sized circle for push to talk in wind or traffic (hold while you talk, or tap to start and stop), the headset play/pause button as a tap where the phone allows it, and **Eyes-free / Can glance** to set how much it says.
 
 It uses a realtime speech model (`gpt-realtime-2`) over WebRTC straight from the phone, opened by pi with your ChatGPT sign-in or `OPENAI_API_KEY`; no token or audio passes through your computer. Without realtime it falls back to basic voice: recognition on your computer, a spoken brief, and the phone's speech (or any OpenAI-compatible speech endpoint via `voice.ttsUrl`, such as a local Kokoro).
 

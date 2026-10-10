@@ -20,7 +20,7 @@ The phone app is plain HTML, CSS and JavaScript in `web/` (no build step). This 
 | Accent | `--accent`, `--accent-text`, `--accent-soft`, `--accent-ink` |
 | Status | `--ok`, `--warn` (text), `--warn-dot`, `--warn-soft`, `--warn-line`, `--err`, `--err-soft` |
 | Who has the floor | `--you` (blue: you, and what you can tap), `--busy` (violet: pi working), `--speak` (teal: pi speaking), `--needs` (amber: pi needs you), `--off` (grey), `--danger`/`--danger-text` (irreversible answers); `-2` companions and `-soft` fills for each |
-| Dark palette | `--d-*`: defined once, applied by `prefers-color-scheme: dark` and by `.voice` (voice mode is always dark) |
+| Dark palette | `--d-*`: defined once, applied by `prefers-color-scheme: dark`; the voice orb's state colours use it in both themes |
 | Diff | `--add`, `--add-ink`, `--del`, `--del-ink` |
 | Shape | `--r-s` 8, `--r-m` 12, `--r-l` 18, `--r-xl` 24; `--shadow-1`, `--shadow-2`; `--ease` |
 

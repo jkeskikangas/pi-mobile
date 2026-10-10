@@ -28,7 +28,7 @@ If a change only works with full attention and two hands, it is wrong for this a
 5. **Nothing is lost.** Text survives reconnects; dictation offers raw and undo; irreversible voice confirmations have an undo window; errors say what to do next.
 6. **Calm by default.** A toast or an inline line before a modal; a state label before a spinner; animation explains state, never decorates.
 7. **One truth.** The terminal, the phone and the voice say the same thing about a session: voice mode's header shows the app's own status line (`statusLine` in `app.js`). The phone never invents state the hub did not send.
-8. **Tokens only.** Every colour, radius, shadow and easing comes from the tokens in `ui.md`. Voice mode is always dark: it applies the app's own dark palette (the `--d-*` tokens), so its header, question card and segmented controls are the app's components.
+8. **Tokens only.** Every colour, radius, shadow and easing comes from the tokens in `ui.md`. Voice mode follows the system theme like every other view, so its header, question card and segmented controls are the app's components; only the orb draws with the vivid `--d-*` state colours in both themes.
 9. **One component per job.** A question from pi is the `.prompt` card wherever it appears (transcript or voice mode); a two-way choice is `.seg`; a session header is `.session-btn`. Do not restyle a copy; extend the component.
 
 ## 3. Dictation in the composer
@@ -43,9 +43,9 @@ If a change only works with full attention and two hands, it is wrong for this a
 
 Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; sound and speech do the real work (behaviour in [voice.md](voice.md)).
 
-- **Always dark and immersive**, whatever the system theme: focus, legibility at arm's length, less battery with the screen kept awake on OLED. `.voice` applies the app's dark palette (`--d-*`), so the same tokens and components work inside it.
+- **Immersive, in either theme.** Voice mode follows the system theme like the rest of the app (a dark room or a sunny street both get a legible screen). The orb keeps its vivid state colours (`--d-accent`, `--d-busy`, `--d-speak`, …) in both themes, so a state looks the same wherever you see it.
 - **The header is the app's header**: session name, the app's status line ("Working · 0:42", "Needs you · …") and status dot, plus the engine tag when voice runs without realtime.
-- **State colours** come from `.voice[data-state]` as `--c1`/`--c2` (pairs of the shared state tokens) and drive the glow, the orb and focus rings, in the same colour language as the app:
+- **State colours** come from `.voice[data-state]` as `--c1`/`--c2` (pairs of the vivid `--d-*` state colours) and drive the glow and the orb, in the same colour language as the app:
 
   | State | Colour | Label |
   |---|---|---|
@@ -54,13 +54,13 @@ Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; so
   | working | violet (`--busy`) | pi is on it, with elapsed time |
   | speaking | teal (`--speak`) | none (the captions carry it) |
   | asking | amber (`--needs`), pulsing ring | pi needs you |
-  | paused, connecting, offline | grey (`--off`) | Mic off / Tap to talk / Connecting… |
+  | paused, connecting, offline | grey (`--off`) | Mic off / Push to talk / Connecting… |
 
 - **The orb** (`Orb` in `voice.js`, a canvas) follows the voice that matters: yours while listening, pi's while speaking; it breathes while pi works. It is `aria-hidden`; the state label is the accessible truth. Draw only in `requestAnimationFrame`, and stop when hidden.
 - **The stage is one button.** It interrupts pi, unmutes, or talks (tap mode); its `aria-label` names the action it will take now.
 - **Captions** show what you said (muted, "You") and what pi says, live as words arrive. Clamp lines; never scroll.
 - **The question card** (`#vAsk`) is the app's `.prompt` card: "pi asks", the title, the message, tap answers when you can glance; destructive answers are `.danger` ("Yes, do it") in both places. During the undo window it shows "Going ahead", the action, a shrinking amber bar, Cancel (primary) and Do it now.
-- **Controls at the bottom**: a 64–72 px mute button and two full-width `.seg.wide` segmented controls (Eyes-free | Can glance, Open mic | Tap to talk) with `aria-pressed`. Header: session switcher and a 44 px close. Icons come from the app's sprite.
+- **Controls at the bottom**: a 64–72 px mute button and two full-width `.seg.wide` segmented controls (Eyes-free | Can glance, Open mic | Push to talk) with `aria-pressed`. Header: session switcher and a 44 px close. Icons come from the app's sprite.
 - **Sound is part of the UI.** Earcons live in `voice-core.js` `EARCONS` (listen, heard, working tick, attention, done, failed, off). A new state the user must notice gets a sound, not only a colour; keep the set small so each stays learnable.
 
 ## 5. Motion

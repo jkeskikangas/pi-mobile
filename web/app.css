@@ -4,6 +4,8 @@
 	--bg: #f7f7f5;
 	--surface: #ffffff;
 	--panel: var(--surface);
+	/* The selected segment: lifted off its track in light, a lighter fill in dark. */
+	--seg-on: var(--surface);
 	--panel-2: #efefeb;
 	--fill-2: #e6e6e1;
 	--text: #17181a;
@@ -59,11 +61,12 @@
 	--needs: var(--warn-dot);
 	--danger: #c42b2b;
 	--danger-text: #ffffff;
-	/* The dark palette, defined once: dark mode and voice mode (always dark) both use it. */
+	/* The dark palette, defined once. The voice orb also draws with its vivid colours in both themes. */
 	--d-bg: #0e0f11;
 	--d-surface: #17181b;
 	--d-panel-2: #202226;
 	--d-fill-2: #2a2c31;
+	--d-seg-on: #3a3d44;
 	--d-text: #ececee;
 	--d-text-2: #b6b9bf;
 	--d-muted: #9a9da4;
@@ -109,6 +112,7 @@
 		--surface: var(--d-surface);
 		--panel-2: var(--d-panel-2);
 		--fill-2: var(--d-fill-2);
+		--seg-on: var(--d-seg-on);
 		--text: var(--d-text);
 		--text-2: var(--d-text-2);
 		--muted: var(--d-muted);
@@ -344,7 +348,7 @@ footer#composer > * { max-width: var(--measure); margin-inline: auto; }
 .work-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; font-weight: 550; }
 .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--panel-2); flex: none; }
 .seg button { height: 30px; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--text-2); }
-.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow-1); }
+.seg button[aria-pressed="true"] { background: var(--seg-on); color: var(--text); box-shadow: var(--shadow-1); }
 .seg.wide { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
 .seg.wide button { height: 44px; font-size: 14px; }
 .stop-btn { display: inline-flex; align-items: center; gap: 4px; height: 36px; padding: 0 12px 0 8px; border-radius: 999px; background: var(--err-soft); color: var(--err); font-size: 14px; font-weight: 650; flex: none; }
@@ -470,56 +474,13 @@ textarea#input::placeholder { color: var(--muted); }
 .rec-x svg, .rec-done svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 @media (max-width: 380px) { .dict-bar .rec-hint { display: none; } }
 
-/* Voice mode: always dark, on the same dark palette as the app's dark theme, so its cards, buttons
-   and segmented controls are the app's own components. Only the state glow is voice-specific. */
+/* Voice mode: light or dark with the app, so its cards, buttons and segmented controls are the app's
+   own components. Only the state glow is voice-specific, in the same vivid colours in both themes. */
 body.voice-on { overflow: hidden; }
 body.voice-on .sheet { z-index: 60; }
 body.voice-on .toasts { z-index: 70; }
 .voice {
-	--bg: var(--d-bg);
-	--surface: var(--d-surface);
-	--panel-2: var(--d-panel-2);
-	--fill-2: var(--d-fill-2);
-	--text: var(--d-text);
-	--text-2: var(--d-text-2);
-	--muted: var(--d-muted);
-	--border: var(--d-border);
-	--border-strong: var(--d-border-strong);
-	--accent: var(--d-accent);
-	--accent-text: var(--d-accent-text);
-	--accent-soft: var(--d-accent-soft);
-	--accent-ink: var(--d-accent-ink);
-	--user: var(--d-user);
-	--user-text: var(--d-user-text);
-	--ok: var(--d-ok);
-	--ok-soft: var(--d-ok-soft);
-	--warn: var(--d-warn);
-	--warn-dot: var(--d-warn-dot);
-	--warn-soft: var(--d-warn-soft);
-	--warn-line: var(--d-warn-line);
-	--err: var(--d-err);
-	--err-soft: var(--d-err-soft);
-	--code-bg: var(--d-code-bg);
-	--add: var(--d-add);
-	--add-ink: var(--d-add-ink);
-	--del: var(--d-del);
-	--del-ink: var(--d-del-ink);
-	--shadow-1: var(--d-shadow-1);
-	--shadow-2: var(--d-shadow-2);
-	--scrim: var(--d-scrim);
-	--busy: var(--d-busy);
-	--busy-2: var(--d-busy-2);
-	--busy-soft: var(--d-busy-soft);
-	--speak: var(--d-speak);
-	--speak-2: var(--d-speak-2);
-	--speak-soft: var(--d-speak-soft);
-	--you-2: var(--d-you-2);
-	--needs-2: var(--d-needs-2);
-	--off: var(--d-off);
-	--danger: var(--d-danger);
-	--danger-text: var(--d-danger-text);
-	color-scheme: dark;
-	--c1: var(--you); --c2: var(--you-2);
+	--c1: var(--d-accent); --c2: var(--d-you-2);
 	position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 10px;
 	padding: calc(var(--safe-t) + 6px) 16px calc(var(--safe-b) + 14px);
 	background: radial-gradient(120% 70% at 50% 36%, color-mix(in srgb, var(--c1) 16%, var(--bg)) 0%, var(--bg) 64%);
@@ -529,12 +490,12 @@ body.voice-on .toasts { z-index: 70; }
 @keyframes voice-in { from { opacity: 0; transform: scale(1.015); } }
 /* State glow, one colour language with the app: you = blue, pi thinking/working = violet,
    pi speaking = teal, pi needs you = amber, off = grey. */
-.voice[data-state="listening"], .voice[data-state="hearing"] { --c1: var(--you); --c2: var(--you-2); }
-.voice[data-state="thinking"] { --c1: var(--you); --c2: var(--busy); }
-.voice[data-state="working"] { --c1: var(--busy); --c2: var(--busy-2); }
-.voice[data-state="speaking"] { --c1: var(--speak); --c2: var(--speak-2); }
-.voice[data-state="asking"] { --c1: var(--needs); --c2: var(--needs-2); }
-.voice[data-state="paused"], .voice[data-state="connecting"], .voice[data-state="offline"] { --c1: var(--off); --c2: var(--muted); }
+.voice[data-state="listening"], .voice[data-state="hearing"] { --c1: var(--d-accent); --c2: var(--d-you-2); }
+.voice[data-state="thinking"] { --c1: var(--d-accent); --c2: var(--d-busy); }
+.voice[data-state="working"] { --c1: var(--d-busy); --c2: var(--d-busy-2); }
+.voice[data-state="speaking"] { --c1: var(--d-speak); --c2: var(--d-speak-2); }
+.voice[data-state="asking"] { --c1: var(--d-warn-dot); --c2: var(--d-needs-2); }
+.voice[data-state="paused"], .voice[data-state="connecting"], .voice[data-state="offline"] { --c1: var(--d-off); --c2: var(--d-muted); }
 
 .v-top { width: 100%; max-width: 560px; display: flex; align-items: center; gap: 8px; }
 .v-session { flex: 1; min-width: 0; }
@@ -544,8 +505,8 @@ body.voice-on .toasts { z-index: 70; }
 .v-close .i, .v-round .i { width: 20px; height: 20px; stroke-width: 2.2; }
 
 /* The stage is one big target: usable without looking, with gloves, on a bike mount. */
-.v-stage { position: relative; flex: 1; width: 100%; max-width: 560px; min-height: 240px; border-radius: var(--r-xl); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6%; color: inherit; -webkit-tap-highlight-color: transparent; }
-.v-stage:focus-visible { outline: 2px solid var(--c1); outline-offset: 4px; }
+.v-stage { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; position: relative; flex: 1; width: 100%; max-width: 560px; min-height: 240px; border-radius: var(--r-xl); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6%; color: inherit; -webkit-tap-highlight-color: transparent; }
+.v-stage:focus-visible { outline: 2px solid var(--you); outline-offset: 4px; }
 .v-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .v-icon { position: absolute; top: 42%; left: 50%; width: 34px; height: 34px; transform: translate(-50%, -50%); opacity: 0; transition: opacity .3s; background: currentColor; -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
 .voice[data-state="paused"] .v-icon { opacity: .8; --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M15 10V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 5 2.2M5 11a7 7 0 0 0 11.4 5.4M19 11a7 7 0 0 1-.6 2.8M12 18v3M4 4l16 16'/%3E%3C/svg%3E"); }
@@ -574,8 +535,6 @@ body.voice-on .toasts { z-index: 70; }
 .v-mute .off, .v-mute[aria-pressed="true"] .on { display: none; }
 .v-mute[aria-pressed="true"] .off { display: block; }
 .v-mute[aria-pressed="true"] { background: var(--text); color: var(--bg); }
-.v-controls .seg { background: var(--panel-2); }
-.v-controls .seg button[aria-pressed="true"] { background: var(--fill-2); box-shadow: none; }
 @media (min-height: 760px) { .v-mute { width: 72px; height: 72px; } }
 @media (prefers-reduced-motion: reduce) { .mic.rec::after, .dict-bar[data-kind="busy"] .grow::before { animation: none !important; } .voice { transition: none; animation: none; } }
 @media (prefers-contrast: more) { .voice { --muted: #d4d6db; --border-strong: rgba(255, 255, 255, .45); } }

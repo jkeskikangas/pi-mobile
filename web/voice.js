@@ -361,6 +361,7 @@
 			this.canvas = canvas;
 			this.owner = owner;
 			this.level = 0;
+			this.press = 0;
 			this.colors = [
 				[91, 147, 245],
 				[34, 211, 238],
@@ -413,7 +414,11 @@
 			const cx = w / 2;
 			const cy = h * 0.42;
 			const r0 = Math.min(w, h) * 0.24;
-			const r = r0 * (1 + breathe + this.level * (still ? 0.15 : 0.5));
+			// Held for push to talk: the finger covers the middle, so the answer is a swell and a ring around it.
+			this.press += ((this.owner.holding ? 1 : 0) - this.press) * (still ? 1 : 0.25);
+			// Never into the state label below: with a question card on screen the stage is short.
+			const room = Math.max(r0 * 0.6, Math.min(cy, h - 96 - cy) / 1.3);
+			const r = Math.min(room, r0 * (1 + breathe + this.level * (still ? 0.15 : 0.5) + this.press * 0.1));
 			// Glow.
 			const glow = g.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 2.1);
 			glow.addColorStop(0, `rgba(${a},${dim ? 0.12 : 0.32})`);
@@ -445,6 +450,13 @@
 			hl.addColorStop(1, "rgba(255,255,255,0)");
 			g.fillStyle = hl;
 			g.fill();
+			if (this.press > 0.02) {
+				g.beginPath();
+				g.arc(cx, cy, r * 1.18, 0, Math.PI * 2);
+				g.strokeStyle = `rgba(${a},${0.55 * this.press})`;
+				g.lineWidth = 4;
+				g.stroke();
+			}
 			// Waiting on you: a slow ring.
 			if (state === "asking" && !still) {
 				const p = (t % 1.6) / 1.6;
@@ -487,7 +499,8 @@
 			this.lastTick = 0;
 			this.significant = new Map();
 			this.muted = false;
-			this.talking = false; // tap-to-talk: currently holding the floor
+			this.talking = false; // push to talk: currently holding the floor
+			this.holding = false; // ...with a finger on the circle
 			this.micAn = null;
 			this.outAn = null;
 			this.saidLive = "";
@@ -649,7 +662,7 @@
 			this.orb.retint();
 			const info = app().S.agents.get(this.agent);
 			let label = LABEL[this.state] ?? this.state;
-			if (this.state === "paused") label = this.muted ? "Mic off" : this.turns === "tap" ? "Tap to talk" : "Paused";
+			if (this.state === "paused") label = this.muted ? "Mic off" : this.turns === "tap" ? "Push to talk" : "Paused";
 			$("vState").textContent = label;
 			$("vHint").textContent = this.hint();
 			$("vOrb").setAttribute("aria-label", this.stageAction());
@@ -686,9 +699,9 @@
 				case "asking":
 					return "Answer out loud, or tap below";
 				case "paused":
-					return this.muted ? "Tap to unmute" : this.turns === "tap" ? "Tap anywhere here, talk, tap again" : "Tap to resume";
+					return this.muted ? "Tap to unmute" : this.turns === "tap" ? "Hold while you talk, or tap to start and stop" : "Tap to resume";
 				case "hearing":
-					return this.turns === "tap" ? "Tap when you're done" : "";
+					return this.turns !== "tap" ? "" : this.holding ? "Let go when you're done" : "Tap when you're done";
 				default:
 					return "";
 			}
@@ -804,25 +817,44 @@
 			}
 			if (this.state === "speaking") return this.interrupt();
 			if (this.muted) return this.setMuted(false);
-			if (this.turns === "tap") {
-				if (this.engine === "realtime") {
-					const t = this.stream?.getAudioTracks()[0];
-					if (!t) return;
-					this.talking = !this.talking;
-					t.enabled = this.talking;
-					if (this.talking && this.state === "speaking") this.hardInterrupt();
-					if (!this.talking) {
-						this.rt({ type: "input_audio_buffer.commit" });
-						this.shortTurn = false;
-						this.respond();
-					}
-					earcon(this.talking ? "listen" : "heard");
-					return this.setState(this.talking ? "hearing" : "thinking");
-				}
-				return this.manualTurn();
-			}
+			if (this.turns === "tap") return this.toggleTalk();
 			if (this.engine === "cascade" && this.state === "paused") return this.setState("listening");
 			earcon("listen");
+		}
+
+		/** Push to talk: pressing the circle starts your turn at once, over pi if it is talking. */
+		pressStart() {
+			if (this.turns !== "tap" || !this.engine || this.muted || this.talking) return false;
+			navigator.vibrate?.(15);
+			this.holding = true;
+			this.toggleTalk();
+			return true;
+		}
+
+		/** Letting go after a hold ends the turn; after a quick tap you stay talking until the next tap. */
+		pressEnd(held) {
+			this.holding = false;
+			if (held && this.talking) this.toggleTalk();
+			else this.render();
+		}
+
+		/** Push to talk: starts or ends your turn. */
+		toggleTalk() {
+			if (this.engine === "realtime") {
+				const t = this.stream?.getAudioTracks()[0];
+				if (!t) return;
+				this.talking = !this.talking;
+				t.enabled = this.talking;
+				if (this.talking && this.state === "speaking") this.hardInterrupt();
+				if (!this.talking) {
+					this.rt({ type: "input_audio_buffer.commit" });
+					this.shortTurn = false;
+					this.respond();
+				}
+				earcon(this.talking ? "listen" : "heard");
+				return this.setState(this.talking ? "hearing" : "thinking");
+			}
+			return this.manualTurn();
 		}
 
 		setMuted(m) {
@@ -1867,7 +1899,31 @@
 			mode?.close();
 			mode = null;
 		};
-		$("vOrb").onclick = () => mode?.tap();
+		// Push to talk on the circle: hold while you talk, or tap to start and tap to stop. A press that
+		// started a turn swallows its click; keyboard Space/Enter keep plain taps.
+		const orb = $("vOrb");
+		let press = null;
+		orb.onpointerdown = (e) => {
+			if (e.button > 0 || !mode?.pressStart()) return;
+			press = { at: performance.now(), id: e.pointerId };
+			try {
+				orb.setPointerCapture(e.pointerId);
+			} catch {}
+		};
+		const release = (e) => {
+			if (!press || e.pointerId !== press.id) return;
+			const held = performance.now() - press.at >= 350;
+			press = null;
+			swallow = true;
+			mode?.pressEnd(held);
+		};
+		orb.onpointerup = orb.onpointercancel = release;
+		orb.oncontextmenu = (e) => e.preventDefault();
+		let swallow = false;
+		orb.onclick = () => {
+			if (swallow) return (swallow = false);
+			mode?.tap();
+		};
 		$("vMute").onclick = () => mode?.setMuted(!mode.muted);
 		$("vEyesFree").onclick = () => mode?.setAttention("eyes-busy");
 		$("vGlance").onclick = () => mode?.setAttention("glance");

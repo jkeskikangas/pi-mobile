@@ -155,7 +155,7 @@ The practices the voice features are built on, where each lives in the code, why
 **Evidence:** *Source*: in the Alexa study the only fast responses users got were "stop" during agent speech ([SemDial 2025](https://www.semdial.org/anthology/Z25-Barthel_semdial_3315.pdf)).
 
 ### 5.6 Turn styles for the context
-**What:** open mic (car, kitchen) or tap to talk (wind, traffic, cycling); the whole stage is the button; the headset play/pause button acts like a tap.
+**What:** open mic (car, kitchen) or push to talk (wind, traffic, cycling): hold the circle while you talk and let go, or tap to start and tap to stop; pressing over pi interrupts it. The whole stage is the button; the headset play/pause button acts like a tap.
 **Evidence:** *Source*: Claude app recommends push-to-talk in noise ([help](https://support.claude.com/en/articles/11101966-use-voice-mode)).
 
 ---
