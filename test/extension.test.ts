@@ -106,7 +106,7 @@ before(async () => {
 	await h.fire("session_start", { reason: "startup" });
 	await until(() => !!processHub() && h.statuses.at(-1) === "📱 shared");
 	phone = new Phone();
-	await phone.pair(processHub()!.createPairing("control").links[0].url);
+	await phone.pair(processHub()!.createPairing().links[0].url);
 	agent = (await phone.rpc("hub")).agents[0].agent;
 	await phone.stream(undefined, agent);
 	await until(() => h.statuses.at(-1) === "📱 1 connected");
@@ -290,15 +290,6 @@ test("voice: status by ear, spoken brief, and the agent knows its user is listen
 	await call("voiceState", { on: false });
 	assert.equal(await voiceNote(), undefined);
 	await assert.rejects(call("voiceSession", { sdp: "nope" }), /bad offer/);
-});
-
-test("voice: a view-only device may listen but not dictate or open a voice call", async () => {
-	const viewer = new Phone();
-	await viewer.pair(processHub()!.createPairing("view").links[0].url, "viewer");
-	const vcall = (m: string, p: unknown = {}) => viewer.rpc("agent", { agent, m, p });
-	assert.equal((await vcall("voiceStatus")).speech, "Pi is idle.");
-	assert.ok((await vcall("brief", {})).speech);
-	for (const m of ["transcribe", "distill", "voiceSession", "voiceState", "speak"]) await assert.rejects(vcall(m, {}), /view-only/, m);
 });
 
 test("terminal notifications are mirrored to the phone", async () => {

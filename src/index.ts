@@ -5,7 +5,7 @@
 // is paired.
 //
 //   /remote            connect this machine; QR if no phone is paired yet, otherwise status
-//   /remote pair       pair another device (`/remote pair view` for a view-only one)
+//   /remote pair       pair another device
 //   /remote off        stop sharing: this session only, or every session on the machine
 //   /remote devices    paired devices; pick one to revoke
 //   /remote settings   exposure, HTTPS address, port (the hub restarts by itself)
@@ -30,7 +30,7 @@ const HIDDEN = Symbol.for("pi-mobile.hidden");
 const FLAG_OFF = Symbol.for("pi-mobile.flag-off");
 type G = typeof globalThis & { [HIDDEN]?: boolean; [FLAG_OFF]?: boolean };
 const SUBCOMMANDS = [
-	{ value: "pair", label: "pair", description: "Pair another device (add 'view' for view-only)" },
+	{ value: "pair", label: "pair", description: "Pair another device" },
 	{ value: "off", label: "off", description: "Stop sharing this session or the whole machine" },
 	{ value: "devices", label: "devices", description: "Paired devices; revoke one" },
 	{ value: "settings", label: "settings", description: "Exposure, HTTPS address, port" },
@@ -95,7 +95,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 			if (msg.t === "paired" && closePanel) {
 				closePanel();
 				ctx?.ui.notify(
-					`📱 Paired ${msg.device.name}${msg.device.role === "view" ? " (view-only)" : ""}. Every pi session on this machine is on your phone.`,
+					`📱 Paired ${msg.device.name}. Every pi session on this machine is on your phone.`,
 					"info",
 				);
 			}
@@ -183,7 +183,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 				case "":
 					return connect(c);
 				case "pair":
-					return pair(c, arg === "view" ? "view" : "control");
+					return pair(c);
 				case "off":
 					return off(c);
 				case "devices":
@@ -219,7 +219,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 		const b = await linked(c);
 		if (!b) return;
 		const s = await b.hubRequest<HubStatus>("status");
-		if (!s.devices.length) return pair(c, "control");
+		if (!s.devices.length) return pair(c);
 		await overview(c, s);
 	}
 
@@ -244,14 +244,13 @@ export default function piMobile(pi: ExtensionAPI): void {
 		]);
 	}
 
-	async function pair(c: ExtensionCommandContext, role: "control" | "view"): Promise<void> {
+	async function pair(c: ExtensionCommandContext): Promise<void> {
 		enable();
 		const b = await linked(c);
 		if (!b) return;
-		const pairing = await b.hubRequest<{ links: { label: string; url: string }[] }>("pair", { role });
+		const pairing = await b.hubRequest<{ links: { label: string; url: string }[] }>("pair", {});
 		const [primary, ...others] = pairing.links;
-		const header =
-			role === "view" ? "Scan to watch this machine's pi sessions (view-only)" : "Scan with your phone to use every pi session on this machine";
+		const header = "Scan with your phone to use every pi session on this machine";
 		if (c.mode !== "tui") {
 			c.ui.notify(`${header}:\n${pairing.links.map((l) => `${l.label}: ${l.url}`).join("\n")}`, "info");
 			return;
@@ -294,7 +293,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 		const s = await b.hubRequest<HubStatus>("status");
 		if (!s.devices.length) return c.ui.notify("No paired devices. /remote pairs one.", "info");
 		const label = (d: HubStatus["devices"][number]) =>
-			`${d.name} · ${d.role === "view" ? "view-only" : "full control"} · last seen ${d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : "never"}`;
+			`${d.name} · last seen ${d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : "never"}`;
 		const pick = await c.ui.select("Paired devices — choose one to revoke", [...s.devices.map(label), "Revoke all", "Done"]);
 		if (!pick || pick === "Done") return;
 		const ids = pick === "Revoke all" ? s.devices.map((d) => d.id) : s.devices.filter((d) => label(d) === pick).map((d) => d.id);

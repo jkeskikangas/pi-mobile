@@ -37,9 +37,9 @@ All of it exists today; the web app (`web/app.js`, `web/voice.js`) is the refere
 
 **Envelope** (`src/crypto.ts`): `seal(key, value) = base64url(nonce24 ‖ secretbox(JSON(value), nonce, key))`; base64url without padding. Every request payload includes `t` (client time, ms); the hub rejects payloads outside ±10 min of its clock and replayed nonces (`ReplayGuard`).
 
-**Pairing** (single use, 10 min): the QR encodes `<origin>/#p=<pairingId>.<base64url key>` (`Hub.createPairing`). The app `POST <origin>/api/pair` with `{ p: pairingId, b: seal(pairKey, { t, name }) }` and gets `{ b: seal(pairKey, { d, k, role, host }) }`: device id `d`, device key `k` (base64url, 32 bytes), `role` `control|view`, `host` (machine name). Store `{ origin, d, k, role, host }` in the Keychain. 410 = expired/used, 401 = bad.
+**Pairing** (single use, 10 min): the QR encodes `<origin>/#p=<pairingId>.<base64url key>` (`Hub.createPairing`). The app `POST <origin>/api/pair` with `{ p: pairingId, b: seal(pairKey, { t, name }) }` and gets `{ b: seal(pairKey, { d, k, role, host }) }`: device id `d`, device key `k` (base64url, 32 bytes), `role` (always `control`), `host` (machine name). Store `{ origin, d, k, role, host }` in the Keychain. 410 = expired/used, 401 = bad.
 
-**RPC:** `POST <origin>/api/rpc` with `{ d, b: seal(k, { t, m, p }) }` → `{ b: seal(k, { r }) }` or `{ b: seal(k, { e: message }) }`; HTTP 401 = device revoked/unknown (unpair). Hub methods (`Hub.deviceCall`): `hub` (→ `{ hubId, host, seq, agents: AgentInfo[], device, pushKey, pushOn }`), `focus { client, agent }`, `push`, `devices`, `revoke { ids }`, `pair { role }`, and `agent { agent, m, p }` which forwards method `m` to that pi session (`Bridge.handle`). Agent methods used by the app:
+**RPC:** `POST <origin>/api/rpc` with `{ d, b: seal(k, { t, m, p }) }` → `{ b: seal(k, { r }) }` or `{ b: seal(k, { e: message }) }`; HTTP 401 = device revoked/unknown (unpair). Hub methods (`Hub.deviceCall`): `hub` (→ `{ hubId, host, seq, agents: AgentInfo[], device, pushKey, pushOn }`), `focus { client, agent }`, `push`, `devices`, `revoke { ids }`, `pair`, and `agent { agent, m, p }` which forwards method `m` to that pi session (`Bridge.handle`). Agent methods used by the app:
 
 | Method | Params → result | Used for |
 |---|---|---|

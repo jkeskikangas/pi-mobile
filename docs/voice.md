@@ -85,16 +85,16 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 
 ### Bridge requests added
 
-| Request | Payload → result | View-only device |
-|---|---|---|
-| `transcribe` | `{audio: base64, mime, distill?, draft?}` → `{raw, text, editor, unclear[], provider, by}` | no |
-| `distill` | `{raw, draft?}` → `{raw, text, editor, unclear[], by}` | no |
-| `brief` | `{mode}` → `{speech, more[], report, by}`: spoken brief of the latest run plus the report for follow-ups | yes |
-| `details` | `{topic, mode}` → `{speech}` | yes |
-| `voiceStatus` | `{}` → `{speech, status, elapsedMs, tools, prompts}` | yes |
-| `voiceSession` | `{sdp, mode}` → `{sdp, model, provider}`: realtime call set up with the voice-layer config | no |
-| `speak` | `{text}` → `{audio: base64, mime}` from `voice.ttsUrl` or OpenAI TTS; `tts unavailable` means the phone speaks itself | no |
-| `voiceState` | `{on, mode}` → `{ok}`: the agent is told its user is listening (expires after 150 s without a refresh) | no |
+| Request | Payload → result |
+|---|---|
+| `transcribe` | `{audio: base64, mime, distill?, draft?}` → `{raw, text, editor, unclear[], provider, by}` |
+| `distill` | `{raw, draft?}` → `{raw, text, editor, unclear[], by}` |
+| `brief` | `{mode}` → `{speech, more[], report, by}`: spoken brief of the latest run plus the report for follow-ups |
+| `details` | `{topic, mode}` → `{speech}` |
+| `voiceStatus` | `{}` → `{speech, status, elapsedMs, tools, prompts}` |
+| `voiceSession` | `{sdp, mode}` → `{sdp, model, provider}`: realtime call set up with the voice-layer config |
+| `speak` | `{text}` → `{audio: base64, mime}` from `voice.ttsUrl` or OpenAI TTS; `tts unavailable` means the phone speaks itself |
+| `voiceState` | `{on, mode}` → `{ok}`: the agent is told its user is listening (expires after 150 s without a refresh) |
 
 ## Platform limits (verified against WebKit/Chromium sources, see research notes)
 
@@ -110,7 +110,7 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 
 ## Verification
 
-Unit and integration tests (`npm test`) cover vocabulary matching (including a 5,000-file repo under the time budget), distillation prompts and fallbacks, writing for the ear, significance rules, the realtime session and call relay, the voice host, the phone's voice logic (`web/voice-core.js`: commands, dialog answers with destructive confirmation, VAD, chunking), and the bridge's voice requests over the real encrypted hub protocol, including what a view-only device may do.
+Unit and integration tests (`npm test`) cover vocabulary matching (including a 5,000-file repo under the time budget), distillation prompts and fallbacks, writing for the ear, significance rules, the realtime session and call relay, the voice host, the phone's voice logic (`web/voice-core.js`: commands, dialog answers with destructive confirmation, VAD, chunking), and the bridge's voice requests over the real encrypted hub protocol.
 
 End to end, against the real services (October 2026, macOS 26, ChatGPT sign-in, no API key):
 

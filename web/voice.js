@@ -1721,7 +1721,6 @@
 
 	function startVoiceMode() {
 		if (!app()?.S.device) return;
-		if (app().S.device.role !== "control") return app().toast("Voice mode needs a full-control device.", "warning");
 		if (!app().S.current) return app().toast("No session to talk to yet.", "warning");
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return secureSheet();
 		mode = new VoiceMode();

@@ -52,7 +52,7 @@ test("pairing, encrypted rpc, routing to the linked pi, and streaming with repla
 		assert.equal((await fetch(`http://127.0.0.1:${hub.port}/nacl.js`)).status, 200);
 		assert.equal((await fetch(`http://127.0.0.1:${hub.port}/../package.json`)).status, 404);
 
-		const pairing = hub.createPairing("control");
+		const pairing = hub.createPairing();
 		const phone = new Phone();
 		assert.equal((await phone.pair(pairing.links[0].url)).status, 200);
 		assert.equal(phone.role, "control");
@@ -92,22 +92,6 @@ test("pairing, encrypted rpc, routing to the linked pi, and streaming with repla
 		// Revocation takes effect immediately.
 		await phone.rpc("revoke", { ids: [phone.d] });
 		await assert.rejects(phone.rpc("hub"), /401/);
-	} finally {
-		link.stop();
-		hub.close();
-	}
-});
-
-test("view-only devices can watch but not act", async () => {
-	const { hub, link } = await setup();
-	try {
-		const phone = new Phone();
-		await phone.pair(hub.createPairing("view").links[0].url);
-		assert.equal(phone.role, "view");
-		assert.deepEqual(await phone.rpc("agent", { agent: "A", m: "snapshot" }), { echoed: "snapshot" });
-		await assert.rejects(phone.rpc("agent", { agent: "A", m: "send", p: { text: "rm -rf" } }), /view-only/);
-		await assert.rejects(phone.rpc("pair", { role: "control" }), /view-only/);
-		await assert.rejects(phone.rpc("devices"), /view-only/);
 	} finally {
 		link.stop();
 		hub.close();
@@ -210,8 +194,8 @@ test("attention reaches subscribed devices as Web Push; dead and revoked subscri
 		await until(() => link.linked);
 		const a = new Phone();
 		const b = new Phone();
-		await a.pair(hub.createPairing("control").links[0].url, "a");
-		await b.pair(hub.createPairing("view").links[0].url, "b");
+		await a.pair(hub.createPairing().links[0].url, "a");
+		await b.pair(hub.createPairing().links[0].url, "b");
 		const keys = { p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", auth: "BTBZMqHH6r4Tts7J_aSIgg" };
 		const h = await a.rpc("hub");
 		assert.equal(h.pushKey, push.vapid.publicKey);
@@ -246,7 +230,7 @@ test("ten sessions: one pairing sees all; detailed events flow only for the focu
 	try {
 		await until(() => links.every((l) => l.linked));
 		const phone = new Phone();
-		await phone.pair(hub.createPairing("control").links[0].url);
+		await phone.pair(hub.createPairing().links[0].url);
 		assert.equal((await phone.rpc("hub")).agents.length, 10);
 		const hello = await phone.stream(undefined, "S3");
 		for (const [i, l] of links.entries()) {
@@ -271,4 +255,22 @@ test("ten sessions: one pairing sees all; detailed events flow only for the focu
 		for (const l of links) l.stop();
 		hub.close();
 	}
+});
+
+test("devices paired with the removed view-only role are locked out", async () => {
+	const { writeFileSync } = await import("node:fs");
+	const dir = tmp();
+	writeFileSync(
+		join(dir, "devices.json"),
+		JSON.stringify([
+			{ id: "old", name: "old viewer", key: "a".repeat(43), role: "view", createdAt: 1 },
+			{ id: "ok", name: "phone", key: "b".repeat(43), role: "control", createdAt: 1 },
+		]),
+	);
+	const store = new DeviceStore(dir);
+	assert.deepEqual(
+		store.list().map((d) => d.id),
+		["ok"],
+	);
+	assert.equal(store.get("old"), undefined);
 });

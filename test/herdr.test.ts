@@ -107,7 +107,7 @@ test("no lock-screen push while someone is typing at a terminal on that machine"
 	try {
 		await until(() => link.linked);
 		const phone = new Phone();
-		await phone.pair(hub.createPairing("control").links[0].url);
+		await phone.pair(hub.createPairing().links[0].url);
 		await phone.rpc("push", { subscription: { endpoint: "https://push.example/a", keys: { p256dh: "x", auth: "y" } } });
 
 		link.send({ t: "attention", title: "away" });

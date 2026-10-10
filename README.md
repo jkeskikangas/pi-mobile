@@ -39,7 +39,7 @@ In any pi session on your computer:
 That's the setup. The first time it shows a QR code: scan it, the panel closes by itself, and the phone stays paired. From then on `/remote` shows which sessions are shared and the address to open on your phone. Add that page to your Home Screen.
 
 ```
-/remote pair [view]   pair another device (view: can watch, cannot act)
+/remote pair          pair another device
 /remote off           stop sharing this session, or every session on the machine
 /remote devices       paired devices; pick one to revoke
 /remote settings      how phones reach this computer, HTTPS address, port
@@ -110,7 +110,7 @@ pi-mobile runs wherever pi runs. A cloud box keeps working while your laptop sle
 
 - **Pairing.** `/remote` creates a single-use key valid for 10 minutes, carried in the QR URL's `#fragment`, which browsers never send to a server. The phone uses it to receive its own long-lived device key.
 - **Transport.** Every request and event is sealed with the device's key (NaCl secretbox). Requests carry a timestamp and nonce, and replays are rejected. There are no bearer tokens or cookies to steal; Wi-Fi, Tailscale or a tunnel sees only ciphertext.
-- **Devices.** Each device is full-control or view-only, and can be revoked on its own (`/remote devices`, or from the phone).
+- **Devices.** Every paired device has full control, so pair only your own. Each can be revoked on its own (`/remote devices`, or from the phone).
 - **Notifications.** Encrypted to your browser (RFC 8291), so the push service can't read them.
 - **Local link.** pi processes join over loopback with a secret in `~/.pi/agent/pi-mobile/` (mode 0600).
 - **Caveat.** On plain HTTP the web app itself isn't integrity-protected: an *active* attacker on your network could serve a modified app. On untrusted networks use the HTTPS address. A paired full-control device can do anything pi can, so revoke lost phones.
@@ -134,7 +134,6 @@ pi-mobile runs wherever pi runs. A cloud box keeps working while your laptop sle
 | Answer any extension's dialogs from the phone | **yes** | no | notifies only | pi-ask questions | not stated |
 | Every pi on the machine, one pairing | yes | yes (agent mesh) | yes (central server) | per-directory room | per session toggle |
 | Lock-screen notifications | Web Push (HTTPS) | native app | Web Push (HTTPS) | Web Push | APNs via a gateway |
-| View-only devices | **yes** | no | no | no | no |
 
 The others have things this doesn't: native apps (remote-pi, Pi Relay), an agent-to-agent mesh across machines (remote-pi), and transcripts of sessions that have since closed (mipsel64).
 

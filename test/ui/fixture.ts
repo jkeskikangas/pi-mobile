@@ -202,10 +202,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 		web.items = [];
 		emit(web, { type: "reset" });
 	}
-	if (cmd === "pair") console.log(hub.createPairing("control").links.map((l) => l.url).join("\n"));
+	if (cmd === "pair") console.log(hub.createPairing().links.map((l) => l.url).join("\n"));
 });
 
-const lan = hub.createPairing("control").links;
+const lan = hub.createPairing().links;
 console.log(`pi-mobile UI fixture on port ${port}. Pair:`);
 for (const l of lan) console.log(`  ${l.label}: ${l.url}`);
 console.log("stdin: work | ask | pick | done | quiet | pair");

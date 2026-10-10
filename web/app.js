@@ -119,7 +119,7 @@
 			S.device = { d: out.d, k: out.k, role: out.role, host: out.host };
 			S.key = unb64u(out.k);
 			store.set(DEVICE_KEY, S.device);
-			toast(`Paired with ${out.host}${out.role === "view" ? " (view-only)" : ""}`);
+			toast(`Paired with ${out.host}`);
 			return true;
 		} catch (e) {
 			if (S.device) {
@@ -137,7 +137,6 @@
 		store.set(DEVICE_KEY, null);
 		S.online = false;
 		$("composer").hidden = true;
-		$("viewOnly").hidden = true;
 		$("modelBtn").hidden = true;
 		$("transcript").replaceChildren();
 		$("prompts").replaceChildren();
@@ -952,7 +951,6 @@
 		eyebrow.append(icon("alert"), "pi asks");
 		card.append(eyebrow, el("div", "ptitle", p.title));
 		if (p.message) card.appendChild(el("div", "pmsg", p.message));
-		const canAct = S.device?.role === "control";
 		const answer = async (value, btn) => {
 			card.querySelectorAll("button,input").forEach((b) => (b.disabled = true));
 			answered.set(p.id, true);
@@ -998,14 +996,14 @@
 			};
 			act.append(ok, cancel);
 		}
-		if (canAct) card.appendChild(act);
+		card.appendChild(act);
 		const foot = el("div", "pfoot");
-		const footText = el("span", "", canAct ? "Also open in the terminal · first answer wins" : "Waiting for an answer · view-only device");
+		const footText = el("span", "", "Also open in the terminal · first answer wins");
 		foot.append(icon("terminal"), footText);
 		if (p.expiresAt) {
 			const tick = () => {
 				const s = Math.max(0, Math.round((p.expiresAt - Date.now()) / 1000));
-				footText.textContent = `${canAct ? "First answer wins" : "View-only"} · times out in ${s}s`;
+				footText.textContent = `First answer wins · times out in ${s}s`;
 				if (s > 0 && card.isConnected) setTimeout(tick, 1000);
 			};
 			tick();
@@ -1015,10 +1013,8 @@
 	}
 
 	function updateComposer() {
-		const control = S.device?.role === "control";
 		const info = S.agents.get(S.current);
-		$("composer").hidden = !S.device || !control || !info;
-		$("viewOnly").hidden = !S.device || control || !info;
+		$("composer").hidden = !S.device || !info;
 		const working = info?.status === "working" && !(S.prompts.get(S.current)?.size > 0);
 		$("workBar").hidden = !working;
 		if (working) $("workText").textContent = workLine(info);
@@ -1254,7 +1250,7 @@
 					}
 				}
 				const starter = all.find((a) => a.herdr);
-				if (starter && S.device?.role === "control") {
+				if (starter) {
 					const add = el("button", "btn");
 					add.append(icon("plus"), "New session");
 					add.onclick = () => newSessionSheet(starter.agent);
@@ -1307,7 +1303,6 @@
 	}
 
 	async function modelSheet() {
-		if (S.device?.role !== "control") return;
 		openSheet((body) => body.appendChild(el("p", "note", "Loading models…")), { title: "Model" });
 		try {
 			S.models = await call("models");
@@ -1364,13 +1359,12 @@
 
 	function menuSheet() {
 		openSheet((body) => {
-			const control = S.device?.role === "control";
 			let g;
 			const add = (label, fn, cls = "", lead = "chev-right", sub) => row(g, { lead, title: label, sub, cls, onclick: fn });
 			const info = S.agents.get(S.current);
 			section(body, info ? `Session · ${info.name}` : "Session");
 			g = group(body);
-			if (control && S.current) {
+			if (S.current) {
 				add("Compact context", async () => {
 					closeSheet();
 					try {
@@ -1402,11 +1396,8 @@
 			}
 			section(body, "Devices");
 			g = group(body);
-			if (control) {
-				add("Pair another device", () => pairSheet("control"), "", "qr");
-				add("Share a view-only link", () => pairSheet("view"), "", "eye", "Watch, but not act");
-				add("Manage devices", devicesSheet, "", "phone");
-			}
+			add("Pair another device", pairSheet, "", "qr");
+			add("Manage devices", devicesSheet, "", "phone");
 			add(
 				"Unpair this device",
 				async () => {
@@ -1421,18 +1412,18 @@
 				"logout",
 			);
 			const note = el("p", "note");
-			note.append(icon("lock"), `End-to-end encrypted · ${S.device?.role === "view" ? "view-only" : "full control"}`);
+			note.append(icon("lock"), "End-to-end encrypted");
 			body.appendChild(note);
 		}, { title: "pi mobile", subtitle: `Connected to ${S.device?.host || "your computer"}` });
 	}
 
-	async function pairSheet(role) {
+	async function pairSheet() {
 		try {
-			const r = await rpc("pair", { role });
+			const r = await rpc("pair", {});
 			const here = r.links.find((l) => l.url.startsWith(location.origin)) || r.links[0];
 			openSheet(
 				(body) => {
-					body.appendChild(el("p", "note", `Single use, valid for 10 minutes. Whoever opens it gets ${role === "view" ? "read-only access" : "full control"}.`));
+					body.appendChild(el("p", "note", "Single use, valid for 10 minutes. Whoever opens it gets full control of your pi sessions, so send it only to your own devices."));
 					body.appendChild(el("div", "linkbox", here.url));
 					if (navigator.share) {
 						const b = el("button", "btn primary");
@@ -1447,7 +1438,7 @@
 						body.appendChild(b);
 					}
 				},
-				{ title: role === "view" ? "View-only link" : "Pair another device" },
+				{ title: "Pair another device" },
 			);
 		} catch (e) {
 			toast(e.message, "error");
@@ -1465,9 +1456,9 @@
 						const trail = el("span", "ask", "Revoke");
 						trail.style.color = "var(--err)";
 						row(g, {
-							lead: d.role === "view" ? "eye" : "phone",
+							lead: "phone",
 							title: `${d.name}${d.id === S.device.d ? " · this device" : ""}`,
-							sub: `${d.role === "view" ? "View-only" : "Full control"} · last seen ${seen}`,
+							sub: `Last seen ${seen}`,
 							trail,
 							label: `Revoke ${d.name}`,
 							onclick: async () => {
@@ -1520,7 +1511,6 @@
 		const box = $("onboard");
 		box.hidden = !(
 			pushSupported() &&
-			S.device?.role === "control" &&
 			!S.push.on &&
 			Notification.permission !== "denied" &&
 			!store.get("pi-mobile-onboarded")
@@ -1594,7 +1584,7 @@
 	function wire() {
 		// The composer grows and shrinks (working bar, dictation, attachments); floating controls follow it.
 		const composer = $("composer");
-		new ResizeObserver(() => document.documentElement.style.setProperty("--composer-h", `${composer.offsetHeight || $("viewOnly").offsetHeight || 0}px`)).observe(composer);
+		new ResizeObserver(() => document.documentElement.style.setProperty("--composer-h", `${composer.offsetHeight || 0}px`)).observe(composer);
 		$("sessionBtn").onclick = () => S.device && sessionsSheet();
 		$("modelBtn").onclick = modelSheet;
 		$("menuBtn").onclick = () => S.device && menuSheet();

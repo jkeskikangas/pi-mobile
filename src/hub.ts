@@ -32,8 +32,6 @@ const PRESENCE_MS = 2 * 60_000;
 const GLOBAL_EVENTS = new Set(["info", "gone", "prompt", "prompt_end"]);
 const MAX_BODY = 25 * 1024 * 1024;
 const PAIRING_TTL = 10 * 60_000;
-// View-only devices may also listen: spoken briefs, details and status read the session, never change it.
-const VIEW_METHODS = new Set(["snapshot", "toolOutput", "models", "commands", "voiceStatus", "brief", "details"]);
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
 	".js": "text/javascript; charset=utf-8",
@@ -275,7 +273,7 @@ export class Hub {
 	private agentRequest(m: string, p: any): unknown {
 		switch (m) {
 			case "pair":
-				return this.createPairing(p?.role === "view" ? "view" : "control");
+				return this.createPairing();
 			case "status":
 				return {
 					hubId: this.id,
@@ -306,7 +304,7 @@ export class Hub {
 		for (const a of this.agents.values()) a.ch.send(msg);
 	}
 
-	createPairing(role: Role): { links: Endpoint[]; expiresAt: number; role: Role } {
+	createPairing(role: Role = "control"): { links: Endpoint[]; expiresAt: number; role: Role } {
 		const now = Date.now();
 		for (const [id, p] of this.pairings) if (p.expiresAt < now) this.pairings.delete(id);
 		const pairing: Pairing = { id: randomId(), key: randomKey(), role, expiresAt: now + PAIRING_TTL };
@@ -480,24 +478,20 @@ export class Hub {
 				return { ok: true };
 			}
 			case "devices":
-				if (device.role !== "control") throw new Error("view-only device");
 				return this.devices.list().map(publicDevice);
 			case "revoke": {
 				const ids: string[] = Array.isArray(p.ids) ? p.ids.map(String) : [];
-				if (device.role !== "control" && !(ids.length === 1 && ids[0] === device.id)) throw new Error("view-only device");
 				const removed = this.devices.remove(ids);
 				for (const id of ids) this.push.set(id, undefined);
 				setImmediate(() => this.dropStreams(ids));
 				return removed.map(publicDevice);
 			}
 			case "pair":
-				if (device.role !== "control") throw new Error("view-only device");
-				return this.createPairing(p.role === "view" ? "view" : "control");
+				return this.createPairing();
 			case "agent": {
 				const conn = this.agents.get(String(p.agent));
 				if (!conn) throw new Error("that pi session is no longer connected");
 				const method = String(p.m);
-				if (device.role !== "control" && !VIEW_METHODS.has(method)) throw new Error("view-only device");
 				return conn.ch.request(method, { ...(p.p ?? {}), _device: { id: device.id, name: device.name } }, 10 * 60_000);
 			}
 			default:

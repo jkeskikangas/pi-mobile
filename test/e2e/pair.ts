@@ -8,7 +8,7 @@ const link = new HubLink({ config: loadConfig, secret: linkSecret(), info, onReq
 link.start();
 for (let i = 0; i < 80 && !link.linked; i++) await new Promise((r) => setTimeout(r, 100));
 if (!link.linked) throw new Error("no hub: start pi with pi-mobile and /remote first");
-const p: any = await link.request("pair", { role: "control" });
+const p: any = await link.request("pair", {});
 console.log(p.links.find((l: any) => l.url.includes("127.0.0.1"))?.url ?? p.links[0].url);
 link.stop();
 process.exit(0);

@@ -7,7 +7,8 @@ import { b64u, randomKey } from "./crypto.ts";
 import { generateVapid, type PushSubscriptionJSON, type Vapid } from "./webpush.ts";
 
 export type Expose = "network" | "local" | "cloudflared";
-export type Role = "control" | "view";
+/** Every paired device has full control. (A view-only role existed until 0.1.3.) */
+export type Role = "control";
 
 export interface Config {
 	/** Port of the hub's HTTP server. Also the election lock: whichever pi binds it hosts the hub. */
@@ -120,7 +121,8 @@ export class DeviceStore {
 		}
 		if (m !== this.mtime) {
 			this.mtime = m;
-			this.cache = m ? readJson<Device[]>(this.path, []) : [];
+			// Devices paired with the removed view-only role are no longer recognised.
+			this.cache = m ? readJson<Device[]>(this.path, []).filter((d) => d.role === "control") : [];
 		}
 		return this.cache;
 	}
