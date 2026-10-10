@@ -1,6 +1,6 @@
 # Frontend design principles
 
-For anyone, person or agent, changing the phone app in `web/`. Read with [ui.md](ui.md), which is the source of truth for **tokens, icons and the UI checks** (`npm run ui`). This page explains **why** the app looks and behaves the way it does, how the voice surfaces work, and what "done" means for a UI change. Where the two overlap, `ui.md` wins on tokens and this page on behaviour.
+For anyone, person or agent, changing the phone app in `web/`. Read with [ui.md](ui.md), the design system: **tokens, type, components, patterns, past mistakes and the checks** (`npm run ui`, `npm run shots`). This page explains **why** the app looks and behaves the way it does, how the voice surfaces work, and what "done" means for a UI change. Where the two overlap, `ui.md` wins on tokens and this page on behaviour.
 
 The app is plain HTML, CSS and JavaScript (`index.html`, `app.css`, `app.js`, `voice.js`, `voice-core.js`) served by the hub under a strict CSP. No framework, no build step, no dependencies. Keep it that way.
 
@@ -28,7 +28,7 @@ If a change only works with full attention and two hands, it is wrong for this a
 5. **Nothing is lost.** Text survives reconnects; dictation offers raw and undo; irreversible voice confirmations have an undo window; errors say what to do next.
 6. **Calm by default.** A toast or an inline line before a modal; a state label before a spinner; animation explains state, never decorates.
 7. **One truth.** The terminal, the phone and the voice say the same thing about a session: voice mode's header shows the app's own status line (`statusLine` in `app.js`). The phone never invents state the hub did not send.
-8. **Tokens only.** Every colour, radius, shadow and easing comes from the tokens in `ui.md`. Voice mode follows the system theme like every other view, so its header, question card and segmented controls are the app's components; only the orb draws with the vivid `--d-*` state colours in both themes.
+8. **Tokens only.** Every colour, radius, shadow and easing comes from the tokens in `ui.md`. Voice mode follows the system theme like every other view, so its header, question card, buttons and settings sheet are the app's components; only the orb draws with the vivid `--d-*` state colours in both themes.
 9. **One component per job.** A question from pi is the `.prompt` card wherever it appears (transcript or voice mode); a two-way choice is `.seg`; a session header is `.session-btn`. Do not restyle a copy; extend the component.
 
 ## 3. Dictation in the composer
@@ -57,7 +57,7 @@ Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; so
   | paused, connecting, offline | grey (`--off`) | Mic off / Push to talk / Connecting… |
 
 - **The orb** (`Orb` in `voice.js`, a canvas) follows the voice that matters: yours while listening, pi's while speaking; it breathes while pi works. It is `aria-hidden`; the state label is the accessible truth. Draw only in `requestAnimationFrame`, and stop when hidden.
-- **The stage is one button.** It interrupts pi, unmutes, or talks (tap mode); its `aria-label` names the action it will take now.
+- **The circle is push to talk.** Hold while you talk and let go to finish, or tap to start and tap to stop; in open mic a tap interrupts pi or unmutes. Its `aria-label` names the action it will take now, and Enter or Space act as a tap. A light haptic confirms press and release where the phone allows.
 - **Captions** show what you said (muted, "You") and what pi says, live as words arrive. Clamp lines; never scroll.
 - **The question card** (`#vAsk`) is the app's `.prompt` card: "pi asks", the title, the message, tap answers when you can glance; destructive answers are `.danger` ("Yes, do it") in both places. During the undo window it shows "Going ahead", the action, a shrinking amber bar, Cancel (primary) and Do it now.
 - **Two controls at the bottom, labelled**: Mute and a red End, 68–72 px, centred in the thumb zone; the circle above is the third control (push to talk). Settings that rarely change (Eyes-free | Can glance, Open mic | Push to talk, the voice) live in a Voice settings sheet behind the header button, and can be said aloud ("push to talk", "I can glance"). Icons come from the app's sprite.
@@ -87,7 +87,7 @@ Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; so
 
 ## 8. Done means
 
-1. Every state of what you changed exists and looks right, in light and dark (voice: dark), at 390 px and 320 px. `npm run ui` gives scripted sessions for this; `test/e2e/browser.mjs` and `test/e2e/turns.mjs` drive the app headless, including a fake or scripted microphone.
+1. Every state of what you changed exists and looks right, in light and dark, at 390 px and 320 px. `npm run shots` captures and axe-scans them all (`ui.md` §7); `npm run ui` gives the scripted sessions behind it; `test/e2e/browser.mjs` and `test/e2e/turns.mjs` drive the app headless, including a fake or scripted microphone.
 2. The checks in `ui.md` pass: axe WCAG 2.2 AA, keyboard only, reduced motion, forced colours.
 3. Targets are at least 44 px; the primary action is at the bottom and unique in its state.
 4. Only tokens: no raw colours, radii, shadows or easings (outside the voice palette).

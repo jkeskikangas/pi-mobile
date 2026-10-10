@@ -65,7 +65,7 @@ Voice mode follows one session at a time and can switch between them mid-call; w
 
 - **Match sessions by machine too.** Move the `switch_session` scoring out of `web/voice.js` into `web/voice-core.js` as `matchSession(list, said)` (the native app shares that file, `plans/native-apps.md` D3). It also matches the machine name ("the api session on the box"). A name that fits sessions on two machines returns both and pi asks "On the laptop or the box?". `list` results carry `machine`. In `src/voice/realtime.ts`, the `switch_session` description says "on any of the developer's machines".
 - **Say the machine only when it helps.** While more than one machine is online, announcements and the session list name it ("api on the box needs you"); with one machine, the copy stays as it is today (INV-3).
-- **Speech runs where the credentials are.** `voiceSession`, `speak`, `voices`, `transcribe` and `distill` use the sign-in and voice config of the machine that serves them; a box signed in only to Anthropic has no realtime. `machines[]` in the `hub` rpc carries `voice: { realtime, speech, stt }` from each machine's VoiceHost. The phone chooses one speech machine when voice mode opens: the focused session's machine if it can, else a capable online one, home first. Switching sessions keeps the call. Session calls (`brief`, `details`, `voiceStatus`, `voiceState`, `send`, `answer`) always go to the session's own machine. `[DECISION NEEDED: OK to use another machine's sign-in for speech? Recommended yes: same person, same encrypted path.]`
+- **Speech runs where the credentials are.** `voiceSession`, `speak`, `voices`, `transcribe` and `distill` use the sign-in and voice config of the machine that serves them; a box signed in only to Anthropic has no realtime. `machines[]` in the `hub` rpc carries `voice: { realtime, speech, stt }` from each machine's VoiceHost. The phone chooses one speech machine when voice mode opens: the focused session's machine if it can, else a capable online one, home first. Switching sessions keeps the call. Session calls (`brief`, `details`, `voiceStatus`, `voiceState`, `send`, `answer`) always go to the session's own machine. Using another machine's sign-in for speech is decided (2026-10-10): yes, same person and same encrypted path.
 - **A machine drops mid-call.** If it is the one serving the focused session: one earcon, then "The laptop went offline." The call stays up, and switching to other sessions still works. On `machine_up`: "The laptop is back", then the snapshot reloads. If it is the speech machine: basic voice on another capable machine, or the phone's own voice if none is left.
 - **Voices** are the same set on every machine, since all machines run the same protocol version, so the phone's pick holds across switches.
 - **Tests:**
@@ -84,7 +84,11 @@ Laptop ↔ Hetzner box over Tailscale:
 
 Update `README.md` ("Several machines") and the comparison table.
 
-## Open decisions
+## Decisions
 
-- D7: a phone paired directly with the laptop gets no laptop pushes while the laptop is linked (design `[DECISION NEEDED]`).
+- D7 (2026-10-10): a linked machine stops pushing to phones paired with it directly; all pushes come through the home. `/remote join` says so when it links.
+- Speech from another machine's sign-in (2026-10-10): allowed (step 7).
+
+## Open
+
 - Spec \[ASSUMPTION\]: linked machines reach the home over Tailscale or a LAN, and the home needs no public address.

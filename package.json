@@ -40,7 +40,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "typecheck": "tsc --noEmit -p .",
-    "ui": "node --experimental-strip-types --no-warnings test/ui/fixture.ts"
+    "ui": "node --experimental-strip-types --no-warnings test/ui/fixture.ts",
+    "shots": "node test/ui/shots.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
@@ -52,9 +53,11 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.1.0",
+    "@earendil-works/pi-tui": "^1.1.0",
     "@types/node": "^26.6.4",
     "@types/qrcode": "^1.5.5",
-    "typescript": "^7.0.2",
-    "@earendil-works/pi-tui": "^1.1.0"
+    "axe-core": "^4.14.0",
+    "puppeteer-core": "^24.43.1",
+    "typescript": "^7.0.2"
   }
 }
