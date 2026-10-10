@@ -254,9 +254,35 @@
 		/\b(prod|production|deploy\w*|release|publish|migrat\w*|drop\s+(?:table|database|schema)|truncate|delete\s+from|update\s+\w+\s+set|rm\s+-\w*r\w*f|git\s+push|--force|reset\s+--hard|kubectl|helm|terraform\s+(?:apply|destroy)|tofu\s+(?:apply|destroy)|psql|mysql|mongosh?|redis-cli|database_url|aws\s|gcloud|az\s|ssh\s|scp\s|curl\s+-X\s*(?:POST|PUT|PATCH|DELETE)|npm\s+publish|docker\s+push|stripe|payment|send\w*\s+(?:mail|email|message))\b/i;
 	const isSignificant = (text) => SIGNIFICANT.test(String(text || ""));
 
+	/**
+	 * Which session "switch to …" means. `list` items: { agent, name, cwd, task, machine }. Naming a
+	 * computer ("the api session on the box") narrows to its sessions; the same best name on two
+	 * computers is ambiguous, so the voice asks which one.
+	 * Returns { match } | { ambiguous: [items] } | { none: true }.
+	 */
+	function matchSession(list, said) {
+		const words = norm(said)
+			.split(" ")
+			.filter((w) => w.length > 1 && !["the", "on", "session", "to", "switch", "open", "go", "in", "at", "my"].includes(w));
+		if (!words.length) return { none: true };
+		const machineWords = (x) => norm(x.machine || "").split(" ").filter((w) => w.length > 1);
+		const named = list.filter((x) => machineWords(x).some((w) => words.includes(w)));
+		const pool = named.length ? named : list;
+		const score = (x) => {
+			const hay = norm(`${x.name} ${String(x.cwd || "").split("/").pop()} ${x.task || ""}`).split(" ");
+			return words.filter((w) => hay.includes(w) || hay.some((h) => h.length > 3 && h.startsWith(w))).length;
+		};
+		const ranked = pool.map((x) => [x, score(x)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]);
+		if (!ranked.length) return named.length === 1 ? { match: named[0] } : { none: true };
+		const top = ranked.filter(([, s]) => s === ranked[0][1]).map(([x]) => x);
+		const machines = new Set(top.map((x) => x.machine || ""));
+		if (top.length > 1 && machines.size > 1) return { ambiguous: top };
+		return { match: top[0] };
+	}
+
 	/** Commands that change voice settings, handled on the phone. */
 	const SETTINGS = ["pushToTalk", "openMic", "eyesFree", "glance"];
 
-	const api = { HELP, SETTINGS, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
+	const api = { HELP, SETTINGS, matchSession, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
 	globalThis.PiVoiceCore = api;
 })();

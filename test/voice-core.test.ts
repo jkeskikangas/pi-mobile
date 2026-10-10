@@ -120,3 +120,20 @@ test("settings by voice: push to talk, open mic, eyes free, can glance", () => {
 	assert.equal(V.parseCommand("push the branch to talk"), null);
 	assert.ok(V.SETTINGS.includes("pushToTalk"));
 });
+
+test("switching by voice: names, the computer's name, and asking when two computers fit", () => {
+	const list = [
+		{ agent: "1", name: "api", cwd: "/Users/you/work/api", task: "fix totals", machine: "laptop" },
+		{ agent: "2", name: "api", cwd: "/home/you/api", task: "deploy", machine: "hetzner box" },
+		{ agent: "3", name: "web", cwd: "/Users/you/work/web", task: "settings page", machine: "laptop" },
+	];
+	assert.equal(V.matchSession(list, "web").match.agent, "3");
+	assert.equal(V.matchSession(list, "the api session on the box").match.agent, "2");
+	assert.equal(V.matchSession(list, "api on the laptop").match.agent, "1");
+	assert.deepEqual(V.matchSession(list, "api").ambiguous.map((x: any) => x.agent), ["1", "2"]);
+	assert.equal(V.matchSession(list, "hetzner").match.agent, "2", "a computer with one session is enough");
+	assert.ok(V.matchSession(list, "billing").none);
+	// One computer: no machine names, behaves as before.
+	const one = list.map((x) => ({ ...x, machine: "" })).slice(0, 1).concat([{ agent: "3", name: "web", cwd: "/w/web", task: "", machine: "" }]);
+	assert.equal(V.matchSession(one, "switch to web").match.agent, "3");
+});

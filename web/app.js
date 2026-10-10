@@ -185,7 +185,15 @@
 		handleEvent(ev);
 	}
 
+	const wasOffline = new Set();
 	function machineStateChanged(id) {
+		// Voice mode says it once when the computer it's following goes away, and when it's back.
+		const st = fleet.state(id);
+		const name = fleet.get(id)?.name || "The computer";
+		if (st === "offline" && !wasOffline.has(id)) {
+			wasOffline.add(id);
+			window.PiVoice?.onMachine?.(id, name, false);
+		} else if (st === "online" && wasOffline.delete(id)) window.PiVoice?.onMachine?.(id, name, true);
 		const b = $("banner");
 		if (S.online || !S.device) b.hidden = true;
 		else {
@@ -847,6 +855,33 @@
 	}
 
 	// ── header, prompts, composer ──────────────────────────────────────────────────
+	/** A session's name, with its computer when there are several ("api on hetzner-box"). */
+	function sessionLabel(agent) {
+		const name = agentName(agent);
+		return several() && machineName(agent) ? `${name} on ${machineName(agent)}` : name;
+	}
+
+	/**
+	 * Speech (realtime calls, speech, recognition, voices) runs where the credentials are: the
+	 * session's own computer first, then any other online computer that can, through one of its sessions.
+	 */
+	async function speechCall(m, p, agent = S.current) {
+		const home = fleet.machineOf(agent);
+		const others = fleet.machines.filter((x) => x.id !== home && x.state === "online").map((x) => fleet.agentsOf(x.id)[0]).filter(Boolean);
+		const tries = [agent, ...others].filter(Boolean);
+		let last;
+		for (const a of tries) {
+			try {
+				return await fleet.call(a, m, p || {});
+			} catch (e) {
+				last = e;
+				// Only "this computer can't do speech" moves on; anything else is a real answer.
+				if (!/unavailable|not set up|no speech|no recogni|api key|sign.?in/i.test(String(e?.message))) throw e;
+			}
+		}
+		throw last || new Error("no computer can do speech");
+	}
+
 	function agentName(agent) {
 		return S.agents.get(agent)?.name || "pi";
 	}
@@ -1527,13 +1562,13 @@
 	function urgency(a) {
 		return S.prompts.get(a.agent)?.size || a.status === "waiting" ? 0 : a.status === "working" ? 1 : 2;
 	}
+	function reachable(agent) {
+		const id = fleet.machineOf(agent);
+		return !id || fleet.state(id) === "online" || fleet.state(id) === "connecting";
+	}
 	function sortedAgents() {
 		// A computer that can't be reached is one "Offline" row, not a list of sessions that won't answer.
-		const reachable = (a) => {
-			const id = fleet.machineOf(a.agent);
-			return !id || fleet.state(id) === "online" || fleet.state(id) === "connecting";
-		};
-		return [...S.agents.values()].filter(reachable).sort((a, b) => urgency(a) - urgency(b));
+		return [...S.agents.values()].filter((a) => reachable(a.agent)).sort((a, b) => urgency(a) - urgency(b));
 	}
 
 	/** A pill for other sessions that are waiting on you; tap to go there. */
@@ -1973,6 +2008,11 @@
 		call,
 		toast,
 		agentName,
+		sessionLabel,
+		speechCall,
+		machineLabel: (agent) => (several() ? machineName(agent) : ""),
+		machineOf: (agent) => fleet.machineOf(agent),
+		reachable,
 		openAgent,
 		autosize,
 		openSheet,
