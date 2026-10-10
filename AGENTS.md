@@ -11,5 +11,5 @@ A pi extension: an end-to-end encrypted hub inside pi plus a no-build phone web 
 ## Read before changing
 
 - **Any UI in `web/`**: `docs/ui.md` (tokens, icons, `npm run ui` checks) and `docs/design-principles.md` (why it works this way, dictation and voice surfaces, motion, copy, what "done" means).
-- **Voice** (`src/voice/`, `web/voice*.js`): `docs/voice.md` (design, principles, verification) and `docs/voice-research.md`.
+- **Voice** (`src/voice/`, `web/voice*.js`): `docs/voice.md` (design, verification), `docs/voice-best-practices.md` (each practice, why, references) and the research notes `docs/voice-research.md`, `docs/voice-research-2.md`.
 - **Multi-machine work**: `specs/`, `designs/`, `plans/`.
