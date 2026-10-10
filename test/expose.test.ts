@@ -20,6 +20,6 @@ test("a cloud box's public address is never listened on; tailnet comes first", (
 });
 
 test("private ranges", () => {
-	for (const ip of ["10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.8", "100.64.0.1", "100.127.255.255"]) assert.equal(isPrivate(ip), true, ip);
+	for (const ip of ["10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.0.42", "100.64.0.1", "100.127.255.255"]) assert.equal(isPrivate(ip), true, ip);
 	for (const ip of ["203.0.113.10", "172.32.0.1", "100.63.0.1", "100.128.0.1", "8.8.8.8", "169.254.1.1"]) assert.equal(isPrivate(ip), false, ip);
 });
