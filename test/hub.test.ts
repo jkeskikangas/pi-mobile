@@ -207,7 +207,7 @@ test("attention reaches subscribed devices as Web Push; dead and revoked subscri
 
 		link.send({ t: "attention", title: "proj asks", body: "Allow rm?", urgent: true });
 		await until(() => sent.length === 2);
-		assert.deepEqual(sent.find((x) => x.endpoint.endsWith("/a")), { endpoint: "https://push.example/a", payload: { title: "proj asks", body: "Allow rm?", agent: "A" }, urgency: "high" });
+		assert.deepEqual(sent.find((x) => x.endpoint.endsWith("/a")), { endpoint: "https://push.example/a", payload: { title: "proj asks", body: "Allow rm?", agent: "A", machine: h.machine.id }, urgency: "high" });
 		await until(() => push.entries().length === 1);
 
 		await a.rpc("revoke", { ids: [a.d] });

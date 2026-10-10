@@ -1,7 +1,8 @@
 // Machine-wide state shared by every pi process: config, paired devices, and the local link secret.
 
-import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { b64u, randomKey } from "./crypto.ts";
 import { generateVapid, type PushSubscriptionJSON, type Vapid } from "./webpush.ts";
@@ -25,6 +26,8 @@ export interface Config {
 	 * QR code. Lock-screen notifications need an HTTPS origin.
 	 */
 	publicUrl?: string;
+	/** HTTPS addresses of your other machines that aren't on Tailscale (`*.ts.net` is always allowed). */
+	machineOrigins?: string[];
 	voice?: VoiceConfig;
 }
 
@@ -170,6 +173,81 @@ export function linkSecret(dir = stateDir()): string {
 	return readFileSync(path, "utf8").trim();
 }
 
+/** A name people recognise: macOS's Computer Name rather than a generated host name. */
+export function machineName(): string {
+	if (process.platform === "darwin") {
+		try {
+			const name = execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000 }).trim();
+			if (name) return name;
+		} catch {}
+	}
+	return hostname().replace(/\.local$/, "");
+}
+
+export interface MachineIdentity {
+	id: string;
+	name: string;
+}
+/** This machine's stable id (created once) and name (`machine.json`; bin/pi-mobile.mjs writes the same file). */
+export function machineIdentity(dir = stateDir()): MachineIdentity {
+	const path = join(dir, "machine.json");
+	const m = readJson<{ id?: string; name?: string }>(path, {});
+	if (!m.id) {
+		m.id = b64u(randomKey()).slice(0, 12);
+		writePrivate(path, `${JSON.stringify(m, null, 2)}\n`);
+	}
+	return { id: m.id, name: m.name || machineName() };
+}
+
+/**
+ * "Add this machine" or "remove that one", waiting for one phone. `pi-mobile add`/`remove` write them
+ * (one file each, so nothing races), the hub delivers them and deletes them once the phone has acted.
+ */
+export interface Offer {
+	id: string;
+	/** The phone's device id on this machine. */
+	device: string;
+	kind: "add" | "remove";
+	machine: MachineIdentity;
+	origin?: string;
+	d?: string;
+	k?: string;
+	/** Name of the machine that made the offer. */
+	from: string;
+	createdAt: number;
+}
+const OFFER_TTL = 7 * 24 * 3600_000;
+export class OfferStore {
+	private readonly dir: string;
+	constructor(dir = stateDir()) {
+		this.dir = join(dir, "offers");
+	}
+	list(now = Date.now()): Offer[] {
+		let files: string[] = [];
+		try {
+			files = readdirSync(this.dir).filter((f) => f.endsWith(".json"));
+		} catch {
+			return [];
+		}
+		const out: Offer[] = [];
+		for (const f of files) {
+			const o = readJson<Offer | null>(join(this.dir, f), null);
+			if (o && now - o.createdAt < OFFER_TTL) out.push(o);
+			else this.remove(f.replace(/\.json$/, ""));
+		}
+		return out.sort((a, b) => a.createdAt - b.createdAt);
+	}
+	forDevice(device: string): Offer[] {
+		return this.list().filter((o) => o.device === device);
+	}
+	remove(id: string): void {
+		if (!/^[\w-]+$/.test(id)) return;
+		try {
+			unlinkSync(join(this.dir, `${id}.json`));
+		} catch {}
+	}
+}
+
 /** VAPID keys and each device's push subscription. Only the hub writes it. */
 export class PushStore {
 	private readonly path: string;
@@ -188,6 +266,12 @@ export class PushStore {
 
 	entries(): [string, PushSubscriptionJSON][] {
 		return Object.entries(this.state.subs);
+	}
+
+	/** A phone moved every machine to a new key (after removing one); its subscription comes with it. */
+	setVapid(vapid: Vapid): void {
+		this.state.vapid = vapid;
+		this.save();
 	}
 
 	set(deviceId: string, sub: PushSubscriptionJSON | undefined): void {

@@ -9,6 +9,8 @@
 //   /remote off        stop sharing: this session only, or every session on the machine
 //   /remote devices    paired devices; pick one to revoke
 //   /remote settings   exposure, HTTPS address, port (the hub restarts by itself)
+//   /remote add <host> add a machine you can ssh to; your phone approves it (also `pi-mobile add`)
+//   /remote remove <m> remove a machine from your phone's list
 
 import { unwatchFile, watchFile } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -34,6 +36,8 @@ const SUBCOMMANDS = [
 	{ value: "off", label: "off", description: "Stop sharing this session or the whole machine" },
 	{ value: "devices", label: "devices", description: "Paired devices; revoke one" },
 	{ value: "settings", label: "settings", description: "Exposure, HTTPS address, port" },
+	{ value: "add", label: "add", description: "Add a machine you can ssh to (your phone approves it)" },
+	{ value: "remove", label: "remove", description: "Remove a machine from your phone's list" },
 ];
 const STATUS_ICON: Record<string, string> = { idle: "○", working: "●", waiting: "◐" };
 
@@ -178,8 +182,12 @@ export default function piMobile(pi: ExtensionAPI): void {
 		},
 		handler: async (args, c) => {
 			ctx = c;
-			const [sub = "", arg = ""] = args.trim().toLowerCase().split(/\s+/);
-			switch (sub) {
+			const [sub = "", arg = ""] = args.trim().split(/\s+/);
+			switch (sub.toLowerCase()) {
+				case "add":
+					return addMachine(c, arg);
+				case "remove":
+					return removeMachine(c, arg);
 				case "":
 					return connect(c);
 				case "pair":
@@ -191,10 +199,38 @@ export default function piMobile(pi: ExtensionAPI): void {
 				case "settings":
 					return settings(c);
 				default:
-					return c.ui.notify("Usage: /remote [pair [view] | off | devices | settings]", "info");
+					return c.ui.notify("Usage: /remote [pair | off | devices | settings | add <ssh-host> | remove <machine>]", "info");
 			}
 		},
 	});
+
+	/** The machine commands live in a dependency-free script that also runs as `npx pi-mobile` on a fresh box. */
+	const machines = (): Promise<any> => import(new URL("../bin/pi-mobile.mjs", import.meta.url).href);
+
+	async function addMachine(c: ExtensionCommandContext, host: string): Promise<void> {
+		if (!host) return c.ui.notify("Usage: /remote add <ssh-host>: a machine you can ssh to, with Tailscale", "info");
+		c.ui.notify(`Adding ${host}: setting up pi-mobile there over ssh…`, "info");
+		try {
+			const r = await (await machines()).add(host);
+			c.ui.notify(`${r.machine.name} is ready (${r.origin}). Approve it on your phone: ${r.phones.join(", ")}.`, "info");
+		} catch (e: any) {
+			c.ui.notify(`pi-mobile: couldn't add ${host}: ${e?.message ?? e}`, "error");
+		}
+	}
+
+	async function removeMachine(c: ExtensionCommandContext, name: string): Promise<void> {
+		const m = await machines();
+		if (!name) {
+			const list = m.knownMachines();
+			return c.ui.notify(list.length ? `Machines added from here: ${list.map((x: any) => x.name).join(", ")}. /remote remove <name>` : "No machines were added from this computer.", "info");
+		}
+		try {
+			const r = m.remove(name);
+			c.ui.notify(`Removing ${r.machine.name}: your phone forgets it the next time it connects.`, "info");
+		} catch (e: any) {
+			c.ui.notify(`pi-mobile: ${e?.message ?? e}`, "error");
+		}
+	}
 
 	async function linked(c: ExtensionContext, timeoutMs = 8000): Promise<Bridge | undefined> {
 		const b = start(c);

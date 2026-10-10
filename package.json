@@ -27,6 +27,7 @@
     "node": ">=22"
   },
   "files": [
+    "bin",
     "src",
     "web",
     "README.md",
@@ -59,5 +60,8 @@
     "axe-core": "^4.14.0",
     "puppeteer-core": "^24.43.1",
     "typescript": "^7.0.2"
+  },
+  "bin": {
+    "pi-mobile": "bin/pi-mobile.mjs"
   }
 }
