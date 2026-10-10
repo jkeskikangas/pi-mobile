@@ -81,6 +81,7 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 | `web/voice.js` | Composer dictation and phone voice mode: realtime client, basic-voice cascade, earcons, wake lock, media session, dialogs by voice. |
 | `web/voice-core.js` | Pure logic shared with tests: voice commands and help, dialog answers, the undo-window rule, backchannels and echo, significance, VAD, speech chunking, earcon specs. |
 | `src/voice/dictionary.ts` | The personal dictionary: corrections learned from edits to distilled dictations. |
+| `src/voice/personas.ts` | Voice personas: voice names per engine, delivery and pace; the phone's pick versus the config's voices. |
 | `src/voice/tts.ts` | Optional speech from the computer for basic voice (any OpenAI-compatible `/v1/audio/speech`). |
 
 ### Bridge requests added
@@ -92,8 +93,9 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 | `brief` | `{mode}` → `{speech, more[], report, by}`: spoken brief of the latest run plus the report for follow-ups |
 | `details` | `{topic, mode}` → `{speech}` |
 | `voiceStatus` | `{}` → `{speech, status, elapsedMs, tools, prompts}` |
-| `voiceSession` | `{sdp, mode}` → `{sdp, model, provider}`: realtime call set up with the voice-layer config |
-| `speak` | `{text}` → `{audio: base64, mime}` from `voice.ttsUrl` or OpenAI TTS; `tts unavailable` means the phone speaks itself |
+| `voiceSession` | `{sdp, mode, persona?}` → `{sdp, model, provider}`: realtime call set up with the voice-layer config |
+| `voices` | `{}` → `{personas: [{id, name, blurb, rate, phone}], sample}`: the voice picker; `sample` says whether the computer can play one |
+| `speak` | `{text, persona?}` → `{audio: base64, mime}` from `voice.ttsUrl` or OpenAI TTS; `tts unavailable` means the phone speaks itself |
 | `voiceState` | `{on, mode}` → `{ok}`: the agent is told its user is listening (expires after 150 s without a refresh) |
 
 ## Platform limits (verified against WebKit/Chromium sources, see research notes)

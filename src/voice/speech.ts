@@ -169,6 +169,7 @@ Talk the way two engineers talk on a walk: about behaviour, design, decisions, r
 
 Rules for the spoken brief:
 - Lead with the outcome: done, partly done, blocked, failed, or a decision they need to make.
+- A caveat that changes what they should do next (something irreversible, a risk to production, data or security, an assumption the work rests on) is always said, even past the length limit below; it never goes into MORE.
 - ${mode === "eyes-busy" ? "At most 2 short sentences, about 30 words in total." : "At most 3 short sentences, about 50 words in total."} One idea per sentence. Plain spoken language; contractions are fine.
 - No identifiers, file names, paths, commands, test names, tool names, code, symbols, URLs or markdown. Name a part of the system by what it is ("the authentication module", "the phone app"). Round numbers.
 - Tool activity is not news. Mention it only when it matters: a significant action (production, data, deployment, pushing, deleting, external services, money) or a failure that changes the outcome.

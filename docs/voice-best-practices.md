@@ -103,6 +103,7 @@ The practices the voice features are built on, where each lives in the code, why
 ### 4.3 Lead with the outcome; keep it short; at most two options
 **What:** first sentence is the outcome; eyes-busy ≤ 2 sentences (~30 words), glance ≤ 3; questions answerable with yes, no or a short phrase; dialog options read two at a time ("or say *more options*"). `BRIEF_SYSTEM`, `speakPrompt` in `web/voice-core.js`.
 **Evidence:** *Source*: rule of three and limited spoken lists ([Google](https://design.google/library/rule-of-three), [Alexa list patterns](https://developer.amazon.com/en-US/alexa/alexa-haus/patterns-and-components/patterns-lists)); listeners have ~8 s to act after a list.
+**Exception:** a caveat that changes what you do next (something irreversible, a risk to production, data or security, an assumption the work rests on) is always said, even past the length limit, and never deferred to "more". The length limits are cognitive-load targets; a missed caveat cannot be recovered. *Source*: the minimum-sufficient-output policy (pi-minimum-sufficient-output), which keeps such caveats visible "whatever the length pressure".
 
 ### 4.4 Tool activity is not news, except significant actions
 **What:** reads, searches, edits and routine commands stay silent. Actions touching production or data, deployments, shared history, deletions, external services or money are "significant": the voice knows when one runs, and a failure is announced with a tone and one sentence. `SIGNIFICANT` in `speech.ts` and `voice-core.js`.
@@ -122,6 +123,10 @@ The practices the voice features are built on, where each lives in the code, why
 ### 4.8 Preferences stick; help is a question away
 **What:** "be terser" holds until changed. A one-sentence spoken intro on first use; rotating example hints that fade after a few sessions; "what can I say?" gets a two-sentence answer.
 **Evidence:** *Source*: Codex's voice prompt keeps stated preferences for the task; automatic hints help first use while regular users prefer help on request ([CUI 2020 study](https://www.porcheron.uk/assets/pubs/2020/kirschthaler2020what.pdf)).
+
+### 4.9 The voice is a persona; the conversation is not
+**What:** four personas (Marin, Coral, Cedar, Ash) set the voice, its delivery and its pace, matched across the realtime model, the computer's speech (OpenAI or Kokoro voice names) and, by name and pitch, the phone's own voice. What is said, and how much, is the same for every persona: the rules in this section apply unchanged. Picked per phone, with a sample; in a realtime call the voice is fixed once it has spoken, so a change redials. `src/voice/personas.ts`, `voiceSheet` in `web/voice.js`.
+**Evidence:** *Pattern*: ChatGPT and Gemini offer a handful of named voices rather than separate gender or style settings. *Product decision*: conversation style follows this document and the minimum-sufficient-output policy; only how it sounds is tunable.
 
 ---
 

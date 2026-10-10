@@ -356,3 +356,45 @@ test("PCM is wrapped as WAV", () => {
 	assert.equal(w.readUInt32LE(24), 16000);
 	assert.equal(w.length, 364);
 });
+
+test("voice personas change how pi sounds, matched across realtime, the computer's speech and the phone", async () => {
+	const { chooseVoice, PERSONAS, personaList } = await import("../src/voice/personas.ts");
+	const { ttsTarget } = await import("../src/voice/tts.ts");
+	assert.equal(new Set(PERSONAS.map((p) => p.id)).size, PERSONAS.length);
+	assert.equal(chooseVoice(undefined, undefined).realtime, "marin", "default");
+	assert.equal(chooseVoice({ realtimeVoice: "verse" }, undefined).realtime, "verse", "the config applies until the phone picks");
+	assert.equal(chooseVoice({ realtimeVoice: "verse" }, "cedar").realtime, "cedar", "the phone's pick wins");
+	assert.equal(chooseVoice(undefined, "nobody").persona.id, "marin", "unknown picks fall back");
+	assert.equal(chooseVoice({ ttsUrl: "http://x/v1" }, "cedar").tts, "am_michael", "Kokoro voice on a local server");
+	assert.equal(chooseVoice({ ttsUrl: "http://x/v1", ttsModel: "voicebox", ttsVoice: "me" }, "cedar").tts, "me", "other servers keep their own voice");
+	const t = ttsTarget({}, { OPENAI_API_KEY: "sk" }, "coral")!;
+	assert.equal(t.voice, "coral");
+	assert.equal(t.speed, 1.06);
+	assert.match(t.instructions!, /calm, competent colleague.*Voice: a bright/s, "delivery is added; the speaking style stays");
+	assert.equal(ttsTarget({}, { OPENAI_API_KEY: "sk" })!.speed, undefined);
+	const s: any = realtimeSession({ mode: "glance", project: "p", voice: "cedar", delivery: "a low, calm voice" });
+	assert.equal(s.audio.output.voice, "cedar");
+	assert.match(s.instructions, /Your voice: a low, calm voice\. It shapes how you sound, never what you say or how much\./);
+	assert.ok(personaList().every((p) => !("delivery" in p) && p.phone.prefer), "the phone gets names, blurbs and its own voice hints only");
+});
+
+test("voice host: the phone's persona reaches the realtime call and the speech", async () => {
+	let body: any;
+	const fetch = (async (_u: string, init: any) => {
+		body = JSON.parse(init.body);
+		return new Response("v=0 answer", { status: 201 });
+	}) as any;
+	const h = host({ credentials: async () => ({ kind: "chatgpt", token: "t" }), fetch });
+	await h.voiceSession({ sdp: "v=0 offer", mode: "glance", persona: "ash" });
+	assert.equal(body.session.audio.output.voice, "ash");
+	assert.match(body.session.instructions, /Your voice: a crisp/);
+	const v = h.voices();
+	assert.deepEqual(v.personas.map((p) => p.id), ["marin", "cedar", "coral", "ash"]);
+});
+
+test("a caveat that changes what the developer does next is never cut for length", () => {
+	for (const mode of ["eyes-busy", "glance"] as const) {
+		assert.match(BRIEF_SYSTEM(mode), /caveat that changes what they should do next .* is always said, even past the length limit/);
+		assert.match(voiceInstructions(mode, "p"), /Never drop a caveat that changes what they should do next/);
+	}
+});

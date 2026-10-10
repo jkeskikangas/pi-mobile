@@ -13,6 +13,8 @@
 	const app = () => window.PiMobile;
 	const MODE_KEY = "pi-mobile-voice-attention";
 	const TURN_KEY = "pi-mobile-voice-turns";
+	const PERSONA_KEY = "pi-mobile-voice-persona";
+	const PERSONAS_KEY = "pi-mobile-voice-personas"; // the computer's list, kept for the menu
 
 	// ── audio basics ────────────────────────────────────────────────────────────────────────────────
 	let actx = null;
@@ -659,6 +661,8 @@
 			$("vDot").className = `dot ${line.cls === "waiting" ? "waiting" : info?.status || "gone"}`;
 			$("vSession").setAttribute("aria-label", `${app().agentName(this.agent)}${line.text ? `: ${line.text}` : ""}. Switch session`);
 			$("vEngine").textContent = this.engine === "cascade" ? "basic" : "";
+			const persona = currentPersona();
+			$("vVoice").setAttribute("aria-label", persona ? `Voice: ${persona.name}. Change voice` : "Change voice");
 			$("vEyesFree").setAttribute("aria-pressed", String(this.attention === "eyes-busy"));
 			$("vGlance").setAttribute("aria-pressed", String(this.attention === "glance"));
 			$("vOpen").setAttribute("aria-pressed", String(this.turns === "open"));
@@ -904,6 +908,25 @@
 					earcon("failed");
 					this.tell("Heads-up: a significant action pi ran just failed.", `[PI] A significant action FAILED: ${title}. Tell the developer in one sentence what kind of action failed (no command text); pi is still working.`);
 				}
+			}
+		}
+
+		/** A new voice. A realtime call keeps its voice once it has spoken, so it is redialled; basic voice just uses it. */
+		async setPersona(p) {
+			this.render();
+			if (this.engine === "cascade") return this.speak(sampleLine(p));
+			if (this.engine !== "realtime") return;
+			this.stopRealtime();
+			this.setState("connecting");
+			try {
+				await this.startRealtime();
+				this.inject(`[PI] The developer just picked a new voice for you. Say only one short sentence in it: "This is ${p.name}."`, true);
+			} catch (e) {
+				this.stopRealtime();
+				await this.startCascade();
+				this.render();
+				this.note(`Basic voice (${e.message.replace(/^.*unavailable:\s*/, "")}).`);
+				this.speak(sampleLine(p));
 			}
 		}
 
@@ -1169,7 +1192,7 @@
 			};
 			const offer = await pc.createOffer();
 			await pc.setLocalDescription(offer);
-			const r = await app().call("voiceSession", { sdp: offer.sdp, mode: this.attention }, this.agent);
+			const r = await app().call("voiceSession", { sdp: offer.sdp, mode: this.attention, persona: pickedPersona() }, this.agent);
 			await pc.setRemoteDescription({ type: "answer", sdp: r.sdp });
 			await opened;
 			this.engine = "realtime";
@@ -1651,14 +1674,6 @@
 			} catch {}
 		}
 
-		voice() {
-			const all = speechSynthesis.getVoices();
-			const lang = (navigator.language || "en-US").toLowerCase();
-			const same = all.filter((v) => v.lang.toLowerCase().startsWith(lang.split("-")[0]));
-			const rank = (v) => (/premium|enhanced|neural|natural/i.test(v.name) ? 0 : /siri|google|samantha|daniel|karen|moira/i.test(v.name) ? 1 : v.localService ? 2 : 3) + (v.lang.toLowerCase() === lang ? 0 : 0.5);
-			return same.sort((x, y) => rank(x) - rank(y))[0] || null;
-		}
-
 		/** Stops whatever is speaking: the computer's audio or the phone's synthesis. */
 		silence() {
 			speechSynthesis.cancel();
@@ -1678,7 +1693,7 @@
 			const turn = (this.speakTurn = (this.speakTurn || 0) + 1);
 			if (this.serverTts !== false) {
 				try {
-					const r = await app().call("speak", { text }, this.agent);
+					const r = await app().call("speak", { text, persona: pickedPersona() }, this.agent);
 					if (turn !== this.speakTurn || this.closed) return;
 					const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(r.audio), (c) => c.charCodeAt(0))], { type: r.mime }));
 					const player = new Audio(url);
@@ -1701,12 +1716,14 @@
 		}
 
 		speakLocal(parts) {
-			const voice = this.voice();
+			const persona = currentPersona();
+			const voice = phoneVoice(persona);
 			this.setState("speaking");
 			parts.forEach((p, i) => {
 				const u = new SpeechSynthesisUtterance(p);
 				if (voice) u.voice = voice;
-				u.rate = this.attention === "eyes-busy" ? 1.05 : 1.0;
+				u.pitch = persona?.phone.pitch ?? 1;
+				u.rate = (this.attention === "eyes-busy" ? 1.05 : 1.0) * (persona?.rate ?? 1);
 				if (i === parts.length - 1)
 					u.onend = u.onerror = () => {
 						if (this.state === "speaking") this.setState(app().S.prompts.get(this.agent)?.size ? "asking" : this.listenState());
@@ -1714,6 +1731,102 @@
 				speechSynthesis.speak(u);
 			});
 		}
+	}
+
+	// ── voice personas: how pi sounds, never what it says (defined on the computer: src/voice/personas.ts) ──
+	const sampleLine = (p) => `This is ${p.name}. The tests pass, and the change is ready for you to review.`;
+
+	function pickedPersona() {
+		return localStorage.getItem(PERSONA_KEY) || undefined;
+	}
+
+	function cachedPersonas() {
+		try {
+			return JSON.parse(localStorage.getItem(PERSONAS_KEY) || "null");
+		} catch {
+			return null;
+		}
+	}
+
+	/** The picked persona, else the computer's default (the first); null before the list was ever loaded. */
+	function currentPersona(info = cachedPersonas()) {
+		const list = info?.personas || [];
+		return list.find((p) => p.id === pickedPersona()) || list[0] || null;
+	}
+
+	/** The phone's closest voice: the persona's preferred names first, then the best quality in the language. */
+	function phoneVoice(persona) {
+		const all = speechSynthesis.getVoices();
+		const lang = (navigator.language || "en-US").toLowerCase();
+		const same = all.filter((v) => v.lang.toLowerCase().startsWith(lang.split("-")[0]));
+		const prefer = persona?.phone.prefer ? new RegExp(`\\b(${persona.phone.prefer})\\b`, "i") : null;
+		const rank = (v) =>
+			(prefer?.test(v.name) ? -4 : 0) +
+			(/premium|enhanced|neural|natural/i.test(v.name) ? 0 : /siri|google|samantha|daniel|karen|moira/i.test(v.name) ? 1 : v.localService ? 2 : 3) +
+			(v.lang.toLowerCase() === lang ? 0 : 0.5);
+		return same.sort((x, y) => rank(x) - rank(y))[0] || null;
+	}
+
+	let sampleTurn = 0;
+	let sampler = null;
+	/** Plays a sample: from the computer when it has speech, else in the phone's closest voice. */
+	async function playSample(p, info) {
+		const turn = ++sampleTurn;
+		speechSynthesis.cancel();
+		sampler?.pause();
+		if (info.sample) {
+			try {
+				const r = await app().call("speak", { text: sampleLine(p), persona: p.id });
+				if (turn !== sampleTurn) return;
+				const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(r.audio), (c) => c.charCodeAt(0))], { type: r.mime }));
+				sampler = new Audio(url);
+				sampler.onended = () => URL.revokeObjectURL(url);
+				return await sampler.play();
+			} catch {
+				if (turn !== sampleTurn) return;
+			}
+		}
+		const u = new SpeechSynthesisUtterance(sampleLine(p));
+		const v = phoneVoice(p);
+		if (v) u.voice = v;
+		u.pitch = p.phone.pitch;
+		u.rate = p.rate;
+		speechSynthesis.speak(u);
+	}
+
+	async function voiceSheet() {
+		const a = app();
+		let info = cachedPersonas();
+		try {
+			info = await a.call("voices", {});
+			localStorage.setItem(PERSONAS_KEY, JSON.stringify(info));
+		} catch (e) {
+			if (!info) return a.toast(/unknown request/.test(e.message) ? "Update pi-mobile on the computer to choose a voice." : e.message, "error");
+		}
+		a.openSheet(
+			(body) => {
+				const g = a.group(body);
+				const rows = info.personas.map((p) => [p, a.row(g, { title: p.name, sub: p.blurb, trail: a.icon("check", "check"), onclick: () => choose(p) })]);
+				const mark = () => {
+					const cur = currentPersona(info);
+					for (const [p, r] of rows) r.setAttribute("aria-pressed", String(p.id === cur?.id));
+				};
+				const choose = (p) => {
+					localStorage.setItem(PERSONA_KEY, p.id);
+					mark();
+					if (mode && !mode.closed) mode.setPersona(p);
+					else playSample(p, info);
+				};
+				mark();
+				const note = document.createElement("p");
+				note.className = "note";
+				note.textContent = `Tap a voice to hear it. It changes how pi sounds, never what it says or how much.${
+					info.sample ? "" : " This computer has no speech set up, so samples play in this phone's closest voice; realtime voice mode uses the voice itself."
+				}`;
+				body.appendChild(note);
+			},
+			{ title: "Voice", subtitle: "How pi sounds in voice mode" },
+		);
 	}
 
 	// ── wiring ───────────────────────────────────────────────────────────────────────────────────────
@@ -1761,6 +1874,7 @@
 		$("vOpen").onclick = () => mode?.setTurns("open");
 		$("vTap").onclick = () => mode?.setTurns("tap");
 		$("vSession").onclick = () => app().sessionsSheet();
+		$("vVoice").onclick = voiceSheet;
 		// Escape ends voice mode on a keyboard (the circle is a button, so Enter/Space tap it).
 		document.addEventListener("keydown", (e) => {
 			if (!mode || mode.closed || $("voice").hidden || !$("sheet").hidden) return;
@@ -1769,6 +1883,8 @@
 	}
 
 	window.PiVoice = {
+		sheet: voiceSheet,
+		persona: () => currentPersona(),
 		/** Tests only (set window.PiVoiceDebug = [] first): show a state with sample captions. */
 		preview(state, { heard = "", said = "", note = "" } = {}) {
 			if (!window.PiVoiceDebug || !mode) return;

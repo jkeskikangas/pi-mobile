@@ -8,7 +8,7 @@ import type { Attention } from "./speech.ts";
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
 export const DEFAULT_VOICE = "marin";
 
-export function voiceInstructions(mode: Attention, project: string, extra = ""): string {
+export function voiceInstructions(mode: Attention, project: string, extra = "", delivery = ""): string {
 	const eyes = mode === "eyes-busy";
 	return `You are the voice of pi, a coding agent working in the developer's "${project}" project on their computer. The developer talks to you through their phone${
 		eyes ? " while driving, running, cycling or cooking: they cannot look at a screen and their attention is elsewhere" : ""
@@ -30,13 +30,16 @@ What you talk about:
 
 How you speak:
 - ${eyes ? "Very short: one or two sentences, about twenty words." : "Short: at most three sentences."} Lead with what matters. One idea per sentence.
+- Never drop a caveat that changes what they should do next (something irreversible, a risk to production, data or security, an assumption the work rests on) to stay short: say it, in one more sentence if needed.
 - Never read code, diffs, paths, URLs, tables or symbols. Round numbers.
 - Never announce what you are about to do ("let me check", "let me think", "one moment"): call the tool silently and speak only the answer. When you call ask_pi, call it straight away and say nothing: no plan, no restating. The phone plays a sound that tells the developer pi is on it. Speak again when pi's result arrives. After hidden updates where speaking would only distract, call remain_silent.
 - Do not narrate pi's progress. Silence while pi works is fine: the phone plays a soft working sound.
 - ${eyes ? "Anything that needs reading or visual review waits until they are at a screen; say so in a few words." : "If something needs reading, say it's on the screen."}
 - If you did not catch what they said, ask them to repeat it, briefly. If a request is ambiguous in a way that matters, ask one short question before calling ask_pi.
 - Preferences they state ("be terser", "tell me every test result") hold until they change them.
-- Speak the developer's language. Be calm and plain; no filler praise, no "great question".${extra ? `\n\n${extra}` : ""}`;
+- Speak the developer's language. Be calm and plain; no filler praise, no "great question".${
+		delivery ? `\n- Your voice: ${delivery}. It shapes how you sound, never what you say or how much.` : ""
+	}${extra ? `\n\n${extra}` : ""}`;
 }
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
@@ -99,6 +102,8 @@ export interface SessionOptions {
 	project: string;
 	model?: string;
 	voice?: string;
+	/** Persona delivery (timbre, pace); the content rules above stay the same. */
+	delivery?: string;
 	hints?: string[];
 	language?: string;
 	/** semantic (default): waits for the end of a thought; server: a fixed silence, more predictable in noise. */
@@ -111,7 +116,7 @@ export function realtimeSession(o: SessionOptions): Record<string, unknown> {
 	return {
 		type: "realtime",
 		model: o.model || DEFAULT_REALTIME_MODEL,
-		instructions: voiceInstructions(o.mode, o.project, vocab),
+		instructions: voiceInstructions(o.mode, o.project, vocab, o.delivery),
 		output_modalities: ["audio"],
 		audio: {
 			input: {

@@ -405,6 +405,7 @@ export class Bridge {
 			case "details":
 			case "voiceSession":
 			case "speak":
+			case "voices":
 			case "learn":
 			case "voiceState": {
 				const v = this.voice;
@@ -415,6 +416,7 @@ export class Bridge {
 				if (m === "details") return v.details(p);
 				if (m === "voiceSession") return v.voiceSession(p);
 				if (m === "speak") return v.speak(p);
+				if (m === "voices") return v.voices();
 				if (m === "learn") return v.learn(p);
 				return v.setListening(p);
 			}

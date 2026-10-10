@@ -403,6 +403,7 @@ textarea#input::placeholder { color: var(--muted); }
 .row .ask { font-size: 13px; color: var(--warn); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .trail { color: var(--muted); width: 18px; height: 18px; flex: none; }
 .row .check { color: var(--accent-ink); width: 20px; height: 20px; stroke-width: 2.4; flex: none; }
+.row[aria-pressed="false"] .check { visibility: hidden; }
 .row.current { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .row.current .sub, .row.current .last { color: var(--text-2); }
 .row.danger, .row.danger > .i { color: var(--err); }
@@ -539,8 +540,8 @@ body.voice-on .toasts { z-index: 70; }
 .v-session { flex: 1; min-width: 0; }
 .v-engine { flex: none; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 999px; }
 .v-engine:empty { display: none; }
-.v-close { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel-2); color: var(--text-2); flex: none; }
-.v-close .i { width: 20px; height: 20px; stroke-width: 2.2; }
+.v-close, .v-round { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel-2); color: var(--text-2); flex: none; }
+.v-close .i, .v-round .i { width: 20px; height: 20px; stroke-width: 2.2; }
 
 /* The stage is one big target: usable without looking, with gloves, on a bike mount. */
 .v-stage { position: relative; flex: 1; width: 100%; max-width: 560px; min-height: 240px; border-radius: var(--r-xl); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6%; color: inherit; -webkit-tap-highlight-color: transparent; }

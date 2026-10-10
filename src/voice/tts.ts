@@ -4,6 +4,7 @@
 // uses its own speech synthesis.
 
 import type { VoiceConfig } from "../store.ts";
+import { chooseVoice } from "./personas.ts";
 
 export const TTS_INSTRUCTIONS =
 	"Speak like a calm, competent colleague giving a quick update: clear, warm, brisk, no drama. Natural pauses between sentences.";
@@ -14,19 +15,31 @@ export interface TtsTarget {
 	model: string;
 	voice: string;
 	instructions?: string;
+	speed?: number;
 }
 
-export function ttsTarget(cfg: VoiceConfig | undefined, env = process.env): TtsTarget | undefined {
+/** `persona` is the phone's pick (see personas.ts); without one the config's voice applies. */
+export function ttsTarget(cfg: VoiceConfig | undefined, env = process.env, persona?: unknown): TtsTarget | undefined {
+	const choice = chooseVoice(cfg, persona);
+	const speed = choice.persona.rate !== 1 ? choice.persona.rate : undefined;
 	if (cfg?.ttsUrl) {
 		return {
 			url: `${cfg.ttsUrl.replace(/\/+$/, "")}/audio/speech`,
 			key: cfg.ttsKey ?? undefined,
 			model: cfg.ttsModel ?? "kokoro",
-			voice: cfg.ttsVoice ?? "af_heart",
+			voice: choice.tts,
+			speed,
 		};
 	}
 	if (env.OPENAI_API_KEY && cfg?.tts !== "off")
-		return { url: "https://api.openai.com/v1/audio/speech", key: env.OPENAI_API_KEY, model: cfg?.ttsModel ?? "gpt-4o-mini-tts", voice: cfg?.ttsVoice ?? "marin", instructions: TTS_INSTRUCTIONS };
+		return {
+			url: "https://api.openai.com/v1/audio/speech",
+			key: env.OPENAI_API_KEY,
+			model: cfg?.ttsModel ?? "gpt-4o-mini-tts",
+			voice: choice.tts,
+			instructions: `${TTS_INSTRUCTIONS} Voice: ${choice.persona.delivery}.`,
+			speed,
+		};
 	return undefined;
 }
 
@@ -44,6 +57,7 @@ export async function synthesize(text: string, target: TtsTarget | undefined, fe
 			input,
 			response_format: "mp3",
 			...(target.instructions ? { instructions: target.instructions } : {}),
+			...(target.speed ? { speed: target.speed } : {}),
 		}),
 		signal: AbortSignal.timeout(20_000),
 	});

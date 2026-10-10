@@ -1394,6 +1394,12 @@
 				if (S.push.on) add("Turn off notifications", () => setPush(false), "", "bell", "You get one when pi finishes or asks");
 				else add("Turn on notifications", () => setPush(true), "", "bell", "When pi finishes or needs you");
 			}
+			if (window.PiVoice?.sheet) {
+				section(body, "Voice");
+				g = group(body);
+				const p = window.PiVoice.persona();
+				add(p ? p.name : "Choose a voice", window.PiVoice.sheet, "", "voice", p ? `${p.blurb} · how pi sounds in voice mode` : "How pi sounds in voice mode");
+			}
 			section(body, "Devices");
 			g = group(body);
 			add("Pair another device", pairSheet, "", "qr");
@@ -1669,6 +1675,9 @@
 	// What voice.js needs from the app.
 	window.PiMobile = {
 		S,
+		row,
+		group,
+		closeSheet,
 		rpc,
 		call,
 		toast,

@@ -10,6 +10,7 @@ import type { Complete } from "./model.ts";
 import { createCall, chatgptAccountId, DEFAULT_REALTIME_MODEL, type RealtimeCredentials, realtimeSession } from "./realtime.ts";
 import { type Attention, brief, countWord, digestText, runDigest, speakable } from "./speech.ts";
 import { chooseStt, type SttProvider } from "./stt.ts";
+import { chooseVoice, personaList } from "./personas.ts";
 import { synthesize, ttsTarget } from "./tts.ts";
 import { gatherVocabulary, recognizerHints, sayName } from "./vocab.ts";
 
@@ -123,7 +124,7 @@ export class VoiceHost {
 	}
 
 	/** Sets up the phone's realtime call. Throws `realtime unavailable` so the phone falls back to the cascade. */
-	async voiceSession(p: { sdp?: unknown; mode?: unknown }) {
+	async voiceSession(p: { sdp?: unknown; mode?: unknown; persona?: unknown }) {
 		const cfg = this.deps.config();
 		if (cfg?.realtime === "off") throw new Error("realtime unavailable: turned off in the voice config");
 		if (typeof p.sdp !== "string" || !p.sdp.startsWith("v=")) throw new Error("bad offer");
@@ -131,11 +132,13 @@ export class VoiceHost {
 		if (!creds) throw new Error("realtime unavailable: sign in to ChatGPT in pi (/login openai-codex) or set OPENAI_API_KEY");
 		const mode = attention(p.mode);
 		const model = cfg?.realtimeModel || DEFAULT_REALTIME_MODEL;
+		const voice = chooseVoice(cfg, p.persona);
 		const session = realtimeSession({
 			mode,
 			project: this.deps.ctx().cwd.split("/").pop() || "project",
 			model,
-			voice: cfg?.realtimeVoice,
+			voice: voice.realtime,
+			delivery: voice.persona.delivery,
 			hints: (await this.hints()).slice(0, 60),
 			language: cfg?.locale,
 			turnDetection: cfg?.turnDetection,
@@ -145,8 +148,13 @@ export class VoiceHost {
 	}
 
 	/** Speech audio for basic voice mode; throws `tts unavailable` when the phone should speak itself. */
-	speak(p: { text?: unknown }) {
-		return synthesize(String(p.text ?? ""), ttsTarget(this.deps.config()), this.deps.fetch);
+	speak(p: { text?: unknown; persona?: unknown }) {
+		return synthesize(String(p.text ?? ""), ttsTarget(this.deps.config(), process.env, p.persona), this.deps.fetch);
+	}
+
+	/** The personas for the phone's picker; `sample` says whether the computer can play one. */
+	voices() {
+		return { personas: personaList(), sample: !!ttsTarget(this.deps.config()) };
 	}
 
 	dictionary(): Dictionary {

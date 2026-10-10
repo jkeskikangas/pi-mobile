@@ -14,6 +14,7 @@ import { Hub } from "../../src/hub.ts";
 import { HubLink } from "../../src/link.ts";
 import type { AgentInfo, Item } from "../../src/protocol.ts";
 import { DeviceStore, PushStore } from "../../src/store.ts";
+import { personaList } from "../../src/voice/personas.ts";
 
 const port = Number(process.argv[2] ?? 7979);
 const dir = mkdtempSync(join(tmpdir(), "pi-mobile-ui-"));
@@ -149,6 +150,7 @@ for (const f of fakes) {
 				);
 			if (m === "voiceSession") throw new Error("realtime voice is not set up");
 			if (m === "speak") throw new Error("tts unavailable");
+			if (m === "voices") return { personas: personaList(), sample: false };
 			if (m === "voiceStatus") return { speech: "pi is idle.", status: f.info.status, elapsedMs: 0, tools: [], prompts: prompts.get(f.info.agent) ?? [] };
 			if (m === "brief") return { speech: "Done. The totals now add instead of subtract.", more: [], report: "", by: "fixture" };
 			if (m === "send") {
