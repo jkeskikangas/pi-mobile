@@ -132,7 +132,7 @@ graph LR
 - **Decision:** with `config.home` set, the spoke forwards attention upstream and sends no pushes itself.
 - **Driver:** UC-5: one notification per event.
 - **Alternatives:** push both ways — rejected because a phone paired with both machines would get duplicates.
-- **Reversibility:** cheap. **Decided 2026-10-10:** yes. The point is every session on one phone through the home; at a desk, herdr reaches the box's sessions from the laptop, so direct phone pairings with a linked machine are not a case to serve.
+- **Reversibility:** cheap. **Decided 2026-10-10:** yes. Every session reaches the phone through the home, so a phone needs only the home's pairing; a linked machine's own notifications would only duplicate the home's.
 - **Validated by:** peer test asserting the spoke's `sendPush` is never called while linked.
 
 ## Failure modes and cross-cutting concerns

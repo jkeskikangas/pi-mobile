@@ -6,6 +6,15 @@ Each step ends green: `npx tsc --noEmit -p .` and `npm test` pass, and it is com
 
 **Coordination:** `src/hub.ts`, `src/index.ts` and `web/app.js` are also being edited by the voice work. Keep edits to those files as small, anchored insertions, and commit only this feature's hunks (staged from `HEAD` plus a replacement script, as for the herdr commit).
 
+## The user's setup (what all of this must add up to)
+
+Every session on every machine, in one list on the phone, with one QR scan:
+
+1. On the always-on machine (the cloud box), run `/remote` and scan its QR code with the phone, as for a single machine today. That machine is the home.
+2. On the box, `/remote pair machine` prints one line, `/remote join <link>`. Paste it into pi on the laptop. Usually the box's terminal is an SSH window on that same laptop, so this is a copy and paste.
+
+From then on, the laptop's sessions appear on the phone, labelled "laptop", whenever the laptop is awake. They disappear when it sleeps and come back within 10 s of it waking. Running `/remote` on the linked laptop shows no QR code; it says its sessions reach the phone through the box. A phone that also scans the laptop directly still works, but it is never needed.
+
 ## 1. Sealed channel framing (D4)
 
 - `src/channel.ts`: optional `codec { encode(line: string): string; decode(line: string): string | undefined }`. A frame that fails to decode closes the channel.
@@ -41,8 +50,9 @@ Each step ends green: `npx tsc --noEmit -p .` and `npm test` pass, and it is com
 ## 5. Commands (UC-1/7)
 
 - `src/index.ts`:
-  - `/remote pair machine` on the home prints a link and code;
+  - `/remote pair machine` on the home prints the ready-to-paste line `/remote join <link>` (single use, 10 min, like phone pairing);
   - `/remote join <link>` on the spoke pairs, saves `config.home` and restarts the hub;
+  - `/remote` on a linked machine shows "Shared with your phone through <home>" and its sessions instead of a QR code;
   - `/remote settings` gains "This machine's name" and "Linked to: <home> — unlink";
   - `/remote devices` shows machines;
   - the overview groups sessions by machine.
@@ -86,7 +96,7 @@ Update `README.md` ("Several machines") and the comparison table.
 
 ## Decisions
 
-- D7 (2026-10-10): a linked machine stops pushing to phones paired with it directly; all pushes come through the home. `/remote join` says so when it links.
+- D7 (2026-10-10): every session on every machine reaches the phone through the home, notifications included. A linked machine sends no notifications of its own, so a phone never gets the same one twice.
 - Speech from another machine's sign-in (2026-10-10): allowed (step 7).
 
 ## Open
