@@ -7,7 +7,7 @@ No server to install, no account, no third-party relay, no app store. It all run
 <p>
 <img src="docs/img/04-transcript.jpg" width="260" alt="A pi session on the phone: tool steps as quiet rows, the reply in readable markdown, another session's question as a bar at the top">
 <img src="docs/img/08-confirm.jpg" width="260" alt="pi asks permission to change a file; large Yes and No buttons above the composer">
-<img src="docs/img/15-voice.jpg" width="260" alt="Voice mode: a large animated orb, and pi's permission question with big answer buttons">
+<img src="docs/img/15-voice.jpg" width="260" alt="Voice mode while pi needs you: an amber orb, the spoken question as a caption, and big answer buttons">
 </p>
 
 ## What you get
