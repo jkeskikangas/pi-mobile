@@ -4,10 +4,10 @@ Your [pi](https://github.com/earendil-works/pi) sessions, on your phone. Run `/r
 
 No server to install, no account, no third-party relay, no app store. It all runs inside pi, and everything between your phone and pi is end-to-end encrypted.
 
-<p>
-<img src="docs/img/04-transcript.jpg" width="260" alt="A pi session on the phone: tool steps as quiet rows, the reply in readable markdown, another session's question as a bar at the top">
-<img src="docs/img/08-confirm.jpg" width="260" alt="pi asks permission to change a file; large Yes and No buttons above the composer">
-<img src="docs/img/15-voice.jpg" width="260" alt="Voice mode while pi needs you: an amber orb, the question card with big answer buttons, and Mute and End below">
+<p align="center">
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/04-transcript-dark.webp"><img src="docs/img/04-transcript-light.webp" width="250" alt="A pi session on the phone: tool steps as quiet rows, the reply in readable markdown, another session's question as a bar at the top"></picture>&nbsp;&nbsp;
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/08-confirm-dark.webp"><img src="docs/img/08-confirm-light.webp" width="250" alt="pi asks permission to change a file; large Yes and No buttons above the composer"></picture>&nbsp;&nbsp;
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/15-voice-dark.webp"><img src="docs/img/15-voice-light.webp" width="250" alt="Voice mode while pi needs you: an amber orb, the question card with big answer buttons, and Mute and End below"></picture>
 </p>
 
 ## What you get
