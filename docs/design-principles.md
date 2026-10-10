@@ -44,7 +44,7 @@ If a change only works with full attention and two hands, it is wrong for this a
 Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; sound and speech do the real work (behaviour in [voice.md](voice.md)).
 
 - **Immersive, in either theme.** Voice mode follows the system theme like the rest of the app (a dark room or a sunny street both get a legible screen). The orb keeps its vivid state colours (`--d-accent`, `--d-busy`, `--d-speak`, …) in both themes, so a state looks the same wherever you see it.
-- **The header is the app's header**: session name, the app's status line ("Working · 0:42", "Needs you · …") and status dot, plus the engine tag when voice runs without realtime.
+- **The header is the app's header**: session name, the app's status line ("Working · 0:42", "Needs you · …") and status dot, plus a settings button. No engine jargon: when realtime voice is unavailable, a note says so once and the settings sheet gives the reason.
 - **State colours** come from `.voice[data-state]` as `--c1`/`--c2` (pairs of the vivid `--d-*` state colours) and drive the glow and the orb, in the same colour language as the app:
 
   | State | Colour | Label |
@@ -60,7 +60,8 @@ Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; so
 - **The stage is one button.** It interrupts pi, unmutes, or talks (tap mode); its `aria-label` names the action it will take now.
 - **Captions** show what you said (muted, "You") and what pi says, live as words arrive. Clamp lines; never scroll.
 - **The question card** (`#vAsk`) is the app's `.prompt` card: "pi asks", the title, the message, tap answers when you can glance; destructive answers are `.danger` ("Yes, do it") in both places. During the undo window it shows "Going ahead", the action, a shrinking amber bar, Cancel (primary) and Do it now.
-- **Controls at the bottom**: a 64–72 px mute button and two full-width `.seg.wide` segmented controls (Eyes-free | Can glance, Open mic | Push to talk) with `aria-pressed`. Header: session switcher and a 44 px close. Icons come from the app's sprite.
+- **Two controls at the bottom, labelled**: Mute and a red End, 68–72 px, centred in the thumb zone; the circle above is the third control (push to talk). Settings that rarely change (Eyes-free | Can glance, Open mic | Push to talk, the voice) live in a Voice settings sheet behind the header button, and can be said aloud ("push to talk", "I can glance"). Icons come from the app's sprite.
+- **Say it once**: while pi's question card is on screen, pi's caption gives way after the question is spoken; the card is the question.
 - **Sound is part of the UI.** Earcons live in `voice-core.js` `EARCONS` (listen, heard, working tick, attention, done, failed, off). A new state the user must notice gets a sound, not only a colour; keep the set small so each stays learnable.
 
 ## 5. Motion
@@ -79,7 +80,7 @@ Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; so
 
 ## 7. Platform rules
 
-- **iOS**: inputs at 16 px or more (smaller zooms the page); safe-area insets on every fixed edge; `navigator.vibrate` does nothing, so never rely on haptics; the mic needs HTTPS and stops when the screen locks; Web Push needs the Home Screen app.
+- **iOS**: inputs at 16 px or more (smaller zooms the page); safe-area insets on every fixed edge; `navigator.vibrate` does nothing; a native switch toggled inside a user gesture gives a haptic tick (Safari 18+), so haptics confirm presses but never notify; the mic needs HTTPS and stops when the screen locks; Web Push needs the Home Screen app.
 - **CSP** (`src/hub.ts`): `default-src 'self'`, images `data:`/`blob:`, media `blob:`. No inline scripts, external fonts, scripts or CDNs.
 - **Performance**: instant on a mid-range phone over a tunnel. Batch DOM writes, render streams on a timer, no layout reads in per-frame loops.
 - **Logic that can be pure belongs in a testable module** (`web/voice-core.js` is loaded by both the browser and `node --test`).

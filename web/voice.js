@@ -556,7 +556,7 @@
 				await this.startCascade();
 			}
 			this.render();
-			if (realtimeError) this.note(`Basic voice (${/unavailable/.test(realtimeError) ? realtimeError.replace(/^.*unavailable:\s*/, "") : realtimeError}).`);
+			if (realtimeError) this.basic(realtimeError);
 			earcon("listen");
 			localStorage.setItem(USES_KEY, String(++this.uses));
 			if (!localStorage.getItem(INTRO_KEY)) {
@@ -673,13 +673,7 @@
 			$("vSub").className = `session-sub ${line.cls}`;
 			$("vDot").className = `dot ${line.cls === "waiting" ? "waiting" : info?.status || "gone"}`;
 			$("vSession").setAttribute("aria-label", `${app().agentName(this.agent)}${line.text ? `: ${line.text}` : ""}. Switch session`);
-			$("vEngine").textContent = this.engine === "cascade" ? "basic" : "";
-			const persona = currentPersona();
-			$("vVoice").setAttribute("aria-label", persona ? `Voice: ${persona.name}. Change voice` : "Change voice");
-			$("vEyesFree").setAttribute("aria-pressed", String(this.attention === "eyes-busy"));
-			$("vGlance").setAttribute("aria-pressed", String(this.attention === "glance"));
-			$("vOpen").setAttribute("aria-pressed", String(this.turns === "open"));
-			$("vTap").setAttribute("aria-pressed", String(this.turns === "tap"));
+			$("vMuteLabel").textContent = this.muted ? "Unmute" : "Mute";
 			$("vMute").setAttribute("aria-pressed", String(this.muted));
 			$("vMute").setAttribute("aria-label", this.muted ? "Unmute microphone" : "Mute microphone");
 		}
@@ -716,7 +710,24 @@
 		}
 
 		note(text) {
+			clearTimeout(this.noteTimer);
 			$("vNote").textContent = text || "";
+		}
+
+		/** Realtime voice isn't available: say so once, briefly; the settings sheet keeps the reason. */
+		basic(error) {
+			this.basicReason = /unavailable/.test(error) ? error.replace(/^.*unavailable:\s*/, "") : error;
+			this.note("Using basic voice. Details in voice settings.");
+			this.noteTimer = setTimeout(() => $("vNote").textContent === "Using basic voice. Details in voice settings." && this.note(""), 8000);
+		}
+
+		/** "Push to talk", "open mic", "eyes free", "I can glance": settings by voice. */
+		applySetting(kind) {
+			if (kind === "pushToTalk") this.setTurns("tap");
+			if (kind === "openMic") this.setTurns("open");
+			if (kind === "eyesFree") this.setAttention("eyes-busy");
+			if (kind === "glance") this.setAttention("glance");
+			earcon("heard");
 		}
 
 		heard(text, live = false) {
@@ -810,7 +821,7 @@
 		 * floor. In open mic, a tap while listening just confirms with a sound that you're heard.
 		 */
 		tap() {
-			navigator.vibrate?.(15);
+			haptic();
 			if (!this.engine) {
 				if (this.state !== "connecting") this.restart();
 				return;
@@ -825,7 +836,7 @@
 		/** Push to talk: pressing the circle starts your turn at once, over pi if it is talking. */
 		pressStart() {
 			if (this.turns !== "tap" || !this.engine || this.muted || this.talking) return false;
-			navigator.vibrate?.(15);
+			haptic();
 			this.holding = true;
 			this.toggleTalk();
 			return true;
@@ -834,7 +845,10 @@
 		/** Letting go after a hold ends the turn; after a quick tap you stay talking until the next tap. */
 		pressEnd(held) {
 			this.holding = false;
-			if (held && this.talking) this.toggleTalk();
+			if (held && this.talking) {
+				haptic();
+				this.toggleTalk();
+			}
 			else this.render();
 		}
 
@@ -957,7 +971,7 @@
 				this.stopRealtime();
 				await this.startCascade();
 				this.render();
-				this.note(`Basic voice (${e.message.replace(/^.*unavailable:\s*/, "")}).`);
+				this.basic(e.message);
 				this.speak(sampleLine(p));
 			}
 		}
@@ -1441,6 +1455,7 @@
 					// Instant local stop, before the model has even answered; its own stop_pi is then a no-op.
 					if (V.parseCommand(text)?.kind === "stop" && app().S.agents.get(this.agent)?.status === "working") app().call("abort", {}, this.agent).catch(() => {});
 					if (V.parseCommand(text)?.kind === "end") setTimeout(() => this.close(), 1200);
+					if (!echo && V.SETTINGS.includes(V.parseCommand(text)?.kind)) this.applySetting(V.parseCommand(text).kind);
 					break;
 				}
 				case "response.created":
@@ -1656,6 +1671,10 @@
 				if (cmd?.kind === "quiet") return this.setState(this.listenState());
 				if (cmd?.kind === "repeat") return this.speak(this.lastSpoken || "I haven't said anything yet.");
 				if (cmd?.kind === "status") return this.speak((await this.tool("pi_status", {})).speech);
+				if (V.SETTINGS.includes(cmd?.kind)) {
+					this.applySetting(cmd.kind);
+					return this.speak(cmd.kind === "pushToTalk" ? "Push to talk. Hold the circle while you talk." : cmd.kind === "openMic" ? "Open mic." : "Okay.");
+				}
 				if (cmd?.kind === "shorter") {
 					this.attention = "eyes-busy";
 					this.render();
@@ -1763,6 +1782,80 @@
 				speechSynthesis.speak(u);
 			});
 		}
+	}
+
+	/**
+	 * A tap you can feel. iOS Safari has no navigator.vibrate; toggling a native switch plays its
+	 * haptic, but only inside a user gesture (Safari 18+). Never for notifications.
+	 */
+	let hapticSwitch = null;
+	function haptic() {
+		if (navigator.vibrate) return navigator.vibrate(12);
+		try {
+			if (!hapticSwitch) {
+				hapticSwitch = document.createElement("label");
+				hapticSwitch.setAttribute("aria-hidden", "true");
+				hapticSwitch.style.display = "none";
+				const input = document.createElement("input");
+				input.type = "checkbox";
+				input.setAttribute("switch", "");
+				input.tabIndex = -1;
+				hapticSwitch.appendChild(input);
+				document.body.appendChild(hapticSwitch);
+			}
+			hapticSwitch.click();
+		} catch {}
+	}
+
+	/** Settings that rarely change, out of the thumb zone: how much to say, how turns work, the voice. */
+	function settingsSheet() {
+		const a = app();
+		const m = mode;
+		if (!m) return;
+		const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text });
+		a.openSheet(
+			(body) => {
+				const seg = (label, options, current, set, describe) => {
+					body.appendChild(el("div", "section", label));
+					const g = el("div", "seg wide");
+					g.setAttribute("role", "group");
+					g.setAttribute("aria-label", label);
+					const sub = el("p", "sub-note", "");
+					const buttons = options.map(([value, text]) => {
+						const b = el("button", "", text);
+						b.onclick = () => {
+							set(value);
+							mark(value);
+						};
+						g.appendChild(b);
+						return [value, b];
+					});
+					const mark = (v) => {
+						for (const [value, b] of buttons) b.setAttribute("aria-pressed", String(value === v));
+						sub.textContent = describe(v);
+					};
+					mark(current);
+					body.append(g, sub);
+				};
+				seg("How much pi says", [["eyes-busy", "Eyes-free"], ["glance", "Can glance"]], m.attention, (v) => m.setAttention(v), (v) =>
+					v === "eyes-busy" ? "Shortest answers, nothing visual: driving, running, cycling." : "A little more detail; you can look at the screen.",
+				);
+				seg("Taking turns", [["open", "Open mic"], ["tap", "Push to talk"]], m.turns, (v) => m.setTurns(v), (v) =>
+					v === "open" ? "Just talk; pi notices when you're done." : "Hold the circle while you talk, or tap to start and stop. For wind, traffic and noise.",
+				);
+				body.appendChild(el("div", "section", "Voice"));
+				const p = currentPersona();
+				a.row(a.group(body), { lead: "voice", title: p ? p.name : "Choose a voice", sub: p ? p.blurb : "How pi sounds", trail: a.icon("chev-right", "trail"), onclick: voiceSheet });
+				const note = el("p", "note", "");
+				note.textContent = `${
+					m.engine === "cascade"
+						? `Basic voice: recognition on your computer and a spoken brief${m.basicReason ? `, because realtime voice is unavailable (${m.basicReason})` : ""}.`
+						: "Realtime voice."
+				} You can also say "push to talk", "open mic", "eyes free" or "I can glance".`;
+				body.appendChild(note);
+			},
+			{ title: "Voice settings" },
+		);
 	}
 
 	// ── voice personas: how pi sounds, never what it says (defined on the computer: src/voice/personas.ts) ──
@@ -1925,12 +2018,8 @@
 			mode?.tap();
 		};
 		$("vMute").onclick = () => mode?.setMuted(!mode.muted);
-		$("vEyesFree").onclick = () => mode?.setAttention("eyes-busy");
-		$("vGlance").onclick = () => mode?.setAttention("glance");
-		$("vOpen").onclick = () => mode?.setTurns("open");
-		$("vTap").onclick = () => mode?.setTurns("tap");
 		$("vSession").onclick = () => app().sessionsSheet();
-		$("vVoice").onclick = voiceSheet;
+		$("vSettings").onclick = settingsSheet;
 		// Escape ends voice mode on a keyboard (the circle is a button, so Enter/Space tap it).
 		document.addEventListener("keydown", (e) => {
 			if (!mode || mode.closed || $("voice").hidden || !$("sheet").hidden) return;

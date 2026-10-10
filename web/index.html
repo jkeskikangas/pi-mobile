@@ -40,6 +40,7 @@
 	<symbol id="i-compact" viewBox="0 0 24 24"><path d="M4 12h16M8 4l4 4 4-4M8 20l4-4 4 4"/></symbol>
 	<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5"/></symbol>
 	<symbol id="i-voice" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M17 6a4 4 0 0 1 0 5M19.5 3.5a7.5 7.5 0 0 1 0 10"/></symbol>
+	<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
 	<symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/></symbol>
 	<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
 	<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
@@ -118,12 +119,11 @@
 		<button id="vSession" class="session-btn v-session" aria-label="Switch session">
 			<span id="vDot" class="dot" aria-hidden="true"></span>
 			<span class="session-text">
-				<span class="session-line"><span id="vSessionName" class="session-name"></span><span id="vEngine" class="v-engine"></span><svg class="i chev" aria-hidden="true"><use href="#i-chev-down"/></svg></span>
+				<span class="session-line"><span id="vSessionName" class="session-name"></span><svg class="i chev" aria-hidden="true"><use href="#i-chev-down"/></svg></span>
 				<span id="vSub" class="session-sub"></span>
 			</span>
 		</button>
-		<button id="vVoice" class="v-round" aria-label="Change voice" title="Voice"><svg class="i" aria-hidden="true"><use href="#i-voice"/></svg></button>
-		<button id="vEnd" class="v-close" aria-label="End voice mode"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+		<button id="vSettings" class="v-round" aria-label="Voice settings" aria-haspopup="dialog" title="Voice settings"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg></button>
 	</header>
 	<button id="vOrb" class="v-stage connecting" aria-describedby="vState vHint">
 		<canvas id="vCanvas" class="v-canvas" aria-hidden="true"></canvas>
@@ -138,18 +138,14 @@
 	<section id="vAsk" class="prompt v-ask" hidden aria-live="assertive"></section>
 	<p id="vNote" class="v-note" role="status"></p>
 	<footer class="v-controls">
-		<button id="vMute" class="v-mute" aria-pressed="false" aria-label="Mute microphone">
-			<svg class="i on" aria-hidden="true"><use href="#i-mic"/></svg>
-			<svg class="i off" aria-hidden="true"><use href="#i-mic-off"/></svg>
+		<button id="vMute" class="v-btn v-mute" aria-pressed="false">
+			<span class="v-btn-face"><svg class="i on" aria-hidden="true"><use href="#i-mic"/></svg><svg class="i off" aria-hidden="true"><use href="#i-mic-off"/></svg></span>
+			<span id="vMuteLabel" class="v-btn-label">Mute</span>
 		</button>
-		<div class="seg wide" role="group" aria-label="How much to say">
-			<button id="vEyesFree" aria-pressed="true" title="Shortest answers, nothing visual: driving, running, cycling">Eyes-free</button>
-			<button id="vGlance" aria-pressed="false" title="A little more detail; you can look at the screen">Can glance</button>
-		</div>
-		<div class="seg wide" role="group" aria-label="How turns work">
-			<button id="vOpen" aria-pressed="true" title="Just talk; pi notices when you're done">Open mic</button>
-			<button id="vTap" aria-pressed="false" title="Hold the circle while you talk, or tap to start and stop: wind, traffic, noise">Push to talk</button>
-		</div>
+		<button id="vEnd" class="v-btn v-end">
+			<span class="v-btn-face"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></span>
+			<span class="v-btn-label">End</span>
+		</button>
 	</footer>
 	<audio id="vRemote" autoplay playsinline></audio>
 </div>

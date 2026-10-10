@@ -499,10 +499,8 @@ body.voice-on .toasts { z-index: 70; }
 
 .v-top { width: 100%; max-width: 560px; display: flex; align-items: center; gap: 8px; }
 .v-session { flex: 1; min-width: 0; }
-.v-engine { flex: none; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 999px; }
-.v-engine:empty { display: none; }
-.v-close, .v-round { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel-2); color: var(--text-2); flex: none; }
-.v-close .i, .v-round .i { width: 20px; height: 20px; stroke-width: 2.2; }
+.v-round { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel-2); color: var(--text-2); flex: none; }
+.v-round .i { width: 20px; height: 20px; stroke-width: 2.2; }
 
 /* The stage is one big target: usable without looking, with gloves, on a bike mount. */
 .v-stage { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; position: relative; flex: 1; width: 100%; max-width: 560px; min-height: 240px; border-radius: var(--r-xl); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6%; color: inherit; -webkit-tap-highlight-color: transparent; }
@@ -529,12 +527,22 @@ body.voice-on .toasts { z-index: 70; }
 .v-note { width: 100%; max-width: 560px; margin: 0; font-size: 13px; color: var(--warn); min-height: 1em; text-align: center; }
 .v-note:empty { display: none; }
 
-.v-controls { width: 100%; max-width: 560px; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 8px 12px; align-items: center; }
-.v-mute { grid-row: span 2; width: 64px; height: 64px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel-2); color: var(--text); }
-.v-mute .i { width: 26px; height: 26px; }
+/* Two big buttons in the thumb zone, labelled; settings that rarely change live in a sheet. */
+.v-controls { width: 100%; max-width: 560px; display: flex; justify-content: center; gap: 56px; padding-top: 4px; }
+.v-btn { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; min-width: 72px; border-radius: var(--r-l); }
+.v-btn-face { width: 68px; height: 68px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel-2); color: var(--text); transition: background .2s var(--ease), color .2s var(--ease), transform .12s var(--ease); }
+.v-btn:active .v-btn-face { transform: scale(.94); }
+.v-btn-face .i { width: 28px; height: 28px; }
+.v-btn-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
 .v-mute .off, .v-mute[aria-pressed="true"] .on { display: none; }
 .v-mute[aria-pressed="true"] .off { display: block; }
-.v-mute[aria-pressed="true"] { background: var(--text); color: var(--bg); }
-@media (min-height: 760px) { .v-mute { width: 72px; height: 72px; } }
+.v-mute[aria-pressed="true"] .v-btn-face { background: var(--text); color: var(--bg); }
+.v-end .v-btn-face { background: var(--danger); color: var(--danger-text); }
+.v-end .i { stroke-width: 2.4; }
+@media (forced-colors: active) { .v-btn-face { border: 2px solid ButtonText; } }
+/* Asking: the card is the question. pi's caption subtitles it while spoken, then gives way. */
+.voice[data-state="asking"] .v-cap.pi { display: none; }
+.sheet .sub-note { margin: 8px 4px 14px; font-size: 13px; color: var(--text-2); }
+@media (min-height: 760px) { .v-btn-face { width: 72px; height: 72px; } }
 @media (prefers-reduced-motion: reduce) { .mic.rec::after, .dict-bar[data-kind="busy"] .grow::before { animation: none !important; } .voice { transition: none; animation: none; } }
 @media (prefers-contrast: more) { .voice { --muted: #d4d6db; --border-strong: rgba(255, 255, 255, .45); } }

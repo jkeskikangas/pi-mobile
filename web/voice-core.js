@@ -24,6 +24,10 @@
 		["quiet", /^(?:quiet|be quiet|shush|shut up|silence|stop talking|enough)$/],
 		["end", /^(?:end voice(?: mode)?|exit voice(?: mode)?|goodbye|bye|that's all|we're done|end call|hang up)$/],
 		["help", /^(?:help|what can i say|what can you do|how does this work|commands)$/],
+		["pushToTalk", /^(?:push to talk|hold to talk|tap to talk|walkie talkie)$/],
+		["openMic", /^(?:open mic|open microphone|hands free|hands-free)$/],
+		["eyesFree", /^(?:eyes free|eyes-free|i can't look|i cannot look|i'm driving)$/],
+		["glance", /^(?:i can (?:look|glance|see the screen)|can glance|i'm at (?:a|the|my) screen)$/],
 	];
 
 	/** What "what can I say?" answers: a few things, spoken, not a manual. */
@@ -250,6 +254,9 @@
 		/\b(prod|production|deploy\w*|release|publish|migrat\w*|drop\s+(?:table|database|schema)|truncate|delete\s+from|update\s+\w+\s+set|rm\s+-\w*r\w*f|git\s+push|--force|reset\s+--hard|kubectl|helm|terraform\s+(?:apply|destroy)|tofu\s+(?:apply|destroy)|psql|mysql|mongosh?|redis-cli|database_url|aws\s|gcloud|az\s|ssh\s|scp\s|curl\s+-X\s*(?:POST|PUT|PATCH|DELETE)|npm\s+publish|docker\s+push|stripe|payment|send\w*\s+(?:mail|email|message))\b/i;
 	const isSignificant = (text) => SIGNIFICANT.test(String(text || ""));
 
-	const api = { HELP, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
+	/** Commands that change voice settings, handled on the phone. */
+	const SETTINGS = ["pushToTalk", "openMic", "eyesFree", "glance"];
+
+	const api = { HELP, SETTINGS, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
 	globalThis.PiVoiceCore = api;
 })();

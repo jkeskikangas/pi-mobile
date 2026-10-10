@@ -111,3 +111,12 @@ test("speech is chunked at sentence and clause boundaries", () => {
 	const long = `${"word ".repeat(30)}, ${"more ".repeat(30)}`;
 	assert.ok(V.chunks(long, 100).every((c: string) => c.length <= 100));
 });
+
+test("settings by voice: push to talk, open mic, eyes free, can glance", () => {
+	assert.equal(V.parseCommand("Push to talk.")?.kind, "pushToTalk");
+	assert.equal(V.parseCommand("open mic")?.kind, "openMic");
+	assert.equal(V.parseCommand("I'm driving")?.kind, "eyesFree");
+	assert.equal(V.parseCommand("I can glance")?.kind, "glance");
+	assert.equal(V.parseCommand("push the branch to talk"), null);
+	assert.ok(V.SETTINGS.includes("pushToTalk"));
+});

@@ -191,11 +191,11 @@ The practices the voice features are built on, where each lives in the code, why
 **Evidence:** *Source*: voice agent UI guidance: a handful of states, never animation alone ([orb-ui guide](https://orb-ui.com/docs/guides/voice-agent-ui)); ChatGPT moved voice into the chat with a live transcript ([Engadget](https://www.engadget.com/ai/now-you-can-use-chatgpt-voice-without-leaving-your-chat-195000538.html)).
 
 ### 7.2 Hit it without looking
-**What:** the whole stage is one button; mute and modes at the bottom; question cards with large answers; reduced-motion path.
+**What:** the whole stage is one button (push to talk: hold or tap); only Mute and End at the bottom, labelled; modes in a settings sheet or by voice; question cards with large answers; reduced-motion path.
 **Evidence:** *Source*: NHTSA glance limits (above); accessible animation ([Pope Tech](https://blog.pope.tech/2025/12/08/design-accessible-animation-and-movement/)).
 
 ### 7.3 Respect the platform
-**What:** voice needs HTTPS (microphone access); on iPhone the mic stops when the screen locks, so voice mode keeps the screen awake and dark; `navigator.vibrate` is not relied on (no-op on iOS); AirPods stem mute via Media Session `togglemicrophone`, a cue on `voiceactivity` while muted, and `audioSession.type = "play-and-record"`.
+**What:** voice needs HTTPS (microphone access); on iPhone the mic stops when the screen locks, so voice mode keeps the screen awake and dark; `navigator.vibrate` is not relied on (no-op on iOS); presses get a haptic tick from a native switch toggled in the gesture (Safari 18+); AirPods stem mute via Media Session `togglemicrophone`, a cue on `voiceactivity` while muted, and `audioSession.type = "play-and-record"`.
 **Evidence:** *Source*: WebKit background capture ([268791](https://trac.webkit.org/changeset/268791/webkit), [273069](https://trac.webkit.org/changeset/273069/webkit)); AirPods mute and `voiceactivity` ([WebKit #33469](https://github.com/WebKit/WebKit/pull/33469), [WebKit #31642](https://github.com/WebKit/WebKit/pull/31642), [Media Session spec](https://w3c.github.io/mediasession/)); [Audio Session API](https://developer.mozilla.org/en-US/docs/Web/API/Audio_Session_API); iOS web haptics ([notes](https://maid.zone/blog/2025-06-03-ios-web-haptics.html)). *Unverified*: whether the AirPods and `voiceactivity` features are on in shipping iOS Safari and Home Screen apps.
 
 ---
