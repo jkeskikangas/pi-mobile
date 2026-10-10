@@ -24,10 +24,10 @@ They multiply rather than add up:
 ## Install
 
 ```bash
-pi install /path/to/pi-mobile     # from a checkout (after npm install)
+pi install npm:pi-mobile
 ```
 
-Or try it once: `pi -e ./src/index.ts --remote`.
+From a checkout: `pi install /path/to/pi-mobile` (after `npm install`), or try it once with `pi -e ./src/index.ts --remote`.
 
 ## Use
 
