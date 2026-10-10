@@ -63,7 +63,17 @@ All of it exists today; the web app (`web/app.js`, `web/voice.js`) is the refere
 
 `persona` is the phone's pick (`marin`, `cedar`, `coral`, `ash`); omitted, the computer's config or Marin applies. It changes only how pi sounds, never what it says.
 
-**Machines:** `designs/multi-machine.md` (planned, not built) keeps one pairing per phone: the phone pairs with a home hub, which relays sessions from other machines and labels them with `AgentInfo.machine { id, name }`. The app needs no second connection; it shows that name wherever it names a session (session switcher, announcements, Live Activity) when present.
+**Machines** (`plans/multi-machine.md`, shipping before this app): the phone pairs once, with a home hub, which relays sessions from other machines. The app keeps one connection and one Keychain device. It adds to the protocol above:
+- `AgentInfo.machine { id, name }`;
+- `hub` → `machines: [{ id, name, online, lastSeenAt?, voice: { realtime, speech, stt } }]`;
+- events `machine_up` / `machine_down`;
+- calls to an offline machine's session fail with "<name> is offline".
+
+The web UI shows machines with no native work. Voice follows that plan's step 7:
+- session matching via `PiVoiceCore.matchSession`;
+- the machine named only while more than one is online;
+- speech calls (`voiceSession`, `speak`, `voices`, `transcribe`, `distill`) sent to the speech machine chosen when voice mode opens, session calls to the session's own machine;
+- a dropped machine announced once.
 
 **Realtime events** handled by the web voice mode (port these exactly, `web/voice.js` `onRealtime`): `session.updated`, `input_audio_buffer.speech_started|speech_stopped`, `conversation.item.input_audio_transcription.delta|completed`, `response.created|done`, `output_audio_buffer.started|stopped|cleared`, `response.output_audio_transcript.delta|done`, `response.function_call_arguments.done`, `error`. Sent: `conversation.item.create` (message or `function_call_output`), `response.create`, `response.cancel` (only while a response is active), `output_audio_buffer.clear`, `input_audio_buffer.commit|clear`, `session.update` (turn detection off while pi speaks, restored after).
 
@@ -99,7 +109,7 @@ native/
 
 ## 3. Step 1 — Hub support (TypeScript, small)
 
-1. `src/hub.ts` `deviceCall("hub")`: add `protocol: PROTOCOL` and `features: ["voice", "voiceSession", "speak", "learn"]` so the app can refuse an incompatible hub with a clear message.
+1. `src/hub.ts` `deviceCall("hub")`: add `protocol: PROTOCOL` and `features: ["voice", "voiceSession", "speak", "voices", "learn", "machines"]` so the app can refuse an incompatible hub with a clear message.
 2. `test/vectors.ts` (new, run by `npm run vectors`): writes `native/fixtures/crypto-vectors.json` with deterministic cases: fixed 32-byte key and 24-byte nonce → sealed string for several JSON values (ASCII, emoji, 100 KB), plus three invalid inputs (tampered byte, short input, wrong key) that must fail. Add a `sealWithNonce(key, nonce, value)` helper next to `seal` in `src/crypto.ts` (used only by the vectors and tests).
 3. `test/crypto.test.ts`: a test that `open(sealWithNonce(...))` round-trips and that the committed vectors file matches regeneration.
 
@@ -151,7 +161,8 @@ The parts to port, with their web counterparts:
 | `startRealtime`, `stopRealtime`, `realtimeLost`, `rt`, `inject`, `respond` | `RealtimeClient` + engine | offer → `voiceSession`; data channel `oai-events`; first `inject` is the "[PI] Voice mode started…" context |
 | `onRealtime` | `handle(event:)` | every case, including live captions and the session.updated capture of `serverTurns` |
 | `clientTurns`, `clientVadFrame`, `duck`, `unduck`, `hardInterrupt` | same names | while pi speaks: `session.update` turn detection `null`, own VAD on mic level (use `PiVoiceCore.Vad` through JSContext or a Swift port with the same constants), duck = remote track volume 0.2 (`RTCAudioTrack` volume or the audio session output gain [verify]), `BARGE_MS = 800`, `SHORT_TURN_MS = 1300`, short sounds committed and judged by transcript |
-| `tool` (`ask_pi`, `answer_question`, `stop_pi`, `pi_status`, `pi_details`, `switch_session`, `remain_silent`), `runCall` | `tools.swift` | same outputs; `ask_pi` cuts the response audio (`output_audio_buffer.clear`) |
+| `tool` (`ask_pi`, `answer_question`, `stop_pi`, `pi_status`, `pi_details`, `switch_session`, `remain_silent`), `runCall` | `tools.swift` | same outputs; `ask_pi` cuts the response audio (`output_audio_buffer.clear`); `switch_session` through `PiVoiceCore.matchSession` |
+| `speechAgent`, `onMachine` (from `plans/multi-machine.md` step 7) | same | one speech machine per voice mode; `machine_down`/`machine_up` announced once; speech machine lost → basic voice elsewhere |
 | `onEvent`, `settled`, `ask`, `tell`, `follow`, `tick` | `handle(hubEvent:)` | brief after a run, prompts read out, other sessions announced, significant tool failures, working tick every 6 s |
 | `startGrace`, `finishGrace`, `cancelGrace`, `dropGrace`, `namedEarlier`, `rememberHeard`, `cancelsGrace` | same | the undo window (`GRACE_MS = 4000`) and echo marking |
 | `pressStart`, `pressEnd(held)`, `toggleTalk`, `tap` | same names | push to talk on the circle: a press starts a turn, letting go after `HOLD_MS = 350` ends it, a shorter press toggles (tap to start, tap to stop); in open mic a tap interrupts or unmutes |
@@ -165,6 +176,7 @@ The parts to port, with their web counterparts:
 `Levels.swift`: poll `RTCPeerConnection.statistics` every 100 ms for `media-source` (mic) and `inbound-rtp` (pi) `audioLevel`; publish a smoothed 0–1 level for the orb, the Live Activity and the dictation strip.
 
 **Tests (`PiTests`, no network):** a `FakeRealtime` (records sent events, lets the test emit server events) and a `FakeHub` (records RPCs, emits hub events) drive `VoiceEngine` through the scenarios that `test/e2e/turns.mjs` and `docs/voice.md` → Verification cover:
+- two machines: switching to a session on the other machine keeps the call; its `machine_down` is announced once; speech calls go to the speech machine and session calls to the session's machine;
 - question → `ask_pi` with the transcript, response audio cleared, state `working`, `brief` after `info` idle → injected `[PI] pi finished…` and `response.create`;
 - backchannel while speaking: duck, no `response.cancel`, unduck after the transcript says "mm-hmm";
 - interruption: duck, `hardInterrupt` after 800 ms voiced, commit and respond on end;
@@ -191,7 +203,7 @@ Mirror the web voice screen (`docs/design-principles.md` §4, `web/app.css` `.vo
 
 ## 9. Step 7 — Live Activity, intents, AirPods
 
-1. `Shared/VoiceActivityAttributes.swift`: attributes `{ sessionName }`, content state `{ state, label, elapsed, question?, muted }`. `PiWidgets/VoiceActivity`: Lock Screen view (state colour, label, question), Dynamic Island compact (orb dot + label), expanded (label, question, Mute and End buttons). Updated locally by `VoiceEngine` on every state change (no push).
+1. `Shared/VoiceActivityAttributes.swift`: attributes `{ sessionName, machine? }` (the machine shown only while more than one is online), content state `{ state, label, elapsed, question?, muted }`. `PiWidgets/VoiceActivity`: Lock Screen view (state colour, label, question), Dynamic Island compact (orb dot + label), expanded (label, question, Mute and End buttons). Updated locally by `VoiceEngine` on every state change (no push).
 2. `Intents/LiveActivityIntents.swift`: `MuteVoiceIntent`, `EndVoiceIntent` (`LiveActivityIntent`) acting on the running engine.
 3. `Intents/StartVoiceIntent.swift` (D7): start the Live Activity, then the engine for the last focused session (or the session that needs you, as `pickAgent()` in `web/app.js`); on `Activity.request` failure call `requestToContinueInForeground()` and retry. `AppShortcuts.swift`: phrases "Talk to pi in ${applicationName}", "Ask pi in ${applicationName}". `PiWidgets/StartVoiceControl`: a `ControlWidgetButton` running the intent (Control Center, Lock Screen, Action button).
 4. **[device]** checks, recorded in `native/ios/README.md`: start from the Action button unlocked and locked (iOS 26/27); a 30-minute session with the screen locked survives (events keep coming, `voiceState` keeps being refreshed, the realtime call stays up); AirPods press-to-mute reaches the app; a phone call interrupts and voice resumes or offers "Tap to resume"; AirPods disconnect moves audio to the speaker.

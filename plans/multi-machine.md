@@ -59,13 +59,28 @@ Each step ends green: `npx tsc --noEmit -p .` and `npm test` pass, and it is com
 - `web/app.css`: chip and offline row styles.
 - Tests: headless-Chrome E2E in `test/e2e/` (scratch script today) with two local "machines" (separate `PI_CODING_AGENT_DIR`s and ports, one joined to the other): one list with labels; kill the spoke → offline row; restart → back; answer a spoke dialog from the phone.
 
-## 7. Real-world check
+## 7. Voice across machines
+
+Voice mode follows one session at a time and can switch between them mid-call; with several machines, that session may live on a machine without voice credentials, and the developer can't see which machine is which. Today `web/voice.js` sends every voice call to the focused session's machine.
+
+- **Match sessions by machine too.** Move the `switch_session` scoring out of `web/voice.js` into `web/voice-core.js` as `matchSession(list, said)` (the native app shares that file, `plans/native-apps.md` D3). It also matches the machine name ("the api session on the box"). A name that fits sessions on two machines returns both and pi asks "On the laptop or the box?". `list` results carry `machine`. In `src/voice/realtime.ts`, the `switch_session` description says "on any of the developer's machines".
+- **Say the machine only when it helps.** While more than one machine is online, announcements and the session list name it ("api on the box needs you"); with one machine, the copy stays as it is today (INV-3).
+- **Speech runs where the credentials are.** `voiceSession`, `speak`, `voices`, `transcribe` and `distill` use the sign-in and voice config of the machine that serves them; a box signed in only to Anthropic has no realtime. `machines[]` in the `hub` rpc carries `voice: { realtime, speech, stt }` from each machine's VoiceHost. The phone chooses one speech machine when voice mode opens: the focused session's machine if it can, else a capable online one, home first. Switching sessions keeps the call. Session calls (`brief`, `details`, `voiceStatus`, `voiceState`, `send`, `answer`) always go to the session's own machine. `[DECISION NEEDED: OK to use another machine's sign-in for speech? Recommended yes: same person, same encrypted path.]`
+- **A machine drops mid-call.** If it is the one serving the focused session: one earcon, then "The laptop went offline." The call stays up, and switching to other sessions still works. On `machine_up`: "The laptop is back", then the snapshot reloads. If it is the speech machine: basic voice on another capable machine, or the phone's own voice if none is left.
+- **Voices** are the same set on every machine, since all machines run the same protocol version, so the phone's pick holds across switches.
+- **Tests:**
+  - `test/voice-core.test.ts`: `matchSession` (machine words, ambiguous names, one machine unchanged).
+  - `test/peer.test.ts`: `voiceSession` for a spoke session is served by a capable home when the spoke reports no realtime, and `machine_down` rejects pending session calls with "<name> is offline".
+  - `test/e2e/turns.mjs`: switch to a spoke session by voice.
+
+## 8. Real-world check
 
 Laptop ↔ Hetzner box over Tailscale:
 
 - `join` from the laptop;
 - close the lid → the phone shows the laptop offline; open it → its sessions are back within 10 s;
-- a spawn on the box from the phone lands in the box's herdr.
+- a spawn on the box from the phone lands in the box's herdr;
+- voice mode started on a box session switches to a laptop session and back without dropping the call; closing the laptop lid mid-call is announced once.
 
 Update `README.md` ("Several machines") and the comparison table.
 
