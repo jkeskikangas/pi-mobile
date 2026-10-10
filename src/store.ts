@@ -25,6 +25,11 @@ export interface Config {
 	 * QR code. Lock-screen notifications need an HTTPS origin.
 	 */
 	publicUrl?: string;
+	/**
+	 * Without a `publicUrl`, put the hub behind Tailscale Serve (tailnet-only HTTPS) when Tailscale
+	 * runs here: an existing serve for the port is reused, else one is added. Default on; false skips.
+	 */
+	tailscale?: boolean;
 	voice?: VoiceConfig;
 }
 

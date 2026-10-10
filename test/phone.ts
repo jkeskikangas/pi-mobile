@@ -3,6 +3,9 @@
 import { createServer } from "node:net";
 import { open, seal, unb64u } from "../src/crypto.ts";
 
+// Hubs started by tests must never run the real `tailscale serve` on the developer's tailnet.
+process.env.PI_MOBILE_TAILSCALE = "off";
+
 export async function freePort(): Promise<number> {
 	return new Promise((resolve) => {
 		const s = createServer();

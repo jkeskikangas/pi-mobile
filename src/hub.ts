@@ -16,7 +16,7 @@ import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Channel } from "./channel.ts";
 import { b64u, open, randomId, randomKey, ReplayGuard, seal, unb64u } from "./crypto.ts";
-import { type Address, type Endpoint, privateAddresses, startCloudflared, type Tunnel } from "./expose.ts";
+import { type Address, type Endpoint, privateAddresses, type ServeResult, startCloudflared, type Tunnel } from "./expose.ts";
 import { type AgentEvent, type AgentInfo, type HubEvent, PROTOCOL } from "./protocol.ts";
 import { type Config, type Device, DeviceStore, PushStore, type Role } from "./store.ts";
 import { type PushSubscriptionJSON, sendPush } from "./webpush.ts";
@@ -75,6 +75,8 @@ export interface HubOptions {
 	/** Called once the hub has been without linked agents for `idleMs`. */
 	onIdle?: () => void;
 	idleMs?: number;
+	/** Finds or sets up an HTTPS address in front of the hub (Tailscale Serve); off when absent. */
+	serve?: (port: number) => Promise<ServeResult>;
 }
 
 export class Hub {
@@ -97,6 +99,12 @@ export class Hub {
 	private secret: Buffer;
 	private tunnel?: Tunnel;
 	private tunnelError?: string;
+	/** HTTPS address from Tailscale Serve, used when no `publicUrl` is configured. */
+	private served?: string;
+	/** One-click link that enables Serve on the tailnet, while pi waits for it. */
+	private serveEnable?: string;
+	private serveRun?: Promise<void>;
+	private serveAt = 0;
 	private heartbeat?: NodeJS.Timeout;
 	private idleTimer?: NodeJS.Timeout;
 	private closed = false;
@@ -139,6 +147,7 @@ export class Hub {
 		this.heartbeat = setInterval(() => this.ping(), 15_000);
 		this.heartbeat.unref();
 		this.armIdle();
+		void this.syncServe();
 		if (this.config.expose === "cloudflared") {
 			startCloudflared(this.config.port).then(
 				(t) => {
@@ -175,6 +184,41 @@ export class Hub {
 		}
 	}
 
+	/**
+	 * Looks up (or sets up) the Tailscale Serve address. Runs at start and before pairing or status,
+	 * at most every 15 s; while the tailnet still has to enable Serve, it waits on that instead.
+	 */
+	syncServe(): Promise<void> {
+		const serve = this.opts.serve;
+		if (!serve || this.config.publicUrl || this.closed) return Promise.resolve();
+		if (this.serveRun) return this.serveRun;
+		if (this.serveEnable || Date.now() - this.serveAt < 15_000) return Promise.resolve();
+		this.serveRun = serve(this.port)
+			.then(
+				(r) => {
+					this.serveEnable = r.enable;
+					this.setServed(r.url);
+					r.pending?.then((url) => {
+						this.serveEnable = undefined;
+						this.serveAt = 0;
+						if (url) this.setServed(url);
+					});
+				},
+				() => {},
+			)
+			.finally(() => {
+				this.serveRun = undefined;
+				this.serveAt = Date.now();
+			});
+		return this.serveRun;
+	}
+
+	private setServed(url: string | undefined): void {
+		if (url === this.served || this.closed) return;
+		this.served = url;
+		this.broadcastToAgents({ t: "endpoints", endpoints: this.endpoints() });
+	}
+
 	get port(): number {
 		const a = this.server.address();
 		return typeof a === "object" && a ? a.port : this.config.port;
@@ -182,7 +226,11 @@ export class Hub {
 
 	endpoints(): Endpoint[] {
 		const local = { label: "this computer", url: `http://127.0.0.1:${this.port}` };
-		const pub = this.config.publicUrl ? [{ label: "https", url: this.config.publicUrl.replace(/\/+$/, "") }] : [];
+		const pub = this.config.publicUrl
+			? [{ label: "https", url: this.config.publicUrl.replace(/\/+$/, "") }]
+			: this.served
+				? [{ label: "tailscale https", url: this.served }]
+				: [];
 		if (this.config.expose === "cloudflared")
 			return [...pub, ...(this.tunnel ? [{ label: "cloudflared", url: this.tunnel.url }] : []), local];
 		if (this.config.expose === "local") return [...pub, local];
@@ -273,18 +321,19 @@ export class Hub {
 	private agentRequest(m: string, p: any): unknown {
 		switch (m) {
 			case "pair":
-				return this.createPairing();
+				return this.syncServe().then(() => ({ ...this.createPairing(), serveEnable: this.serveEnable }));
 			case "status":
-				return {
+				return this.syncServe().then(() => ({
 					hubId: this.id,
 					pid: process.pid,
 					expose: this.config.expose,
 					endpoints: this.endpoints(),
+					serveEnable: this.serveEnable,
 					tunnelError: this.tunnelError,
 					agents: [...this.agents.values()].map((a) => a.info),
 					clients: this.clientSummary(),
 					devices: this.devices.list().map(publicDevice),
-				};
+				}));
 			case "restart":
 				setTimeout(() => this.opts.onRestart?.(), 50);
 				return { ok: true };
@@ -487,7 +536,8 @@ export class Hub {
 				return removed.map(publicDevice);
 			}
 			case "pair":
-				return this.createPairing();
+				await this.syncServe();
+				return { ...this.createPairing(), serveEnable: this.serveEnable };
 			case "agent": {
 				const conn = this.agents.get(String(p.agent));
 				if (!conn) throw new Error("that pi session is no longer connected");

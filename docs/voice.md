@@ -100,7 +100,7 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 
 ## Platform limits (verified against WebKit/Chromium sources, see research notes)
 
-- Browsers give `getUserMedia` only to secure contexts: phone voice needs the HTTPS address (or `http://127.0.0.1` on the computer).
+- Browsers give `getUserMedia` only to secure contexts: phone voice needs the HTTPS address, which `/remote` sets up with Tailscale Serve (or `http://127.0.0.1` on the computer).
 - iOS stops capturing the mic when a Home Screen PWA goes to the background or locks; a Safari tab with an active capture keeps it longer. Voice mode keeps the screen awake (Wake Lock) and tells you when iOS took the mic away. Android Chrome exempts audible pages from freezing; verify on the device before relying on it.
 - CarPlay has no path for web apps; the phone's audio plays through the car as usual.
 - **A native iPhone app** would lift the hardest limits for voice mode: a background audio session keeps the mic with the screen locked (phone in a pocket), Apple's voice-processing I/O gives stronger echo cancellation for speakerphone barge-in, headset buttons work reliably, and Siri or the Action button can start a conversation, with status on the lock screen. CarPlay would still need an Apple entitlement (unverified for this kind of app). A web view wrapper is not enough, because it has the same capture limits. The suggested shape: keep the web app, and add a small native app for voice mode only that reuses the same pairing, bridge requests and voice design. Not built.

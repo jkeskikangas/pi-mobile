@@ -20,7 +20,9 @@ const port = Number(process.argv[2] ?? 7979);
 const dir = mkdtempSync(join(tmpdir(), "pi-mobile-ui-"));
 const SECRET = "u".repeat(43);
 const config = { port, expose: "network" as const, enabled: true };
-const hub = new Hub({ config, secret: SECRET, devices: new DeviceStore(dir), push: new PushStore(dir) });
+// PI_MOBILE_FIXTURE_HTTPS=https://… pretends Tailscale Serve gave the hub that address (for the secure-address UI).
+const https = process.env.PI_MOBILE_FIXTURE_HTTPS;
+const hub = new Hub({ config, secret: SECRET, devices: new DeviceStore(dir), push: new PushStore(dir), serve: https ? async () => ({ url: https }) : undefined });
 await hub.listen();
 
 const now = Date.now();
@@ -43,8 +45,14 @@ def add(a, b):
 
 All green. Want me to open a PR?`;
 
+// A stand-in screenshot for the image thumbnails and viewer.
+const shot = `<svg xmlns="http://www.w3.org/2000/svg" width="780" height="520"><rect width="780" height="520" fill="#f4f5f7"/><rect x="40" y="40" width="700" height="56" rx="10" fill="#dde3f0"/><text x="64" y="78" font-family="sans-serif" font-size="26" fill="#223">Monthly report · March</text>${[0, 1, 2, 3, 4]
+	.map((i) => `<rect x="40" y="${128 + i * 64}" width="700" height="48" rx="8" fill="#fff"/><text x="64" y="${160 + i * 64}" font-family="sans-serif" font-size="22" fill="#334">Line ${i + 1}</text><text x="600" y="${160 + i * 64}" font-family="monospace" font-size="22" fill="${i === 4 ? "#c0392b" : "#334"}">${i === 4 ? "-1 204.50" : `${(i + 2) * 113}.00`}</text>`)
+	.join("")}</svg>`;
+const images = new Map<string, { data: string; mimeType: string }[]>([["u1", [{ data: Buffer.from(shot).toString("base64"), mimeType: "image/svg+xml" }]]]);
+
 const items: Item[] = [
-	{ k: "user", id: "u1", text: "The totals in the monthly report are wrong. Find out why and fix it.", images: 0, ts: now - 600_000 },
+	{ k: "user", id: "u1", text: "The totals in the monthly report are wrong. Find out why and fix it.", images: 1, ts: now - 600_000 },
 	{
 		k: "assistant",
 		id: "a1",
@@ -153,8 +161,15 @@ for (const f of fakes) {
 			if (m === "voices") return { personas: personaList(), sample: false };
 			if (m === "voiceStatus") return { speech: "pi is idle.", status: f.info.status, elapsedMs: 0, tools: [], prompts: prompts.get(f.info.agent) ?? [] };
 			if (m === "brief") return { speech: "Done. The totals now add instead of subtract.", more: [], report: "", by: "fixture" };
+			if (m === "image") {
+				const img = images.get(String(p.id))?.[Number(p.i) || 0];
+				if (!img) throw new Error("that image is no longer in this session");
+				return img;
+			}
 			if (m === "send") {
-				f.items.push({ k: "user", id: `u${Date.now()}`, text: p.text, images: p.images?.length ?? 0, ts: Date.now() });
+				const id = `u${Date.now()}`;
+				if (p.images?.length) images.set(id, p.images);
+				f.items.push({ k: "user", id, text: p.text, images: p.images?.length ?? 0, ts: Date.now() });
 				emit(f, { type: "item", item: f.items.at(-1) });
 				return { ok: true, delivered: f.info.status === "idle" ? "prompt" : p.mode === "followUp" ? "followUp" : "steer" };
 			}
@@ -170,6 +185,8 @@ async function work(): Promise<void> {
 	emit(api, { type: "info", info: api.info });
 	emit(api, { type: "item", item: { k: "user", id: "u9", text: "Yes, open a PR and link the ticket.", images: 0, ts: Date.now() } });
 	emit(api, { type: "stream_start", key: "s9", ts: Date.now() });
+	// The model takes a moment before its first token: the transcript's activity row covers it.
+	await new Promise((r) => setTimeout(r, 1500));
 	for (const chunk of ["Opening the PR. ", "I'll reference TUL-512 in the description ", "and request a review from the team."]) {
 		emit(api, { type: "stream", key: "s9", i: 0, kind: "text", delta: chunk });
 		await new Promise((r) => setTimeout(r, 150));

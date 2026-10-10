@@ -42,7 +42,7 @@ That's the setup. The first time it shows a QR code: scan it, the panel closes b
 /remote pair          pair another device
 /remote off           stop sharing this session, or every session on the machine
 /remote devices       paired devices; pick one to revoke
-/remote settings      how phones reach this computer, HTTPS address, port
+/remote settings      how phones reach this computer, HTTPS address (automatic with Tailscale), port
 ```
 
 `pi --remote` shares a single session without sharing the whole machine.
@@ -57,14 +57,9 @@ On the phone:
 
 ### Lock-screen notifications and HTTPS
 
-Browsers only allow notifications and the microphone on HTTPS pages. Put an HTTPS address in front of pi-mobile and tell it:
+Browsers only allow notifications and the microphone on HTTPS pages. Install [Tailscale](https://tailscale.com) on the computer and the phone, and `/remote` does the rest: it puts pi-mobile behind `tailscale serve` (private to your tailnet, with a real certificate) and puts that address first in the QR code. It reuses a serve you already have for the port, never changes other serve settings, and skips port 443 when another program holds it (then the address ends in `:8443`). If your tailnet hasn't enabled HTTPS yet, `/remote` shows Tailscale's one-click link and finishes by itself once you click it. A phone already paired over Wi-Fi gets a **Switch to the secure address** button (in voice mode and under **⋯**) that moves it there, pairing included.
 
-```bash
-tailscale serve --bg 7878          # private to your tailnet
-# then in pi: /remote settings → HTTPS address → https://<machine>.<tailnet>.ts.net
-```
-
-Pair through that address; the app offers to turn notifications on (also under **⋯**). On iPhone, add the page to the Home Screen first (iOS 16.4+). The "cloudflared" option in `/remote settings` gives HTTPS too, but its address changes when pi-mobile restarts.
+The app offers to turn notifications on (also under **⋯**). On iPhone, add the page to the Home Screen first (iOS 16.4+). To use your own HTTPS address instead, set it in `/remote settings`; `"tailscale": false` in `config.json` turns the automatic setup off. The "cloudflared" option in `/remote settings` gives HTTPS too, but its address changes when pi-mobile restarts.
 
 ## Voice
 

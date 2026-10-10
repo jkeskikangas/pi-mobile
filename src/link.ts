@@ -3,7 +3,7 @@
 import { request } from "node:http";
 import { Channel } from "./channel.ts";
 import { Hub, LINK_PROTOCOL } from "./hub.ts";
-import type { Endpoint } from "./expose.ts";
+import { type Endpoint, ensureServe } from "./expose.ts";
 import type { AgentInfo } from "./protocol.ts";
 import { PROTOCOL } from "./protocol.ts";
 import type { Config } from "./store.ts";
@@ -28,6 +28,7 @@ async function hostHub(config: Config, secret: string): Promise<boolean> {
 	const hub = new Hub({
 		config,
 		secret,
+		serve: config.tailscale === false || process.env.PI_MOBILE_TAILSCALE === "off" ? undefined : (port) => ensureServe(port),
 		onIdle: () => {
 			if (g[HUB_KEY] === hub) closeProcessHub();
 		},

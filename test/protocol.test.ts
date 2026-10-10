@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { branchToItems, clip, findToolOutput, messageToItem, toolTitle } from "../src/protocol.ts";
+import { branchToItems, clip, findImage, findToolOutput, messageToItem, toolTitle } from "../src/protocol.ts";
 
 test("assistant messages become text, thinking and tool blocks", () => {
 	const item = messageToItem(
@@ -71,6 +71,21 @@ test("user images are counted, hidden custom messages dropped, summaries kept", 
 			["custom", "4"],
 		],
 	);
+});
+
+test("findImage finds user images by entry id or timestamp and tool images by call id", () => {
+	const png = { type: "image", data: "UE5H", mimeType: "image/png" };
+	const entries = [
+		{ type: "message", id: "e1", message: { role: "user", timestamp: 42, content: [{ type: "text", text: "look" }, png, { ...png, data: "Mg==" }] } },
+		{ type: "message", id: "e2", message: { role: "toolResult", toolCallId: "t1", content: [{ type: "text", text: "Read image" }, png] } },
+	];
+	assert.deepEqual(findImage(entries, "e1", 1), { data: "Mg==", mimeType: "image/png" });
+	assert.deepEqual(findImage(entries, "m-live", 0, 42), { data: "UE5H", mimeType: "image/png" });
+	assert.deepEqual(findImage(entries, "t1", 0), { data: "UE5H", mimeType: "image/png" });
+	assert.equal(findImage(entries, "e1", 2), undefined);
+	assert.equal(findImage(entries, "m-live", 0, 7), undefined);
+	const tool = messageToItem({ role: "toolResult", toolCallId: "t1", toolName: "read", content: entries[1].message.content }, "x");
+	assert.equal(tool?.k === "tool" && tool.images, 1);
 });
 
 test("findToolOutput returns the latest result for a call id", () => {

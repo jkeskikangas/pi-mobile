@@ -445,8 +445,21 @@
 				toolEnd(ev.id, ev.isError);
 				break;
 		}
+		refreshWork();
 		if (stick) scrollToBottom();
 		else $("jumpBtn").hidden = false;
+	}
+
+	/** What pi is doing right now, in one word, for the work bar: the running step, else writing or thinking. */
+	function phase() {
+		const run = document.querySelector("#liveTools .tstate.run, #transcript .tstate.run")?.closest(".tool")?.querySelector(".tname");
+		if (run) return run.dataset.doing || "Working";
+		const blocks = S.view?.stream?.blocks.filter(Boolean) ?? [];
+		return blocks.at(-1)?.t === "text" ? "Writing" : "Thinking";
+	}
+	function refreshWork() {
+		const info = S.agents.get(S.current);
+		if (info && !$("workBar").hidden) $("workText").textContent = workLine(info);
 	}
 
 	// ── rendering ──────────────────────────────────────────────────────────────────
@@ -493,9 +506,9 @@
 				node = el("div", "msg user");
 				node.textContent = item.text;
 				if (item.images) {
-					const meta = el("div", "meta");
-					meta.append(icon("image", "sm"), `${item.images} image${item.images > 1 ? "s" : ""}`);
-					node.appendChild(meta);
+					const strip = thumbs({ id: item.id, ts: item.ts }, item.images);
+					if (item.text) strip.classList.add("after-text");
+					node.appendChild(strip);
 				}
 				break;
 			}
@@ -557,27 +570,28 @@
 	function thinkingNode(text, live) {
 		const d = el("details", "thinking");
 		const s = el("summary");
-		s.append(icon("sparkle", "sm"), el("span", live ? "shimmer" : "", live ? "Thinking" : "Thought"), icon("chev-right", "chev"));
+		s.append(icon("sparkle", "sm"), el("span", "", live ? "Thinking" : "Thought"), icon("chev-right", "chev"));
 		d.appendChild(s);
 		if (text) d.appendChild(mdNode(text));
 		return d;
 	}
 
-	// How a tool call reads in the transcript: an icon and a verb, then its target.
+	// How a tool call reads in the transcript: an icon and a verb (present while it runs), then its target.
 	const TOOL_LOOK = [
-		[/^read$/, "file", "Read"],
-		[/^(write)$/, "pencil", "Wrote"],
-		[/edit|patch/, "pencil", "Edited"],
-		[/^(bash|shell|exec|powershell)$/, "terminal", "Ran"],
-		[/^ls$/, "folder", "Listed"],
-		[/grep|find|glob|search/, "search", "Searched"],
-		[/web|fetch|url|browse/, "globe", "Fetched"],
+		[/^read$/, "file", "Read", "Reading"],
+		[/^(write)$/, "pencil", "Wrote", "Writing"],
+		[/edit|patch/, "pencil", "Edited", "Editing"],
+		[/^(bash|shell|exec|powershell)$/, "terminal", "Ran", "Running"],
+		[/^ls$/, "folder", "Listed", "Listing"],
+		[/grep|find|glob|search/, "search", "Searched", "Searching"],
+		[/web|fetch|url|browse/, "globe", "Fetched", "Fetching"],
 	];
 	function toolLook(name) {
 		const hit = TOOL_LOOK.find(([re]) => re.test(name || ""));
-		if (hit) return { icon: hit[1], verb: hit[2], known: true };
+		if (hit) return { icon: hit[1], verb: hit[2], doing: hit[3], known: true };
 		const pretty = String(name || "tool").replace(/^mcp__/, "").replace(/[_-]+/g, " ");
-		return { icon: "bolt", verb: pretty.charAt(0).toUpperCase() + pretty.slice(1), known: false };
+		const verb = pretty.charAt(0).toUpperCase() + pretty.slice(1);
+		return { icon: "bolt", verb, doing: verb, known: false };
 	}
 	function setState(card, state) {
 		const st = card.querySelector(".tstate");
@@ -588,6 +602,10 @@
 		st.setAttribute("aria-label", state === "run" ? "running" : state === "err" ? "failed" : state === "ok" ? "done" : "");
 		card.classList.toggle("running", state === "run");
 		card.classList.toggle("err", state === "err");
+		const name = card.querySelector(".tname");
+		if (name?.dataset.doing) {
+			name.textContent = state === "run" ? name.dataset.doing : name.dataset.done;
+		}
 	}
 	function stateOf(card) {
 		const c = card.querySelector(".tstate")?.classList;
@@ -603,7 +621,10 @@
 		const s = el("summary");
 		const ti = el("span", "ticon");
 		ti.appendChild(icon(look.icon));
-		s.append(ti, el("span", "tname", look.verb), el("span", "ttitle", title || ""), el("span", "tstate"));
+		const tname = el("span", "tname", look.verb);
+		tname.dataset.done = look.verb;
+		tname.dataset.doing = look.doing;
+		s.append(ti, tname, el("span", "ttitle", title || ""), el("span", "tstate"));
 		const body = el("div", "tbody");
 		// Known tools say everything in their title; show raw arguments only for the others.
 		if (args && !(look.known && title)) {
@@ -642,8 +663,156 @@
 				box.appendChild(more);
 			}
 		}
+		if (item.images) box.appendChild(thumbs({ id: item.id }, item.images));
 		body.appendChild(box);
 		if (item.isError) card.open = true;
+	}
+
+	// ── images in the transcript ───────────────────────────────────────────────────
+	// Transcript items carry only an image count; the phone fetches each image when it is shown.
+	const images = new Map();
+	function loadImage(ref) {
+		const key = `${ref.agent}|${ref.id}|${ref.ts ?? ""}|${ref.i}`;
+		if (!images.has(key)) {
+			const p = call("image", { id: ref.id, ts: ref.ts, i: ref.i }, ref.agent).then((r) => {
+				if (!/^image\/[\w.+-]+$/.test(r?.mimeType || "") || typeof r.data !== "string") throw new Error("not an image");
+				return `data:${r.mimeType};base64,${r.data}`;
+			});
+			p.catch(() => images.delete(key));
+			images.set(key, p);
+		}
+		return images.get(key);
+	}
+
+	function thumbs(ref, count) {
+		const strip = el("div", count === 1 ? "thumbs one" : "thumbs");
+		const at = { ...ref, agent: S.current };
+		for (let i = 0; i < count; i++) {
+			const b = el("button", "thumb");
+			b.type = "button";
+			b.setAttribute("aria-label", count === 1 ? "Open image" : `Open image ${i + 1} of ${count}`);
+			b.appendChild(icon("image"));
+			loadImage({ ...at, i }).then(
+				(src) => {
+					const img = el("img");
+					img.alt = "";
+					img.src = src;
+					// A single image takes its own shape once decoded; keep the transcript pinned to the bottom.
+					img.decode().then(
+						() => {
+							const stick = b.isConnected && nearBottom();
+							b.replaceChildren(img);
+							if (stick) scrollToBottom();
+						},
+						() => b.classList.add("missing"),
+					);
+				},
+				() => b.classList.add("missing"),
+			);
+			b.onclick = () => openViewer(at, i, count);
+			strip.appendChild(b);
+		}
+		return strip;
+	}
+
+	let viewer = null;
+	function openViewer(ref, index, count) {
+		closeViewer();
+		const v = el("div", "viewer");
+		v.setAttribute("role", "dialog");
+		v.setAttribute("aria-modal", "true");
+		const stage = el("div", "viewer-stage");
+		const img = el("img");
+		img.alt = "";
+		const note = el("p", "viewer-note");
+		stage.append(img, note);
+		const btn = (cls, name, label, onclick) => {
+			const b = el("button", `viewer-btn ${cls}`);
+			b.type = "button";
+			b.setAttribute("aria-label", label);
+			b.appendChild(icon(name));
+			b.onclick = (e) => {
+				e.stopPropagation();
+				onclick();
+			};
+			return b;
+		};
+		const close = btn("close", "x", "Close", closeViewer);
+		const prev = btn("prev", "chev-right", "Previous image", () => show(index - 1));
+		const next = btn("next", "chev-right", "Next image", () => show(index + 1));
+		const counter = el("div", "viewer-count");
+		counter.setAttribute("aria-hidden", "true");
+		const show = (i) => {
+			index = (i + count) % count;
+			v.classList.remove("zoomed");
+			v.setAttribute("aria-label", count === 1 ? "Image" : `Image ${index + 1} of ${count}`);
+			counter.textContent = `${index + 1} of ${count}`;
+			img.removeAttribute("src");
+			img.hidden = true;
+			note.textContent = "Loading image…";
+			note.hidden = false;
+			const want = index;
+			loadImage({ ...ref, i: index }).then(
+				(src) => {
+					if (want !== index || viewer?.node !== v) return;
+					img.src = src;
+					img.hidden = false;
+					note.hidden = true;
+				},
+				(e) => {
+					if (want === index) note.textContent = `Couldn't load the image: ${e.message}`;
+				},
+			);
+		};
+		// Tap the picture to see it at full size (scroll to pan); tap again to fit. Tap outside to close.
+		img.onclick = (e) => {
+			e.stopPropagation();
+			v.classList.toggle("zoomed");
+		};
+		v.onclick = () => {
+			if (!v.classList.contains("zoomed")) closeViewer();
+		};
+		// Swipe sideways for the next image, down to close; the picture follows the finger.
+		let touch = null;
+		const drag = (dx, dy) => {
+			img.style.transform = dx || dy ? `translate(${dx}px, ${Math.max(0, dy)}px)` : "";
+			v.style.setProperty("--pull", String(Math.min(1, Math.max(0, dy) / 300)));
+		};
+		v.addEventListener("touchstart", (e) => {
+			touch = e.touches.length === 1 && !v.classList.contains("zoomed") ? { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, dy: 0 } : null;
+			if (touch) img.classList.add("dragging");
+		}, { passive: true });
+		v.addEventListener("touchmove", (e) => {
+			if (!touch || e.touches.length !== 1) return;
+			touch.dx = e.touches[0].clientX - touch.x;
+			touch.dy = e.touches[0].clientY - touch.y;
+			const sideways = Math.abs(touch.dx) > Math.abs(touch.dy);
+			drag(sideways && count > 1 ? touch.dx : 0, sideways ? 0 : touch.dy);
+		}, { passive: true });
+		const release = () => {
+			if (!touch) return;
+			const { dx, dy } = touch;
+			touch = null;
+			img.classList.remove("dragging");
+			drag(0, 0);
+			if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) && count > 1) show(index + (dx < 0 ? 1 : -1));
+			else if (dy > 90 && dy > Math.abs(dx)) closeViewer();
+		};
+		v.addEventListener("touchend", release);
+		v.addEventListener("touchcancel", release);
+		v.append(stage, close);
+		if (count > 1) v.append(counter, prev, next);
+		viewer = { node: v, opener: document.activeElement, step: (d) => count > 1 && show(index + d) };
+		document.body.appendChild(v);
+		show(index);
+		close.focus({ preventScroll: true });
+	}
+	function closeViewer() {
+		if (!viewer) return;
+		const { node, opener } = viewer;
+		viewer = null;
+		node.remove();
+		opener?.focus?.({ preventScroll: true });
 	}
 
 	function attachToolResult(item) {
@@ -739,8 +908,6 @@
 				node.appendChild(card);
 			}
 		}
-		node.lastElementChild?.classList.add("cursor");
-		if (!node.children.length) node.appendChild(el("div", "cursor"));
 		const old = document.getElementById(node.id);
 		if (old) {
 			const openThinking = old.querySelector("details.thinking[open]");
@@ -874,7 +1041,7 @@
 	}
 
 	function workLine(info) {
-		return `Working${info.since ? ` · ${elapsed(Date.now() - info.since)}` : ""}${info.queued ? " · message queued" : ""}`;
+		return `${phase()}${info.since ? ` · ${elapsed(Date.now() - info.since)}` : ""}${info.queued ? " · message queued" : ""}`;
 	}
 
 	function setHeader() {
@@ -1386,9 +1553,8 @@
 			);
 			section(body, "Notifications");
 			if (!pushSupported()) {
-				body.appendChild(
-					el("p", "note", "Lock-screen notifications need this page on HTTPS: in pi, /remote settings → HTTPS address (for example your Tailscale Serve address). On iPhone, add the page to your Home Screen first."),
-				);
+				if (window.isSecureContext) body.appendChild(el("p", "note", "On iPhone, add this page to your Home Screen (Share → Add to Home Screen) and open pi from there to get lock-screen notifications."));
+				else secureMove(body, "Lock-screen notifications need this page on a secure (HTTPS) address.");
 			} else {
 				g = group(body);
 				if (S.push.on) add("Turn off notifications", () => setPush(false), "", "bell", "You get one when pi finishes or asks");
@@ -1421,6 +1587,37 @@
 			note.append(icon("lock"), "End-to-end encrypted");
 			body.appendChild(note);
 		}, { title: "pi mobile", subtitle: `Connected to ${S.device?.host || "your computer"}` });
+	}
+
+	/**
+	 * The microphone and notifications need HTTPS. When the computer has a secure address (Tailscale
+	 * Serve, set up by /remote), one tap moves this phone there, pairing included; otherwise say how
+	 * to get one.
+	 */
+	function secureMove(body, why) {
+		body.appendChild(el("p", "note", why));
+		const slot = el("div", "secure-move");
+		slot.appendChild(el("p", "note", "Checking your computer…"));
+		body.appendChild(slot);
+		rpc("pair", {}).then(
+			(r) => {
+				const secure = r.links.find((l) => l.url.startsWith("https://"));
+				if (!secure) {
+					slot.replaceChildren(
+						el("p", "note", "Install Tailscale on your computer and on this phone (same account), then run /remote in pi. It sets up a secure address by itself."),
+					);
+					return;
+				}
+				const go = el("button", "btn primary");
+				go.append(icon("lock"), "Switch to the secure address");
+				go.onclick = () => location.assign(secure.url);
+				slot.replaceChildren(
+					el("p", "note", "Your computer has one. This phone pairs there by itself; on iPhone, add it to your Home Screen for lock-screen notifications."),
+					go,
+				);
+			},
+			(e) => slot.replaceChildren(el("p", "note", `Couldn't ask your computer: ${e.message}`)),
+		);
 	}
 
 	async function pairSheet() {
@@ -1621,6 +1818,18 @@
 			};
 		}
 		document.addEventListener("keydown", (e) => {
+			if (viewer) {
+				if (e.key === "Escape") closeViewer();
+				else if (e.key === "ArrowLeft") viewer.step(-1);
+				else if (e.key === "ArrowRight") viewer.step(1);
+				else if (e.key === "Tab") {
+					const f = [...viewer.node.querySelectorAll("button")];
+					const i = f.indexOf(document.activeElement);
+					e.preventDefault();
+					f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length]?.focus();
+				}
+				return;
+			}
 			if (e.key === "Escape" && !$("sheet").hidden) closeSheet();
 		});
 		const input = $("input");
@@ -1685,6 +1894,7 @@
 		openAgent,
 		autosize,
 		openSheet,
+		secureMove,
 		sessionsSheet,
 		statusLine,
 		icon,

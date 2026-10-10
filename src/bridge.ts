@@ -11,6 +11,7 @@ import {
 	branchToItems,
 	clip,
 	contentText,
+	findImage,
 	findToolOutput,
 	type Item,
 	messageToItem,
@@ -366,6 +367,12 @@ export class Bridge {
 				return this.snapshot(Number(p.limit) || 120, p.before === undefined ? undefined : Number(p.before));
 			case "toolOutput":
 				return { output: findToolOutput(this.ctx.sessionManager.getBranch(), String(p.id)) ?? "" };
+			case "image": {
+				const ts = typeof p.ts === "number" ? p.ts : undefined;
+				const img = findImage(this.ctx.sessionManager.getBranch(), String(p.id), Number(p.i) || 0, ts);
+				if (!img) throw new Error("that image is no longer in this session");
+				return img;
+			}
 			case "send":
 				return this.send(p, device?.name ?? "remote");
 			case "abort":

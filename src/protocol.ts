@@ -39,7 +39,7 @@ export type Block =
 export type Item =
 	| { k: "user"; id: string; text: string; images: number; ts: number }
 	| { k: "assistant"; id: string; blocks: Block[]; model?: string; stop?: string; error?: string; ts: number }
-	| { k: "tool"; id: string; name: string; output: string; isError: boolean; truncated: boolean; diff?: string; ts: number }
+	| { k: "tool"; id: string; name: string; output: string; isError: boolean; truncated: boolean; diff?: string; images?: number; ts: number }
 	| { k: "bash"; id: string; command: string; output: string; exitCode?: number; ts: number }
 	| { k: "custom"; id: string; customType: string; text: string; ts: number }
 	| { k: "summary"; id: string; kind: "compaction" | "branch"; text: string; ts: number };
@@ -154,6 +154,7 @@ export function messageToItem(message: AnyMessage, id: string): Item | undefined
 		case "toolResult": {
 			const out = clip(contentText(message.content), TOOL_OUTPUT_LIMIT);
 			const diff = typeof message.details?.diff === "string" ? clip(message.details.diff, TOOL_OUTPUT_LIMIT * 2).text : undefined;
+			const images = imageCount(message.content);
 			return {
 				k: "tool",
 				id: message.toolCallId,
@@ -162,6 +163,7 @@ export function messageToItem(message: AnyMessage, id: string): Item | undefined
 				isError: !!message.isError,
 				truncated: out.truncated,
 				...(diff ? { diff } : {}),
+				...(images ? { images } : {}),
 				ts,
 			};
 		}
@@ -200,6 +202,29 @@ export function branchToItems(entries: readonly AnyEntry[]): Item[] {
 		}
 	}
 	return items;
+}
+
+/**
+ * The `index`th image of a transcript item on the branch: a user message (by entry id, or by its
+ * timestamp for live items, which carry a temporary id) or a tool result (by tool call id).
+ */
+export function findImage(
+	entries: readonly AnyEntry[],
+	id: string,
+	index: number,
+	ts?: number,
+): { data: string; mimeType: string } | undefined {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const e = entries[i];
+		const m = e?.type === "message" ? e.message : undefined;
+		if (!m) continue;
+		const hit =
+			e.id === id || (m.role === "toolResult" && m.toolCallId === id) || (m.role === "user" && ts !== undefined && m.timestamp === ts);
+		if (!hit || !Array.isArray(m.content)) continue;
+		const img = m.content.filter((c: any) => c?.type === "image" && typeof c.data === "string")[index];
+		if (img) return { data: img.data, mimeType: String(img.mimeType ?? "image/png") };
+	}
+	return undefined;
 }
 
 /** Full (untruncated, but bounded) output of one tool call on the branch. */

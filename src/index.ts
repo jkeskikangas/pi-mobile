@@ -41,6 +41,7 @@ interface HubStatus {
 	pid: number;
 	expose: Expose;
 	endpoints: { label: string; url: string }[];
+	serveEnable?: string;
 	tunnelError?: string;
 	agents: AgentInfo[];
 	clients: { count: number; names: string[] };
@@ -234,6 +235,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 			`Open on your phone: ${t.fg("accent", primary.url)}  ${t.fg("dim", primary.label)}`,
 			...others.filter((o) => o.label !== "this computer").map((o) => t.fg("dim", `                    ${o.url}  ${o.label}`)),
 			...(s.tunnelError ? [t.fg("error", `tunnel: ${s.tunnelError}`)] : []),
+			...serveEnableLines(c, s.serveEnable),
 			"",
 			...sessions.map((a) => {
 				const me = a.pid === process.pid ? t.fg("dim", " (this one)") : "";
@@ -248,7 +250,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 		enable();
 		const b = await linked(c);
 		if (!b) return;
-		const pairing = await b.hubRequest<{ links: { label: string; url: string }[] }>("pair", {});
+		const pairing = await b.hubRequest<{ links: { label: string; url: string }[]; serveEnable?: string }>("pair", {});
 		const [primary, ...others] = pairing.links;
 		const header = "Scan with your phone to use every pi session on this machine";
 		if (c.mode !== "tui") {
@@ -265,9 +267,24 @@ export default function piMobile(pi: ExtensionAPI): void {
 			...others.filter((o) => o.label !== "this computer").map((o) => t.fg("dim", `${o.label}  ${o.url}`)),
 			"",
 			t.fg("dim", "Single-use code, valid 10 min. Traffic is end-to-end encrypted."),
-			...(primary.label.startsWith("lan") ? [t.fg("dim", "On untrusted Wi-Fi use Tailscale or an HTTPS address (/remote settings).")] : []),
+			...serveEnableLines(c, pairing.serveEnable),
+			...(primary.label.startsWith("lan") && !pairing.serveEnable
+				? [t.fg("dim", "Voice and lock-screen notifications need HTTPS: install Tailscale here and on your phone, then run /remote again.")]
+				: []),
 			t.fg("dim", "Closes by itself once your phone is paired; any key closes it now."),
 		]);
+	}
+
+	/** Tailscale runs here but the tailnet has not enabled Serve: one click, and pi finishes by itself. */
+	function serveEnableLines(c: ExtensionCommandContext, link: string | undefined): string[] {
+		if (!link) return [];
+		const t = c.ui.theme;
+		return [
+			"",
+			t.fg("warning", "Voice and lock-screen notifications need HTTPS. Turn on HTTPS for your tailnet (one click):"),
+			t.fg("accent", link),
+			t.fg("dim", "pi finishes the setup by itself; then run /remote again for the new code."),
+		];
 	}
 
 	async function off(c: ExtensionCommandContext): Promise<void> {
@@ -306,7 +323,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 	async function settings(c: ExtensionCommandContext): Promise<void> {
 		const cfg = loadConfig();
 		const expose = `How phones reach this computer: ${cfg.expose}`;
-		const url = `HTTPS address (for lock-screen notifications): ${cfg.publicUrl ?? "none"}`;
+		const url = `HTTPS address (voice, lock-screen notifications): ${cfg.publicUrl ?? (cfg.tailscale === false ? "none" : "automatic with Tailscale")}`;
 		const port = `Port: ${cfg.port}`;
 		const pick = await c.ui.select("pi-mobile settings", [expose, url, port, "Done"]);
 		const next: Config = { ...cfg };
@@ -319,7 +336,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 			if (!e) return;
 			next.expose = e.split(" ")[0] as Expose;
 		} else if (pick === url) {
-			const v = await c.ui.input(`HTTPS address that forwards to port ${cfg.port} (e.g. tailscale serve); empty to remove`, cfg.publicUrl ?? "https://");
+			const v = await c.ui.input(`HTTPS address that forwards to port ${cfg.port}; empty for automatic (Tailscale Serve)`, cfg.publicUrl ?? "https://");
 			if (v === undefined) return;
 			const trimmed = v.trim().replace(/\/+$/, "");
 			const empty = !trimmed || trimmed === "https:";

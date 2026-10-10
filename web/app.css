@@ -190,6 +190,8 @@ header#top.bare .chev, header#top.bare .dot { display: none; }
 .dot.working::after, .dot.waiting::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor; opacity: 0; animation: ring 1.8s var(--ease) infinite; }
 .dot.working { color: var(--busy); }
 .dot.waiting { background: var(--warn-dot); color: var(--warn-dot); }
+/* On the open session the work bar carries the motion; the header dot stays still while pi works. */
+#statusDot.working::after { display: none; }
 .dot.gone { background: var(--border-strong); }
 @keyframes ring { 0% { transform: scale(.6); opacity: .7; } 100% { transform: scale(1.5); opacity: 0; } }
 
@@ -229,7 +231,33 @@ main#scroller { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit
 .msg { margin: 0 0 16px; overflow-wrap: anywhere; }
 .msg.user { margin-left: auto; width: fit-content; max-width: 86%; background: var(--user); color: var(--user-text); padding: 10px 14px; border-radius: 20px 20px 6px 20px; white-space: pre-wrap; line-height: 1.45; }
 .msg.user + .msg.assistant, .msg.assistant + .msg.user { margin-top: 20px; }
-.msg.user .meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; opacity: .75; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 6px; white-space: normal; }
+.thumbs.after-text { margin-top: 8px; }
+.result .thumbs { margin-top: 8px; }
+.thumb { width: 76px; height: 76px; padding: 0; overflow: hidden; border-radius: var(--r-m); border: 1px solid var(--border); background: var(--fill-2); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; cursor: zoom-in; }
+.thumbs.one .thumb { width: 168px; height: 168px; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumbs.one .thumb:has(img) { width: auto; height: auto; }
+.thumbs.one .thumb img { width: auto; height: auto; max-width: min(240px, 60vw); max-height: 280px; }
+.thumb.missing { cursor: pointer; opacity: .6; }
+
+.viewer { position: fixed; inset: 0; z-index: 80; background: color-mix(in srgb, var(--d-bg) calc(100% - var(--pull, 0) * 60%), transparent); color: var(--d-text); overflow: hidden; overscroll-behavior: contain; animation: fade .2s var(--ease); }
+.viewer-stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: calc(64px + var(--safe-t)) 12px calc(24px + var(--safe-b)); }
+.viewer-stage img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; border-radius: var(--r-s); transition: transform .22s var(--ease); touch-action: pinch-zoom; }
+.viewer-stage img.dragging { transition: none; }
+.viewer-count { position: fixed; top: calc(12px + var(--safe-t)); left: 16px; height: 44px; display: flex; align-items: center; font-size: 15px; font-weight: 600; color: var(--d-text-2); font-variant-numeric: tabular-nums; }
+.viewer.zoomed { overflow: auto; }
+.viewer.zoomed .viewer-stage { position: static; display: block; width: max-content; min-width: 100%; padding: calc(64px + var(--safe-t)) 0 calc(24px + var(--safe-b)); }
+.viewer.zoomed .viewer-stage img { max-width: none; max-height: none; cursor: zoom-out; border-radius: 0; }
+.viewer-note { margin: 0; color: var(--d-text-2); font-size: 15px; }
+.viewer-btn { position: fixed; width: 44px; height: 44px; border-radius: 50%; background: var(--d-panel-2); color: var(--d-text); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-1); }
+.viewer-btn .i { width: 20px; height: 20px; stroke-width: 2.2; }
+.viewer-btn.close { top: calc(12px + var(--safe-t)); right: calc(12px + var(--safe-r, 0px)); }
+.viewer-btn.prev, .viewer-btn.next { bottom: calc(20px + var(--safe-b)); }
+.viewer-btn.prev { left: calc(50% - 56px); }
+.viewer-btn.prev .i { transform: scaleX(-1); }
+.viewer-btn.next { left: calc(50% + 12px); }
+.viewer:has(.prev) .viewer-stage { padding-bottom: calc(80px + var(--safe-b)); }
 .msg.assistant { line-height: 1.55; }
 .msg.assistant > * + * { margin-top: 10px; }
 .msg.assistant > .tool + .tool { margin-top: 2px; }
@@ -268,8 +296,10 @@ details.thinking > summary::-webkit-details-marker { display: none; }
 details.thinking > summary .chev { width: 14px; height: 14px; transition: transform .2s var(--ease); }
 details.thinking[open] > summary .chev { transform: rotate(90deg); }
 details.thinking .md { margin-top: 6px; padding-left: 12px; border-left: 2px solid var(--border-strong); color: var(--text-2); }
-.shimmer { background: linear-gradient(90deg, var(--muted) 0%, var(--text) 50%, var(--muted) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.6s linear infinite; }
-@keyframes shimmer { to { background-position: -200% 0; } }
+/* The one moving thing while pi works: the work bar's sparkle twists and breathes in violet.
+   The transcript says the same in words ("Running", "Thinking") and colour, without motion. */
+.work-bar .sparkle { width: 18px; height: 18px; color: var(--busy); stroke-width: 2.1; flex: none; animation: twinkle 1.8s var(--ease) infinite; }
+@keyframes twinkle { 0%, 100% { transform: rotate(0) scale(.8); opacity: .7; } 50% { transform: rotate(90deg) scale(1.1); opacity: 1; } }
 
 /* Tool steps: a quiet row (icon · verb · target · status); details on demand. */
 .tool { border-radius: var(--r-m); }
@@ -284,7 +314,6 @@ details.thinking .md { margin-top: 6px; padding-left: 12px; border-left: 2px sol
 .tool .tstate .i { width: 18px; height: 18px; stroke-width: 2.4; }
 .tool .tstate.ok { color: var(--ok); }
 .tool .tstate.err { color: var(--err); }
-.tool .tstate.run::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--fill-2); border-top-color: var(--busy); animation: spin .8s linear infinite; }
 .tool.err .ticon { background: var(--err-soft); color: var(--err); }
 .tool.running .ticon { background: var(--busy-soft); color: var(--busy); }
 .tool .tbody { padding: 2px 0 10px 38px; }
@@ -302,8 +331,6 @@ pre.diff .d { background: var(--del); color: var(--del-ink); }
 pre.diff .h { color: var(--muted); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.cursor::after { content: ""; display: inline-block; width: 2px; height: 1.1em; margin-left: 2px; vertical-align: text-bottom; background: var(--busy); animation: blink 1s steps(2, start) infinite; }
-@keyframes blink { to { visibility: hidden; } }
 
 /* Sits just above the composer, whose height changes with the working bar and dictation strip. */
 .jump { position: fixed; right: 16px; bottom: calc(var(--composer-h, 120px) + 12px); width: 44px; height: 44px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-2); color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; z-index: 3; }
@@ -443,7 +470,7 @@ textarea#input::placeholder { color: var(--muted); }
 }
 @media (forced-colors: active) {
 	.compose-box, .prompt, .group, .row, .tool > summary, .model-btn, .seg button, .pill, .btn, .send, .attention, .onboard,
-	.prompt .pact button, .chips button, .sheet-close, .stop-btn, .toast, .sheet-panel { border: 1px solid CanvasText; }
+	.prompt .pact button, .chips button, .sheet-close, .stop-btn, .toast, .sheet-panel, .thumb, .viewer-btn { border: 1px solid CanvasText; }
 	.primary, .chips button[aria-pressed="true"], .seg button[aria-pressed="true"] { border-width: 3px; }
 	.dot, .badge, .others { forced-color-adjust: none; }
 }

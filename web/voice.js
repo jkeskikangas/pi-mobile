@@ -65,7 +65,7 @@
 	const MIC = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
 
 	function micError(e) {
-		if (!window.isSecureContext) return "The microphone needs this page on HTTPS (pi: /remote settings → HTTPS address) or on this computer.";
+		if (!window.isSecureContext) return "The microphone needs a secure (HTTPS) address. Tap the voice button to switch to it.";
 		if (e?.name === "NotAllowedError") return "Microphone access is blocked for this page. Allow it in the browser's site settings.";
 		if (e?.name === "NotFoundError") return "No microphone found.";
 		return `Microphone: ${e?.message || e}`;
@@ -1965,23 +1965,9 @@
 		mode.open();
 	}
 
-	/** The microphone needs HTTPS: say exactly how to get there instead of failing. */
+	/** The microphone needs HTTPS: offer the computer's secure address instead of failing. */
 	function secureSheet() {
-		const port = location.port || "7878";
-		app().openSheet((body) => {
-			const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text });
-			body.append(
-				el("h3", "", "Voice needs a secure address"),
-				el("p", "note", "Browsers only let HTTPS pages use the microphone. One-time setup on your computer, if you use Tailscale:"),
-				el("pre", "out", `tailscale serve --bg ${port}`),
-				el("p", "note", "Then in pi: /remote settings → HTTPS address, and open pi mobile from that address (it also turns on lock-screen notifications). On the computer itself, http://127.0.0.1 works as is."),
-			);
-			if (navigator.clipboard) {
-				const copy = el("button", "row", "Copy the command");
-				copy.onclick = () => navigator.clipboard.writeText(`tailscale serve --bg ${port}`).then(() => app().toast("Copied"));
-				body.appendChild(copy);
-			}
-		});
+		app().openSheet((body) => app().secureMove(body, "Browsers only let secure (HTTPS) pages use the microphone."), { title: "Voice needs a secure address" });
 	}
 
 	function wire() {

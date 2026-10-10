@@ -67,6 +67,7 @@ Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; so
 ## 5. Motion
 
 - Short and purposeful: 100–300 ms with `--ease` for state changes. Loops only for live states (recording ring, working pulse, orb).
+- **One moving thing while pi works.** The work bar above the composer carries it: a twisting violet sparkle and what pi is doing now ("Thinking · 0:30", "Running · 0:42", "Writing · 0:51"), next to Stop and Steer/Queue and always in view. The transcript says the same in words and colour without motion (present-tense "Running" on a violet icon, then "Ran" ✓); no caret, spinner or shimmer there, and the open session's header dot stays still.
 - Animate `transform` and `opacity`. Canvas animation runs in `requestAnimationFrame` and stops when the page is hidden.
 - No layout shift while content streams: reserve space (captions have a minimum height; the dictation bar replaces itself in place).
 - Every animation has a `prefers-reduced-motion` path: no pulsing, breathing, wobble or rings; the orb becomes a still disc that scales only slightly with level.
