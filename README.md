@@ -13,7 +13,7 @@ No server to install, no account, no third-party relay, no app store. It all run
 ## What you get
 
 - **Answer pi from your pocket.** When pi asks something, any extension's question included (permission gates, pickers, text input), your locked phone buzzes. Tap, answer, and pi carries on. The question stays open in the terminal too; whichever side answers first wins.
-- **Every session, one pairing.** `/remote` shares every pi on the machine, running or started later. The list puts the session that needs you first, and a bar at the top tells you when another one is waiting.
+- **Every session, every computer.** `/remote` shares every pi on the machine, running or started later; `/remote add box` puts a cloud box's sessions in the same list, with one tap on the phone. The list puts the session that needs you first, and a bar at the top tells you when another one is waiting.
 - **Talk to it when you can't look.** Voice mode is a spoken conversation about the work: what pi did, why something failed, what's next. It speaks about behaviour and decisions, never file names or diffs, reads pi's questions aloud, and makes you name an irreversible action ("yes, push") before it happens.
 - **Dictate prompts, get what you meant.** Speak in the terminal or on the phone; what lands in the editor is a clean prompt, with your self-corrections applied and spoken names matched to real ones in the repository.
 - **Steer without breaking flow.** Follow streaming output and tool steps live, steer pi mid-run or queue a follow-up, stop it, switch model or thinking level, compact, attach a photo.
@@ -103,15 +103,24 @@ If you run pi inside [herdr](https://herdr.dev), pi-mobile adds two things; outs
 - **herdr's sidebar shows pi's questions.** Any pi dialog marks the pane *blocked*, so herdr and your phone agree on who needs you.
 - **Start sessions from the phone.** Sessions → **New session**: pick a folder and an optional first prompt. herdr opens a tab there, starts pi, and the phone opens the new session.
 
-## A laptop and a cloud box
+## Several computers: a laptop and cloud boxes
 
-pi-mobile runs wherever pi runs. A cloud box keeps working while your laptop sleeps, so it suits sessions you steer from the phone. Run pi there (inside herdr or tmux so it survives your SSH disconnects), install Tailscale on the box and your phone, and run `/remote`. pi-mobile only ever listens on loopback, private LAN and Tailscale addresses, never on a public IP, so the box's public interface stays closed. Each machine is paired separately for now; one list across machines is planned ([design](designs/multi-machine.md)).
+Every session on every computer, in one list on the phone, each labelled with its computer. A cloud box keeps working while your laptop sleeps, so it suits sessions you steer from the phone.
+
+1. **Once:** run `/remote` on your laptop and scan the QR code.
+2. **For each new box:** in pi on the laptop, run `/remote add <ssh-host>` (or ask pi to; scripts can run `npx pi-mobile add <ssh-host>`). Your phone asks "Add box?"; tap **Add** and its sessions join the list. No QR code, no keys to copy.
+3. **When a box goes:** `/remote remove box`, or remove it on the phone under **⋯ → Computers**.
+
+While the laptop sleeps it shows as "Offline since 14:02"; the boxes keep working and keep sending notifications, and the app still opens. Voice mode can switch between computers ("the api session on the box").
+
+`add` sets pi-mobile up on the box over SSH and needs Tailscale there, with HTTPS turned on for your tailnet (it tells you the exact fix if not). Your phone needs Tailscale too. Machine names appear in public certificate logs as `box.<tailnet>.ts.net`, so name machines accordingly. Run pi on the box inside herdr or tmux so it survives your SSH disconnects. pi-mobile only listens on loopback, private LAN and Tailscale addresses, never on a public IP. Design: [designs/multi-machine.md](designs/multi-machine.md).
 
 ## Security
 
 - **Pairing.** `/remote` creates a single-use key valid for 10 minutes, carried in the QR URL's `#fragment`, which browsers never send to a server. The phone uses it to receive its own long-lived device key.
 - **Transport.** Every request and event is sealed with the device's key (NaCl secretbox). Requests carry a timestamp and nonce, and replays are rejected. There are no bearer tokens or cookies to steal; Wi-Fi, Tailscale or a tunnel sees only ciphertext.
 - **Devices.** Every paired device has full control, so pair only your own. Each can be revoked on its own (`/remote devices`, or from the phone).
+- **Several computers.** Your phone talks to each computer directly, with its own key on each; no computer relays another's sessions or can drive them. A new computer joins only when a computer you already use adds it over SSH and you tap Add on the phone. Keys travel over SSH and the existing encrypted channel, never on a command line. All your computers sign notifications with one key, which changes whenever you remove one.
 - **Notifications.** Encrypted to your browser (RFC 8291), so the push service can't read them.
 - **Local link.** pi processes join over loopback with a secret in `~/.pi/agent/pi-mobile/` (mode 0600).
 - **Caveat.** On plain HTTP the web app itself isn't integrity-protected: an *active* attacker on your network could serve a modified app. On untrusted networks use the HTTPS address. A paired full-control device can do anything pi can, so revoke lost phones.
@@ -120,6 +129,7 @@ pi-mobile runs wherever pi runs. A cloud box keeps working while your laptop sle
 
 ```
  phone ──sealed HTTP + SSE──▶ hub (inside one pi) ◀──loopback link── other pi processes
+       └─sealed HTTP + SSE──▶ hub on another computer (one connection per computer)
 ```
 
 - **One hub per machine.** Whichever pi binds the port hosts it; the others link to it. If that pi exits, another takes over within a second and the phone reconnects to the same address.
@@ -135,6 +145,7 @@ pi-mobile runs wherever pi runs. A cloud box keeps working while your laptop sle
 | Answer any extension's dialogs from the phone | **yes** | no | notifies only | pi-ask questions | not stated |
 | Every pi on the machine, one pairing | yes | yes (agent mesh) | yes (central server) | per-directory room | per session toggle |
 | Lock-screen notifications | Web Push (HTTPS) | native app | Web Push (HTTPS) | Web Push | APNs via a gateway |
+| Several computers in one list | yes, phone to each computer, no relay | yes (agent mesh, via its relay) | not stated | not stated | not stated |
 
 The others have things this doesn't: native apps (remote-pi, Pi Relay), an agent-to-agent mesh across machines (remote-pi), and transcripts of sessions that have since closed (mipsel64).
 

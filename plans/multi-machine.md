@@ -126,6 +126,22 @@ Then update:
 - `docs/ui.md` with the new components;
 - `plans/native-apps.md` if anything changed.
 
+## Status (2026-10-10, branch `multi-machine`)
+
+- **Done:** steps 1–5 and 7, plus step 6's computer picker. The command is `bin/pi-mobile.mjs`: plain JavaScript, because Node won't strip TypeScript types inside `node_modules`, so `npx` runs it on a fresh box.
+- **Covered by tests:**
+  - `test/machines.test.ts`: enrol/add/remove, offers, CORS, CSP and the push key;
+  - `test/fleet.test.ts`: real hubs; one list, routing, offline and back, revoked, duplicates;
+  - `matchSession`;
+  - `npm run shots -- --only machines`, in both themes at 390 and 320 px.
+- **Not built:** Scan in Add a computer (paste only for now; iOS has no `BarcodeDetector`).
+- **Not verified:**
+  - `/remote add` over real ssh, and `tailscale serve` on a real box;
+  - the iOS offline launch;
+  - Chrome Local Network Access.
+
+`npx pi-mobile@<version> enrol` only works once a version with `bin/` is published. Until then, set `PI_MOBILE_ENROL` to a command that runs this checkout's `bin/pi-mobile.mjs enrol` on the box.
+
 ## Open
 
 - `[verify on device]` iOS offline launch of the cached shell after a week unused (D5).
