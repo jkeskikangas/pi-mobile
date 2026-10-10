@@ -8,8 +8,6 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
-import { hostname } from "node:os";
 import { extname, join, normalize } from "node:path";
 import type { Duplex } from "node:stream";
 import { timingSafeEqual } from "node:crypto";
@@ -18,8 +16,8 @@ import { Channel } from "./channel.ts";
 import { b64u, open, randomId, randomKey, ReplayGuard, seal, unb64u } from "./crypto.ts";
 import { type Address, type Endpoint, privateAddresses, type ServeResult, startCloudflared, type Tunnel } from "./expose.ts";
 import { type AgentEvent, type AgentInfo, type HubEvent, PROTOCOL } from "./protocol.ts";
-import { type Config, type Device, DeviceStore, PushStore, type Role } from "./store.ts";
-import { type PushSubscriptionJSON, sendPush } from "./webpush.ts";
+import { type Config, type Device, DeviceStore, type MachineIdentity, machineIdentity, type Offer, OfferStore, PushStore, type Role } from "./store.ts";
+import { type PushSubscriptionJSON, sendPush, type Vapid } from "./webpush.ts";
 
 export const LINK_PROTOCOL = "pi-mobile-link";
 const WEB_DIR = fileURLToPath(new URL("../web/", import.meta.url));
@@ -51,6 +49,8 @@ interface StreamClient {
 	/** The session this phone is looking at; its detailed events are sent only for that one. */
 	focus?: string;
 	device: Device;
+	/** Offers already sent on this stream. */
+	offered: Set<string>;
 	res: ServerResponse;
 	queue: unknown[];
 	flush?: NodeJS.Timeout;
@@ -70,6 +70,9 @@ export interface HubOptions {
 	push?: PushStore;
 	/** Replaceable in tests; defaults to the real Web Push sender. */
 	sendPush?: typeof sendPush;
+	offers?: OfferStore;
+	/** This machine (default: `machine.json`). */
+	machine?: MachineIdentity;
 	/** Called when a linked pi asks the hub to restart, e.g. after a port or exposure change. */
 	onRestart?: () => void;
 	/** Called once the hub has been without linked agents for `idleMs`. */
@@ -96,6 +99,11 @@ export class Hub {
 	private replay = new ReplayGuard();
 	private devices: DeviceStore;
 	private push: PushStore;
+	private offers: OfferStore;
+	/** Offers already announced by a lock-screen notification in this process. */
+	private notified = new Set<string>();
+	private offerTimer?: NodeJS.Timeout;
+	private me?: MachineIdentity;
 	private secret: Buffer;
 	private tunnel?: Tunnel;
 	private tunnelError?: string;
@@ -117,6 +125,7 @@ export class Hub {
 		this.secret = Buffer.from(opts.secret);
 		this.devices = opts.devices ?? new DeviceStore();
 		this.push = opts.push ?? new PushStore();
+		this.offers = opts.offers ?? new OfferStore();
 		this.handler = (req, res) => {
 			this.handle(req, res).catch((e) => {
 				if (!res.headersSent) send(res, 500, { error: String(e?.message ?? e) });
@@ -146,6 +155,9 @@ export class Hub {
 		}
 		this.heartbeat = setInterval(() => this.ping(), 15_000);
 		this.heartbeat.unref();
+		// `pi-mobile add` and `remove` run outside the hub; pick their offers up within seconds.
+		this.offerTimer = setInterval(() => this.deliverOffers(), 3000);
+		this.offerTimer.unref();
 		this.armIdle();
 		void this.syncServe();
 		if (this.config.expose === "cloudflared") {
@@ -219,6 +231,10 @@ export class Hub {
 		this.broadcastToAgents({ t: "endpoints", endpoints: this.endpoints() });
 	}
 
+	get machine(): MachineIdentity {
+		return (this.me ??= this.opts.machine ?? machineIdentity());
+	}
+
 	get port(): number {
 		const a = this.server.address();
 		return typeof a === "object" && a ? a.port : this.config.port;
@@ -243,6 +259,7 @@ export class Hub {
 		this.closed = true;
 		clearInterval(this.heartbeat);
 		clearInterval(this.ifaceTimer);
+		clearInterval(this.offerTimer);
 		for (const l of this.extra.values()) {
 			l.server.close();
 			l.server.closeAllConnections?.();
@@ -368,7 +385,7 @@ export class Hub {
 	 */
 	private async attention(agent: string, msg: { title?: string; body?: string; urgent?: boolean }): Promise<void> {
 		if (Date.now() - this.lastPresence < PRESENCE_MS) return; // you are at a terminal here
-		const payload = { title: String(msg.title ?? "pi"), body: String(msg.body ?? ""), agent };
+		const payload = { title: String(msg.title ?? "pi"), body: String(msg.body ?? ""), agent, machine: this.machine.id };
 		await Promise.all(
 			this.push.entries().map(async ([id, sub]) => {
 				if (!this.devices.get(id)) return this.push.set(id, undefined);
@@ -376,6 +393,27 @@ export class Hub {
 				if ((await send(sub, payload, this.push.vapid, msg.urgent ? "high" : "normal")) === "gone") this.push.set(id, undefined);
 			}),
 		);
+	}
+
+	// ── machines offered to phones ─────────────────────────────────────────────────
+
+	/** Sends each phone its pending offers: on its open streams, and once as a notification. */
+	private deliverOffers(): void {
+		for (const o of this.offers.list()) {
+			for (const c of this.clients) if (c.device.id === o.device && !c.offered.has(o.id)) this.offerTo(c, o);
+			if (this.notified.has(o.id)) continue;
+			this.notified.add(o.id);
+			const sub = this.push.entries().find(([id]) => id === o.device)?.[1];
+			if (!sub || !this.devices.get(o.device)) continue;
+			const body = o.kind === "add" ? `Add ${o.machine.name} to your sessions?` : `${o.machine.name} was removed`;
+			void (this.opts.sendPush ?? sendPush)(sub, { title: "pi", body, machine: this.machine.id, offer: o.id }, this.push.vapid).catch(() => {});
+		}
+	}
+
+	private offerTo(c: StreamClient, o: Offer): void {
+		c.offered.add(o.id);
+		const { device: _device, ...offer } = o;
+		this.enqueue(c, { type: o.kind === "add" ? "machine_offer" : "machine_removed", offer });
 	}
 
 	// ── events ─────────────────────────────────────────────────────────────────────
@@ -430,6 +468,20 @@ export class Hub {
 		const url = new URL(req.url ?? "/", "http://hub");
 		res.setHeader("x-content-type-options", "nosniff");
 		res.setHeader("referrer-policy", "no-referrer");
+		if (url.pathname.startsWith("/api/")) {
+			// The phone's app may be served by another of your machines. Bodies are sealed and nothing
+			// rides on cookies, so any origin may call; the device key is the only credential.
+			res.setHeader("access-control-allow-origin", "*");
+			if (req.method === "OPTIONS") {
+				res.writeHead(204, {
+					"access-control-allow-methods": "GET, POST",
+					"access-control-allow-headers": "content-type",
+					"access-control-max-age": "600",
+					...(req.headers["access-control-request-private-network"] ? { "access-control-allow-private-network": "true" } : {}),
+				});
+				return void res.end();
+			}
+		}
 		if (url.pathname === "/api/pair" && req.method === "POST") return this.pair(req, res);
 		if (url.pathname === "/api/rpc" && req.method === "POST") return this.rpc(req, res);
 		if (url.pathname === "/api/stream" && req.method === "GET") return this.stream(url, req, res);
@@ -453,12 +505,24 @@ export class Hub {
 				"cache-control": "no-cache",
 				"content-security-policy":
 					// media-src blob: lets voice mode keep a silent media session (headset button) alive.
-					"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+					`default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src ${this.connectSources()}; frame-ancestors 'none'`,
 			});
 			res.end(body);
 		} catch {
 			send(res, 404, { error: "not found" });
 		}
+	}
+
+	/** The app talks to this machine and to your other machines (Tailscale HTTPS, or HTTPS addresses you set). */
+	private connectSources(): string {
+		const extra = [this.config.publicUrl, ...(this.config.machineOrigins ?? [])].flatMap((u) => {
+			try {
+				return u ? [new URL(u).origin] : [];
+			} catch {
+				return [];
+			}
+		});
+		return ["'self'", "https://*.ts.net", "https://*.ts.net:8443", ...new Set(extra)].join(" ");
 	}
 
 	private async pair(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -478,7 +542,7 @@ export class Hub {
 		};
 		this.devices.add(device);
 		this.broadcastToAgents({ t: "paired", device: publicDevice(device) });
-		send(res, 200, { b: seal(pairing.key, { d: device.id, k: device.key, role: device.role, host: MACHINE() }) });
+		send(res, 200, { b: seal(pairing.key, { d: device.id, k: device.key, role: device.role, host: this.machine.name, machine: this.machine }) });
 	}
 
 	private authenticate(d: unknown, b: unknown): { device: Device; value: any } | undefined {
@@ -508,7 +572,9 @@ export class Hub {
 			case "hub":
 				return {
 					hubId: this.id,
-					host: MACHINE(),
+					host: this.machine.name,
+					machine: this.machine,
+					protocol: PROTOCOL,
 					seq: this.seq,
 					agents: [...this.agents.values()].map((a) => a.info),
 					device: publicDevice(device),
@@ -523,8 +589,23 @@ export class Hub {
 				const sub = p.subscription as PushSubscriptionJSON | null;
 				if (sub && !(typeof sub.endpoint === "string" && sub.endpoint.startsWith("https://") && sub.keys?.p256dh && sub.keys?.auth))
 					throw new Error("invalid push subscription");
+				// The phone moved all its machines to a new signing key (after removing one).
+				const v = p.vapid as Vapid | undefined;
+				if (v) {
+					if (!(typeof v.publicKey === "string" && v.publicKey.length > 80 && typeof v.privateKey === "string" && v.privateKey.length > 30))
+						throw new Error("invalid push key");
+					this.push.setVapid({ publicKey: v.publicKey, privateKey: v.privateKey });
+				}
 				this.push.set(device.id, sub ?? undefined);
-				return { ok: true };
+				return { ok: true, pushKey: this.push.vapid.publicKey };
+			}
+			case "vapid":
+				// The key every machine signs notifications with; the phone hands it to a machine that has another.
+				return this.push.vapid;
+			case "offerDone": {
+				const o = this.offers.forDevice(device.id).find((x) => x.id === String(p.id));
+				if (o) this.offers.remove(o.id);
+				return { ok: !!o };
 			}
 			case "devices":
 				return this.devices.list().map(publicDevice);
@@ -561,11 +642,12 @@ export class Hub {
 		res.flushHeaders();
 		req.socket.setNoDelay(true);
 		const { hub, since, focus } = auth.value as { hub?: string; since?: number; focus?: string };
-		const client: StreamClient = { id: randomId(), focus, device: auth.device, res, queue: [] };
+		const client: StreamClient = { id: randomId(), focus, device: auth.device, res, queue: [], offered: new Set() };
 		const first = this.ring[0]?.seq ?? this.seq + 1;
 		const canReplay = hub === this.id && typeof since === "number" && since >= first - 1 && since <= this.seq;
 		client.queue.push({ type: "hello", hubId: this.id, seq: this.seq, resync: !canReplay, client: client.id });
 		if (canReplay) for (const ev of this.ring) if (ev.seq > since && wants(client, ev)) client.queue.push(ev);
+		for (const o of this.offers.forDevice(auth.device.id)) this.offerTo(client, o);
 		this.flush(client);
 		this.clients.add(client);
 		this.clientsChanged();
@@ -579,18 +661,6 @@ export class Hub {
 	}
 }
 
-/** A name people recognise: macOS's Computer Name rather than a generated host name. */
-function machineName(): string {
-	if (process.platform === "darwin") {
-		try {
-			const name = execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000 }).trim();
-			if (name) return name;
-		} catch {}
-	}
-	return hostname().replace(/\.local$/, "");
-}
-let machine: string | undefined;
-const MACHINE = () => (machine ??= machineName());
 
 function wants(c: StreamClient, ev: HubEvent): boolean {
 	return GLOBAL_EVENTS.has(ev.type) || ev.agent === c.focus;

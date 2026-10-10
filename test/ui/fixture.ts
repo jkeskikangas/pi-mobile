@@ -5,24 +5,37 @@
 //
 // Control it on stdin: `work` starts a streaming turn with a running tool, `ask` opens a confirm
 // dialog, `pick` a select, `done` finishes the turn, `quiet` empties the second session.
+// Several machines: `box` starts a second computer (port + 1) and offers it to paired phones, as
+// `/remote add` does; `box off` / `box on` take it away and bring it back.
 
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { Hub } from "../../src/hub.ts";
 import { HubLink } from "../../src/link.ts";
 import type { AgentInfo, Item } from "../../src/protocol.ts";
-import { DeviceStore, PushStore } from "../../src/store.ts";
+import { DeviceStore, OfferStore, PushStore } from "../../src/store.ts";
 import { personaList } from "../../src/voice/personas.ts";
 
 const port = Number(process.argv[2] ?? 7979);
 const dir = mkdtempSync(join(tmpdir(), "pi-mobile-ui-"));
 const SECRET = "u".repeat(43);
-const config = { port, expose: "network" as const, enabled: true };
+const BOX_PORT = port + 1;
+// The page may call the second fixture computer (not on a tailnet, so it is listed explicitly).
+const config = { port, expose: "network" as const, enabled: true, machineOrigins: [`http://127.0.0.1:${BOX_PORT}`] };
+const laptop = { id: "fx-laptop", name: "MacBook Pro" };
 // PI_MOBILE_FIXTURE_HTTPS=https://… pretends Tailscale Serve gave the hub that address (for the secure-address UI).
 const https = process.env.PI_MOBILE_FIXTURE_HTTPS;
-const hub = new Hub({ config, secret: SECRET, devices: new DeviceStore(dir), push: new PushStore(dir), serve: https ? async () => ({ url: https }) : undefined });
+const hub = new Hub({
+	config,
+	secret: SECRET,
+	devices: new DeviceStore(dir),
+	push: new PushStore(dir),
+	offers: new OfferStore(dir),
+	machine: laptop,
+	serve: https ? async () => ({ url: https }) : undefined,
+});
 await hub.listen();
 
 const now = Date.now();
@@ -118,10 +131,10 @@ function emit(f: Fake, ev: any): void {
 	f.link?.send({ t: "ev", ev: { ...ev, n: ++f.n } });
 }
 
-for (const f of fakes) {
+function link(f: Fake, cfg: typeof config | typeof boxConfig, secret: string): void {
 	f.link = new HubLink({
-		config: () => config,
-		secret: SECRET,
+		config: () => cfg,
+		secret,
 		info: () => f.info,
 		onRequest: (m, p) => {
 			if (m === "snapshot") return { n: f.n, info: f.info, items: f.items, start: 0, total: f.items.length, tools: [], prompts: prompts.get(f.info.agent) ?? [] };
@@ -178,6 +191,43 @@ for (const f of fakes) {
 	});
 	f.link.start();
 }
+for (const f of fakes) link(f, config, SECRET);
+
+// ── a second computer ──────────────────────────────────────────────────────────────────────────
+const boxDir = mkdtempSync(join(tmpdir(), "pi-mobile-ui-box-"));
+const BOX_SECRET = "b".repeat(43);
+const boxConfig = { port: BOX_PORT, expose: "local" as const, enabled: true };
+const box = { id: "fx-box", name: "hetzner-box" };
+const boxFakes: Fake[] = [
+	{
+		info: { agent: "f-deploy", pid: 201, sessionId: "s4", name: "deploy", task: "Roll the API out to staging", cwd: "/home/you/api", status: "idle", model: { provider: "anthropic", id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", reasoning: true }, thinking: "low", cost: 0.4, last: "Staging is on 2026.10.3; health checks pass.", herdr: true },
+		items: [{ k: "user", id: "d1", text: "Roll the API out to staging", images: 0, ts: now - 900_000 }],
+		n: 0,
+	},
+];
+let boxHub: Hub | undefined;
+async function boxOn(): Promise<void> {
+	if (boxHub) return;
+	boxHub = new Hub({ config: boxConfig, secret: BOX_SECRET, devices: new DeviceStore(boxDir), push: new PushStore(boxDir), offers: new OfferStore(boxDir), machine: box });
+	await boxHub.listen();
+	for (const f of boxFakes) link(f, boxConfig, BOX_SECRET);
+}
+function boxOff(): void {
+	for (const f of boxFakes) f.link?.stop();
+	boxHub?.close();
+	boxHub = undefined;
+}
+/** What `/remote add` does, minus ssh and HTTPS: enrol the box for every phone here, offer it to each. */
+async function offerBox(): Promise<void> {
+	await boxOn();
+	const cli: any = await import(new URL("../../bin/pi-mobile.mjs", import.meta.url).href);
+	const phones = new DeviceStore(dir).list();
+	const push = new PushStore(dir);
+	const out = cli.enrol({ from: laptop.name, vapid: push.vapid, origin: `http://127.0.0.1:${BOX_PORT}`, phones: phones.map((p) => ({ id: p.id, name: p.name, sub: push.entries().find(([id]) => id === p.id)?.[1] })) }, boxDir);
+	mkdirSync(join(dir, "offers"), { recursive: true });
+	for (const d of out.devices)
+		writeFileSync(join(dir, "offers", `fx${d.phone}.json`), JSON.stringify({ id: `fx${d.phone}`, device: d.phone, kind: "add", machine: box, origin: out.origin, d: d.d, k: d.k, from: laptop.name, createdAt: Date.now() }));
+}
 
 const [api, web] = fakes;
 async function work(): Promise<void> {
@@ -221,10 +271,13 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 		web.items = [];
 		emit(web, { type: "reset" });
 	}
+	if (cmd === "box") await offerBox();
+	if (cmd === "box off") boxOff();
+	if (cmd === "box on") await boxOn();
 	if (cmd === "pair") console.log(hub.createPairing().links.map((l) => l.url).join("\n"));
 });
 
 const lan = hub.createPairing().links;
 console.log(`pi-mobile UI fixture on port ${port}. Pair:`);
 for (const l of lan) console.log(`  ${l.label}: ${l.url}`);
-console.log("stdin: work | ask | pick | done | quiet | pair");
+console.log("stdin: work | ask | pick | done | quiet | pair | box | box off | box on");

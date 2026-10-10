@@ -147,6 +147,7 @@ The helpers are in `web/app.js`. `voice.js` gets them through `window.PiMobile`.
 | Fields | `.field` (label span + input/textarea) | Label above, 48 px, 16 px text, focus turns the border accent |
 | Dictation strip | `#dictBar[data-kind=rec/busy/done/error]` | Replaces itself in place; never rebuilds per frame |
 | Voice mode | `#voice` with `.v-*` classes | design-principles.md §4; every voice class starts with `v-` |
+| Computers | `fleet` (`web/fleet.js`), `machineSheet`, `addComputerSheet`, the offer sheet (`showOffer`) | Name a computer only when there are two or more (`several()`): as a prefix on session rows and the header line ("hetzner-box · Working · 0:42"), and in the attention bar. A computer that can't be reached is one row, "Offline since 14:02", never a list of dead sessions |
 
 ## 5. Patterns
 
@@ -170,6 +171,8 @@ The helpers are in `web/app.js`. `voice.js` gets them through `window.PiMobile`.
   - treat a press of 350 ms or longer as hold-to-talk, and a shorter one as a tap that toggles;
   - swallow the click that follows a press;
   - still work with Enter and Space as plain taps.
+- **Several computers** never change the single-computer UI: no chips, sections or wording appear until a second computer is added. Requests go to the session's own computer (`fleet.call`); speech goes to whichever computer can do it (`speechCall`).
+- **Sheets that open by themselves** (an offer from another computer) pass `unprompted: true` to `openSheet`, so focus lands on the title instead of a pre-selected button.
 - **Haptics** happen only inside a user gesture: `navigator.vibrate` where it exists, otherwise the iOS switch trick (design-principles.md §7).
 
 ## 6. Mistakes already made once (don't repeat)
@@ -196,7 +199,8 @@ npm run shots -- --only voice --theme dark --width 390 --out /tmp/s
 `shots` (`test/ui/shots.mjs`) uses `puppeteer-core` with the local Chrome; set `CHROME=/path` if it is not in the usual place. It covers three flows:
 - **app:** pairing, sessions, transcript, open tools, working, confirm and select questions, menu, models, new session, slash commands, and focus rings, including inside a sheet;
 - **voice:** dictation, every voice-mode state, mute, the settings sheet, push to talk with a real held press;
-- **picker:** the voice picker from the menu and from voice mode.
+- **picker:** the voice picker from the menu and from voice mode;
+- **machines:** a second fixture computer offered and added, one list from both, the Computers menu, the box going offline and coming back (`box`, `box off`, `box on` on the fixture's stdin).
 
 It exits 1 on any axe violation (WCAG 2.2 AA), page error or failed step, and writes `report.json` with the checks it measured.
 

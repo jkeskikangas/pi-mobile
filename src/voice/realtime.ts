@@ -86,7 +86,7 @@ export const VOICE_TOOLS = [
 	{
 		type: "function",
 		name: "switch_session",
-		description: "Switch to another pi session on the computer, by project or session name. Use 'list' to hear the sessions.",
+		description: "Switch to another pi session on any of the developer's computers, by project or session name (and the computer's name, if they say it). Use 'list' to hear the sessions. If the result is ambiguous, ask which computer.",
 		parameters: obj({ name: { type: "string" } }, ["name"]),
 	},
 	{

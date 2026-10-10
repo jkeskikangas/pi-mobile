@@ -58,40 +58,58 @@
 
 	// ── state ──────────────────────────────────────────────────────────────────────
 	const S = {
-		device: store.get(DEVICE_KEY), // { d, k, role, host }
-		key: null,
-		hubId: null,
-		seq: 0,
-		agents: new Map(), // agent -> info
+		agents: new Map(), // agent -> info, from every machine
 		prompts: new Map(), // agent -> Map(id -> prompt)
 		current: null,
 		view: null, // transcript state of the current agent
 		mode: store.get(MODE_KEY) || "steer",
 		commands: null,
 		attachments: [],
-		online: false,
 		models: null,
 		push: { key: null, on: false },
+		offers: [], // machines offered by another of your computers, waiting for "Add"
+		pushKeys: new Map(), // machine -> the push key it signs with
 	};
-	if (S.device) S.key = unb64u(S.device.k);
+	const Unauthorized = window.PiFleet.Unauthorized;
+	const PROTOCOL = 1; // src/protocol.ts
 
-	class Unauthorized extends Error {}
+	// Every machine this phone uses, each with its own key and connection (web/fleet.js).
+	const fleet = window.PiFleet.createFleet({
+		seal,
+		open,
+		unb64u,
+		fetch: (...a) => fetch(...a),
+		origin: location.origin,
+		storage: store,
+		onHello: (id) => resync(id),
+		onEvent: (id, ev) => onMachineEvent(id, ev),
+		onState: (id) => machineStateChanged(id),
+		onRevoked: (id, reason) => machineRevoked(id, reason),
+	});
+	/** The computer that serves this app (the first one paired), as the single-machine code knew it. */
+	Object.defineProperty(S, "device", {
+		get() {
+			const m = fleet.primary() || fleet.machines[0];
+			return m ? { d: m.d, k: m.k, role: "control", host: m.name, id: m.id } : null;
+		},
+	});
+	/** Whether the machine of the session on screen is reachable (any machine, without a session). */
+	Object.defineProperty(S, "online", {
+		get() {
+			const id = S.current && fleet.machineOf(S.current);
+			return id ? fleet.state(id) === "online" : fleet.anyOnline();
+		},
+	});
+	const several = () => fleet.machines.length > 1;
+	const machineName = (agent) => fleet.get(fleet.machineOf(agent))?.name || "";
 
+	/** Calls the computer that serves this app (devices, pairing, unpairing). */
 	async function rpc(m, p) {
-		if (!S.device) throw new Unauthorized("not paired");
-		const res = await fetch("api/rpc", {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ d: S.device.d, b: seal(S.key, { t: Date.now(), m, p }) }),
-		});
-		if (res.status === 401) throw new Unauthorized("this device is no longer paired");
-		const body = await res.json();
-		if (!body.b) throw new Error(body.error || `HTTP ${res.status}`);
-		const out = open(S.key, body.b);
-		if (out.e !== undefined) throw new Error(out.e);
-		return out.r;
+		const primary = fleet.primary();
+		if (!primary) throw new Unauthorized("not paired");
+		return fleet.rpc(primary.id, m, p);
 	}
-	const call = (m, p, agent = S.current) => rpc("agent", { agent, m, p: p || {} });
+	const call = (m, p, agent = S.current) => fleet.call(agent, m, p || {});
 
 	// ── pairing ────────────────────────────────────────────────────────────────────
 	function deviceName() {
@@ -116,9 +134,9 @@
 			const body = await res.json();
 			if (!res.ok || !body.b) throw new Error(body.error || `HTTP ${res.status}`);
 			const out = open(key, body.b);
-			S.device = { d: out.d, k: out.k, role: out.role, host: out.host };
-			S.key = unb64u(out.k);
-			store.set(DEVICE_KEY, S.device);
+			const old = fleet.primary();
+			if (old) fleet.remove(old.id);
+			fleet.add({ d: out.d, k: out.k, machine: out.machine?.id, name: out.host, primary: true });
 			toast(`Paired with ${out.host}`);
 			return true;
 		} catch (e) {
@@ -132,10 +150,9 @@
 	}
 
 	function unpaired(reason) {
-		S.device = null;
-		S.key = null;
+		fleet.stop();
+		for (const m of fleet.machines) fleet.remove(m.id);
 		store.set(DEVICE_KEY, null);
-		S.online = false;
 		$("composer").hidden = true;
 		$("modelBtn").hidden = true;
 		$("transcript").replaceChildren();
@@ -155,103 +172,89 @@
 		} else el.hidden = true;
 	}
 
-	// ── stream ─────────────────────────────────────────────────────────────────────
-	let streamAbort = null;
-	let lastData = 0;
-	let backoff = 500;
-
-	async function streamLoop() {
-		for (;;) {
-			if (!S.device) return;
-			const ctrl = new AbortController();
-			streamAbort = ctrl;
-			try {
-				const b = seal(S.key, { t: Date.now(), hub: S.hubId, since: S.seq, focus: S.current || undefined });
-				const res = await fetch(`api/stream?d=${encodeURIComponent(S.device.d)}&b=${b}`, { signal: ctrl.signal, cache: "no-store" });
-				if (res.status === 401) return unpaired("This device was revoked or the pairing was lost");
-				if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-				const reader = res.body.getReader();
-				let buf = "";
-				lastData = Date.now();
-				for (;;) {
-					const { value, done } = await reader.read();
-					if (done) break;
-					lastData = Date.now();
-					buf += dec.decode(value, { stream: true });
-					let i = buf.indexOf("\n\n");
-					while (i >= 0) {
-						const frame = buf.slice(0, i);
-						buf = buf.slice(i + 2);
-						const data = frame
-							.split("\n")
-							.filter((l) => l.startsWith("data: "))
-							.map((l) => l.slice(6))
-							.join("");
-						if (data) await onBatch(open(S.key, data));
-						i = buf.indexOf("\n\n");
-					}
-				}
-			} catch (e) {
-				if (e instanceof Unauthorized) return unpaired(e.message);
-			}
-			setOnline(false);
-			await sleep(backoff);
-			backoff = Math.min(backoff * 2, 8000);
-		}
-	}
-
-	// Mobile browsers silently freeze sockets in the background; the hub pings every 15 s.
-	setInterval(() => {
-		if (streamAbort && S.online && Date.now() - lastData > 40_000) streamAbort.abort();
-	}, 5000);
+	// ── machines and their events ──────────────────────────────────────────────────
+	// Mobile browsers silently freeze sockets in the background; the hubs ping every 15 s.
+	setInterval(() => fleet.watch(), 5000);
 	document.addEventListener("visibilitychange", () => {
-		if (document.visibilityState === "visible" && streamAbort && Date.now() - lastData > 20_000) {
-			backoff = 200;
-			streamAbort.abort();
-		}
+		if (document.visibilityState === "visible") fleet.watch(Date.now(), true);
 	});
 
-	async function onBatch(batch) {
-		for (const ev of batch) {
-			if (ev.type === "hello") {
-				backoff = 500;
-				const fresh = ev.resync;
-				S.hubId = ev.hubId;
-				S.seq = ev.seq;
-				S.clientId = ev.client;
-				setOnline(true);
-				if (fresh) await resync();
-				continue;
-			}
-			if (ev.seq) S.seq = Math.max(S.seq, ev.seq);
-			handleEvent(ev);
-		}
+	function onMachineEvent(id, ev) {
+		if (ev.type === "machine_offer") return offerMachine(id, ev.offer);
+		if (ev.type === "machine_removed") return machineRemovedElsewhere(id, ev.offer);
+		handleEvent(ev);
 	}
 
-	function setOnline(on) {
-		S.online = on;
+	const wasOffline = new Set();
+	function machineStateChanged(id) {
+		// Voice mode says it once when the computer it's following goes away, and when it's back.
+		const st = fleet.state(id);
+		const name = fleet.get(id)?.name || "The computer";
+		if (st === "offline" && !wasOffline.has(id)) {
+			wasOffline.add(id);
+			window.PiVoice?.onMachine?.(id, name, false);
+		} else if (st === "online" && wasOffline.delete(id)) window.PiVoice?.onMachine?.(id, name, true);
 		const b = $("banner");
-		if (on) b.hidden = true;
-		else if (S.device) {
-			b.innerHTML = `<span class="spinner" aria-hidden="true"></span>Reconnecting…`;
+		if (S.online || !S.device) b.hidden = true;
+		else {
+			const name = fleet.get(fleet.machineOf(S.current) || id)?.name;
+			b.innerHTML = `<span class="spinner" aria-hidden="true"></span>${several() && name ? `Reconnecting to ${esc(name)}…` : "Reconnecting…"}`;
 			b.className = "banner";
 			b.hidden = false;
 		}
 		updateComposer();
+		if (!$("sheet").hidden) window.dispatchEvent(new Event("pi-machines"));
 	}
 
-	async function resync() {
+	function machineRevoked(id, reason) {
+		const m = fleet.get(id);
+		if (!m) return;
+		const gone = fleet.remove(id);
+		for (const a of gone) {
+			S.agents.delete(a);
+			S.prompts.delete(a);
+		}
+		if (!fleet.machines.length) return unpaired(reason);
+		toast(`${m.name || "A computer"} removed this phone`, "warning");
+		if (!S.agents.has(S.current)) {
+			S.current = pickAgent();
+			loadCurrent();
+		} else setHeader();
+	}
+
+	/** A machine said hello (first connect, or after a gap it couldn't replay): take its sessions fresh. */
+	async function resync(id) {
 		try {
-			const hub = await rpc("hub");
-			S.agents = new Map(hub.agents.map((a) => [a.agent, a]));
-			S.device.role = hub.device.role;
-			S.push = { key: hub.pushKey, on: !!hub.pushOn };
-			store.set(DEVICE_KEY, S.device);
+			const hub = await fleet.rpc(id, "hub");
+			fleet.identify(id, hub.machine);
+			if (hub.protocol !== undefined && hub.protocol !== PROTOCOL) {
+				toast(`${hub.host} runs a different pi-mobile version; update it to use it here`, "warning");
+				return;
+			}
+			const mine = new Set(hub.agents.map((a) => a.agent));
+			for (const a of fleet.agentsOf(id)) {
+				if (mine.has(a)) continue;
+				S.agents.delete(a);
+				S.prompts.delete(a);
+			}
+			fleet.adopt(id, [...mine]);
+			for (const a of hub.agents) S.agents.set(a.agent, a);
+			// The subscription's own key wins; without one, the computer serving the app decides.
+			if (!S.push.fromSub && (fleet.get(id)?.primary || !S.push.key)) S.push.key = hub.pushKey;
+			S.push.on = S.push.on || !!hub.pushOn;
+			// Every machine notifies on its own: give one that doesn't know this phone's subscription.
+			S.pushKeys.set(id, hub.pushKey);
+			if (S.push.on && (!hub.pushOn || hub.pushKey !== S.push.key)) shareSubscription(id);
 			if (!S.agents.has(S.current)) S.current = pickAgent();
 			maybeOnboard();
-			await loadCurrent();
+			if (!S.current || fleet.machineOf(S.current) === id || !S.view) await loadCurrent();
+			else {
+				setHeader();
+				updateTitle();
+				renderAttention();
+			}
 		} catch (e) {
-			if (e instanceof Unauthorized) return unpaired(e.message);
+			if (e instanceof Unauthorized) return;
 			toast(`Sync failed: ${e.message}`, "error");
 		}
 	}
@@ -288,7 +291,7 @@
 		S.view = view;
 		try {
 			// Detailed events (token stream, tool output) flow only for the session on screen.
-			if (S.clientId) await rpc("focus", { client: S.clientId, agent });
+			await fleet.focus(agent);
 			const snap = await call("snapshot", { limit: 120 }, agent);
 			if (S.view !== view) return;
 			view.n = snap.n || 0;
@@ -315,7 +318,7 @@
 			scrollToBottom(true);
 			if (!snap.items.length && !snap.streaming) showEmpty(`<h2>Nothing here yet</h2><p>Tell pi what to do in ${esc(snap.info?.name || "this session")}.</p>`);
 		} catch (e) {
-			if (e instanceof Unauthorized) return unpaired(e.message);
+			if (e instanceof Unauthorized) return; // machineRevoked() handles it
 			if (S.view === view) showEmpty(`<p>Could not load the session: ${esc(e.message)}</p>`);
 		}
 	}
@@ -1019,6 +1022,33 @@
 	}
 
 	// ── header, prompts, composer ──────────────────────────────────────────────────
+	/** A session's name, with its computer when there are several ("api on hetzner-box"). */
+	function sessionLabel(agent) {
+		const name = agentName(agent);
+		return several() && machineName(agent) ? `${name} on ${machineName(agent)}` : name;
+	}
+
+	/**
+	 * Speech (realtime calls, speech, recognition, voices) runs where the credentials are: the
+	 * session's own computer first, then any other online computer that can, through one of its sessions.
+	 */
+	async function speechCall(m, p, agent = S.current) {
+		const home = fleet.machineOf(agent);
+		const others = fleet.machines.filter((x) => x.id !== home && x.state === "online").map((x) => fleet.agentsOf(x.id)[0]).filter(Boolean);
+		const tries = [agent, ...others].filter(Boolean);
+		let last;
+		for (const a of tries) {
+			try {
+				return await fleet.call(a, m, p || {});
+			} catch (e) {
+				last = e;
+				// Only "this computer can't do speech" moves on; anything else is a real answer.
+				if (!/unavailable|not set up|no speech|no recogni|api key|sign.?in/i.test(String(e?.message))) throw e;
+			}
+		}
+		throw last || new Error("no computer can do speech");
+	}
+
 	function agentName(agent) {
 		return S.agents.get(agent)?.name || "pi";
 	}
@@ -1054,7 +1084,7 @@
 		if (!info) {
 			$("sessionName").textContent = S.device ? (S.agents.size ? "Choose a session" : "pi mobile") : "pi mobile";
 			const sub = $("sessionSub");
-			sub.textContent = S.device?.host || "";
+			sub.textContent = several() ? `${fleet.machines.length} computers` : S.device?.host || "";
 			sub.className = "session-sub";
 			dot.className = "dot gone";
 			$("modelBtn").hidden = true;
@@ -1065,10 +1095,12 @@
 		$("sessionName").textContent = info.name;
 		const line = statusLine(info);
 		const sub = $("sessionSub");
-		sub.textContent = line.text;
+		// With several computers, say which one this session runs on.
+		const where = several() ? machineName(S.current) : "";
+		sub.textContent = where ? `${where} · ${line.text}` : line.text;
 		sub.className = `session-sub ${line.cls}`;
 		dot.className = `dot ${line.cls === "waiting" ? "waiting" : info.status}`;
-		$("sessionBtn").setAttribute("aria-label", `${info.name}: ${line.text}. Switch session${others ? `, ${others} other${others > 1 ? "s" : ""} need you` : ""}`);
+		$("sessionBtn").setAttribute("aria-label", `${info.name}${where ? ` on ${where}` : ""}: ${line.text}. Switch session${others ? `, ${others} other${others > 1 ? "s" : ""} need you` : ""}`);
 		const mb = $("modelBtn");
 		if (info.model) {
 			mb.innerHTML = `<span class="label">${esc(shortModel(info.model.name || info.model.id))}</span>`;
@@ -1327,6 +1359,7 @@
 			const g = el("div", "grow");
 			const t = el("h2", "", head.title);
 			t.id = "sheetTitle";
+			t.tabIndex = -1;
 			g.appendChild(t);
 			if (head.subtitle) g.appendChild(el("div", "subtitle", head.subtitle));
 			const x = el("button", "sheet-close");
@@ -1343,7 +1376,10 @@
 		if ($("sheet").hidden) sheetOpener = document.activeElement;
 		$("sheet").hidden = false;
 		panel.scrollTop = 0;
-		(panel.querySelector(".row, .btn, input, button:not(.sheet-close)") || panel.querySelector("button"))?.focus({ preventScroll: true });
+		// A sheet that opened by itself (an offer from another computer) starts at its title, so nothing
+		// looks pre-selected; one you opened starts at its first control.
+		const first = head?.unprompted ? $("sheetTitle") : panel.querySelector(".row, .btn, input, button:not(.sheet-close)") || panel.querySelector("button");
+		first?.focus({ preventScroll: true });
 	}
 	function closeSheet() {
 		if ($("sheet").hidden) return;
@@ -1401,14 +1437,15 @@
 						trail.style.display = "contents";
 						if (asks.length) trail.appendChild(el("span", "badge", String(asks.length)));
 						trail.appendChild(a.agent === S.current ? icon("check", "check") : icon("chev-right", "trail"));
+						const where = several() ? machineName(a.agent) : "";
 						row(g, {
 							lead: el("span", `lead dot ${a.status}`),
 							title: a.name,
-							sub: a.task || shortPath(a.cwd),
+							sub: [where, a.task || shortPath(a.cwd)].filter(Boolean).join(" · "),
 							extra,
 							trail,
 							cls: a.agent === S.current ? "current" : "",
-							label: `${a.name}, ${name.toLowerCase()}${a.task ? `: ${a.task}` : ""}`,
+							label: `${a.name}${where ? ` on ${where}` : ""}, ${name.toLowerCase()}${a.task ? `: ${a.task}` : ""}`,
 							onclick: () => {
 								closeSheet();
 								openAgent(a.agent);
@@ -1416,24 +1453,50 @@
 						});
 					}
 				}
-				const starter = all.find((a) => a.herdr);
-				if (starter) {
+				// A computer that can't be reached says so, instead of its sessions silently vanishing.
+				const away = fleet.machines.filter((m) => m.state !== "online" && m.state !== "connecting");
+				if (away.length) {
+					section(body, "Offline", away.length);
+					const g = group(body);
+					for (const m of away) row(g, { lead: el("span", "lead dot gone"), title: m.name || "Computer", sub: awayLine(m), cls: "plain", onclick: () => machineSheet(m.id) });
+				}
+				if (all.some((a) => a.herdr)) {
 					const add = el("button", "btn");
 					add.append(icon("plus"), "New session");
-					add.onclick = () => newSessionSheet(starter.agent);
+					add.onclick = () => newSessionSheet();
 					body.appendChild(add);
 				}
 			},
-			{ title: "Sessions", subtitle: `On ${S.device?.host || "your computer"}` },
+			{ title: "Sessions", subtitle: several() ? `On ${fleet.machines.length} computers` : `On ${S.device?.host || "your computer"}` },
 		);
 	}
 
-	/** Starts pi in a herdr tab on this computer: pick a folder, optionally give it a first prompt. */
-	function newSessionSheet(starter) {
-		const folders = [...new Set([...S.agents.values()].map((a) => a.cwd))].sort();
+	/** Starts pi in a herdr tab on a computer: pick it (if several run herdr), a folder, and maybe a first prompt. */
+	function newSessionSheet(machineId) {
+		// One session per computer that runs herdr carries the request there.
+		const starters = new Map();
+		for (const a of S.agents.values()) if (a.herdr && !starters.has(fleet.machineOf(a.agent))) starters.set(fleet.machineOf(a.agent), a.agent);
+		const target = machineId && starters.has(machineId) ? machineId : starters.has(fleet.machineOf(S.current)) ? fleet.machineOf(S.current) : [...starters.keys()][0];
+		const starter = starters.get(target);
+		const folders = [...new Set([...S.agents.values()].filter((a) => fleet.machineOf(a.agent) === target).map((a) => a.cwd))].sort();
+		const where = fleet.get(target)?.name || "your computer";
 		openSheet((body) => {
+			if (starters.size > 1) {
+				section(body, "Computer");
+				const seg = el("div", "seg wide");
+				seg.setAttribute("role", "group");
+				seg.setAttribute("aria-label", "Computer");
+				if (starters.size > 2) seg.style.gridTemplateColumns = `repeat(${starters.size}, 1fr)`;
+				for (const id of starters.keys()) {
+					const b = el("button", "", fleet.get(id)?.name || "Computer");
+					b.setAttribute("aria-pressed", String(id === target));
+					b.onclick = () => id !== target && newSessionSheet(id);
+					seg.appendChild(b);
+				}
+				body.appendChild(seg);
+			}
 			const folder = el("input");
-			folder.value = S.agents.get(S.current)?.cwd || folders[0] || "";
+			folder.value = (fleet.machineOf(S.current) === target && S.agents.get(S.current)?.cwd) || folders[0] || "";
 			folder.placeholder = "/path/to/project";
 			folder.setAttribute("list", "folders");
 			const list = el("datalist");
@@ -1466,7 +1529,7 @@
 			const f2 = el("label", "field");
 			f2.append(el("span", "", "First prompt"), prompt);
 			body.append(f1, f2, go);
-		}, { title: "New session", subtitle: "Starts pi in a new herdr tab on your computer" });
+		}, { title: "New session", subtitle: `Starts pi in a new herdr tab on ${where}` });
 	}
 
 	async function modelSheet() {
@@ -1566,7 +1629,20 @@
 				const p = window.PiVoice.persona();
 				add(p ? p.name : "Choose a voice", window.PiVoice.sheet, "", "voice", p ? `${p.blurb} · how pi sounds in voice mode` : "How pi sounds in voice mode");
 			}
-			section(body, "Devices");
+			section(body, "Computers");
+			g = group(body);
+			for (const m of fleet.machines) {
+				const on = m.state === "online";
+				row(g, {
+					lead: el("span", `lead dot ${on ? "idle" : "gone"}`),
+					title: m.name || "Computer",
+					sub: on ? `${fleet.agentsOf(m.id).length} session${fleet.agentsOf(m.id).length === 1 ? "" : "s"}` : awayLine(m),
+					trail: icon("chev-right", "trail"),
+					onclick: () => machineSheet(m.id),
+				});
+			}
+			add("Add a computer", addComputerSheet, "", "plus", "Or run /remote add <host> in pi");
+			section(body, several() ? `Devices on ${S.device?.host || "this computer"}` : "Devices");
 			g = group(body);
 			add("Pair another device", pairSheet, "", "qr");
 			add("Manage devices", devicesSheet, "", "phone");
@@ -1577,7 +1653,6 @@
 					try {
 						await rpc("revoke", { ids: [S.device.d] });
 					} catch {}
-					streamAbort?.abort();
 					unpaired("You unpaired this device");
 				},
 				"danger",
@@ -1586,7 +1661,7 @@
 			const note = el("p", "note");
 			note.append(icon("lock"), "End-to-end encrypted");
 			body.appendChild(note);
-		}, { title: "pi mobile", subtitle: `Connected to ${S.device?.host || "your computer"}` });
+		}, { title: "pi mobile", subtitle: several() ? `Connected to ${fleet.machines.length} computers` : `Connected to ${S.device?.host || "your computer"}` });
 	}
 
 	/**
@@ -1684,8 +1759,13 @@
 	function urgency(a) {
 		return S.prompts.get(a.agent)?.size || a.status === "waiting" ? 0 : a.status === "working" ? 1 : 2;
 	}
+	function reachable(agent) {
+		const id = fleet.machineOf(agent);
+		return !id || fleet.state(id) === "online" || fleet.state(id) === "connecting";
+	}
 	function sortedAgents() {
-		return [...S.agents.values()].sort((a, b) => urgency(a) - urgency(b));
+		// A computer that can't be reached is one "Offline" row, not a list of sessions that won't answer.
+		return [...S.agents.values()].filter((a) => reachable(a.agent)).sort((a, b) => urgency(a) - urgency(b));
 	}
 
 	/** A pill for other sessions that are waiting on you; tap to go there. */
@@ -1702,7 +1782,8 @@
 		const what = ask ? `asks: ${ask.title}` : "needs you";
 		const text = el("span", "grow");
 		const b = el("b", "", first.name);
-		text.append(others.length > 1 ? `${others.length} sessions need you · ` : "", b, ` ${what}`);
+		const where = several() ? `${machineName(first.agent)} · ` : "";
+		text.append(others.length > 1 ? `${others.length} sessions need you · ` : where, b, ` ${what}`);
 		pill.replaceChildren(icon("alert"), text, icon("chev-right", "chev"));
 		pill.setAttribute("aria-label", others.length === 1 ? `${first.name} ${what}. Open` : `${others.length} sessions need you. Show them`);
 		pill.onclick = () => (others.length === 1 ? openAgent(first.agent) : sessionsSheet());
@@ -1743,17 +1824,250 @@
 			if (on) {
 				if ((await Notification.requestPermission()) !== "granted") throw new Error("notifications are blocked for this site");
 				sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64u(S.push.key) });
-				await rpc("push", { subscription: sub.toJSON() });
+				S.push.on = true;
+				S.push.key = b64u(new Uint8Array(sub.options.applicationServerKey));
+				S.push.fromSub = true;
+				await Promise.all(fleet.machines.map((m) => shareSubscription(m.id, sub)));
 				toast("Notifications on");
 			} else {
-				await rpc("push", { subscription: null });
+				await Promise.all(fleet.machines.map((m) => fleet.rpc(m.id, "push", { subscription: null }).catch(() => {})));
 				await sub?.unsubscribe();
+				S.push.on = false;
 				toast("Notifications off");
 			}
-			S.push.on = on;
 		} catch (e) {
 			toast(`Notifications: ${e.message}`, "error");
 		}
+	}
+
+	/**
+	 * Every machine sends its own notifications to this phone's one subscription, signing with the
+	 * same key. A machine with a different key gets it from one that has the right one.
+	 */
+	async function shareSubscription(id, sub) {
+		try {
+			sub ||= await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+			if (!sub) return;
+			const hub = await fleet.rpc(id, "push", { subscription: sub.toJSON() });
+			if (hub?.pushKey && S.push.key && hub.pushKey !== S.push.key) {
+				const source = fleet.machines.find((m) => m.id !== id && m.state === "online" && S.pushKeys.get(m.id) === S.push.key);
+				if (!source) return;
+				const vapid = await fleet.rpc(source.id, "vapid", {});
+				await fleet.rpc(id, "push", { subscription: sub.toJSON(), vapid });
+			}
+			S.pushKeys.set(id, S.push.key);
+		} catch {}
+	}
+
+	/** Moves every machine to a new signing key, so a removed one can no longer notify this phone. */
+	async function rotatePushKey() {
+		if (!pushSupported() || !S.push.on) return;
+		try {
+			const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign"]);
+			const jwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+			const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+			const vapid = { publicKey: b64u(raw), privateKey: jwk.d };
+			const reg = await navigator.serviceWorker.ready;
+			await (await reg.pushManager.getSubscription())?.unsubscribe();
+			const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+			S.push.key = vapid.publicKey;
+			S.push.fromSub = true;
+			await Promise.all(
+				fleet.machines.map((m) =>
+					fleet
+						.rpc(m.id, "push", { subscription: sub.toJSON(), vapid })
+						.then(() => S.pushKeys.set(m.id, vapid.publicKey))
+						.catch(() => {}),
+				),
+			);
+		} catch {}
+	}
+
+	// ── computers ──────────────────────────────────────────────────────────────────
+	function awayLine(m) {
+		if (m.state === "revoked") return "Removed this phone";
+		if (!m.lastSeen) return "Not reached yet";
+		const t = new Date(m.lastSeen);
+		const today = t.toDateString() === new Date().toDateString();
+		return `Offline since ${today ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : t.toLocaleDateString([], { month: "short", day: "numeric" })}`;
+	}
+
+	function forgetMachine(id) {
+		for (const a of fleet.remove(id)) {
+			S.agents.delete(a);
+			S.prompts.delete(a);
+		}
+		if (!fleet.machines.length) return unpaired("You removed every computer");
+		if (!S.agents.has(S.current)) {
+			S.current = pickAgent();
+			loadCurrent();
+		} else setHeader();
+		renderAttention();
+		void rotatePushKey();
+	}
+
+	/** One computer: where it is, how it's doing, and Remove. */
+	function machineSheet(id) {
+		const m = fleet.machines.find((x) => x.id === id);
+		if (!m) return;
+		const sessions = fleet.agentsOf(id).map((a) => S.agents.get(a)).filter(Boolean);
+		openSheet(
+			(body) => {
+				if (sessions.length) {
+					section(body, "Sessions", sessions.length);
+					const g = group(body);
+					for (const a of sessions)
+						row(g, {
+							lead: el("span", `lead dot ${a.status}`),
+							title: a.name,
+							sub: statusLine(a).text,
+							trail: icon("chev-right", "trail"),
+							onclick: () => {
+								closeSheet();
+								openAgent(a.agent);
+							},
+						});
+				}
+				body.appendChild(el("div", "linkbox", m.primary ? location.origin : m.origin));
+				if (m.primary) body.appendChild(el("p", "note", "This computer serves the app on this phone. To stop using it, unpair this device from the menu."));
+				else {
+					const b = el("button", "btn");
+					b.append(icon("logout"), "Remove from this phone");
+					b.style.color = "var(--err)";
+					b.onclick = async () => {
+						if (!confirm(`Remove ${m.name}? Its sessions leave your list and it can't reach this phone any more.`)) return;
+						closeSheet();
+						await fleet.rpc(id, "revoke", { ids: [m.d] }).catch(() => {});
+						forgetMachine(id);
+						toast(`${m.name} removed`);
+					};
+					body.appendChild(b);
+				}
+			},
+			{ title: m.name || "Computer", subtitle: m.state === "online" ? "Online" : awayLine(m) },
+		);
+	}
+
+	/** A computer offered by another of yours (`/remote add`): the phone decides. */
+	function offerMachine(fromId, offer) {
+		if (!offer?.id || S.offers.some((o) => o.offer.id === offer.id)) return;
+		S.offers.push({ fromId, offer });
+		if (S.offers.length === 1) showOffer();
+	}
+	function showOffer() {
+		const next = S.offers[0];
+		if (!next) return;
+		const { fromId, offer } = next;
+		const done = () => {
+			fleet.rpc(fromId, "offerDone", { id: offer.id }).catch(() => {});
+			S.offers.shift();
+			closeSheet();
+			if (S.offers.length) setTimeout(showOffer, 300);
+		};
+		let host = offer.origin;
+		try {
+			host = new URL(offer.origin).host;
+		} catch {}
+		openSheet(
+			(body) => {
+				body.appendChild(el("p", "note", `Its pi sessions join your list, next to the others. ${offer.from ? `You asked for this on ${offer.from}.` : ""}`.trim()));
+				body.appendChild(el("div", "linkbox", host));
+				const yes = el("button", "btn primary", "Add");
+				yes.onclick = () => {
+					fleet.add({ machine: offer.machine.id, name: offer.machine.name, origin: offer.origin, d: offer.d, k: offer.k });
+					toast(`${offer.machine.name} added`);
+					done();
+				};
+				const no = el("button", "btn", "Not now");
+				no.onclick = async () => {
+					// Leave nothing behind there: this phone's key on that computer is revoked.
+					await fleet.rpcTo({ origin: offer.origin, d: offer.d, k: offer.k }, "revoke", { ids: [offer.d] }).catch(() => {});
+					done();
+				};
+				body.append(yes, no);
+			},
+			{ title: `Add ${offer.machine.name}?`, subtitle: offer.from ? `From ${offer.from}` : undefined, unprompted: true },
+		);
+	}
+
+	/** Another of your computers says this one was removed (`/remote remove`). */
+	async function machineRemovedElsewhere(fromId, offer) {
+		const m = fleet.byMachine(offer?.machine?.id);
+		if (m && !m.primary) {
+			await fleet.rpc(m.id, "revoke", { ids: [m.d] }).catch(() => {});
+			forgetMachine(m.id);
+			toast(`${m.name} removed`);
+		}
+		fleet.rpc(fromId, "offerDone", { id: offer.id }).catch(() => {});
+	}
+
+	/** Adds a computer by its pairing link (from `/remote pair` there), when no computer of yours can add it. */
+	function addComputerSheet() {
+		openSheet(
+			(body) => {
+				body.appendChild(el("p", "note", "Easiest: in pi on a computer this phone already uses, run /remote add <host>. Otherwise run /remote pair on the new computer and paste its link here."));
+				const input = el("input");
+				input.type = "url";
+				input.placeholder = "https://….ts.net/#p=…";
+				input.autocomplete = "off";
+				const f = el("label", "field");
+				f.append(el("span", "", "Pairing link"), input);
+				const go = el("button", "btn primary", "Add computer");
+				go.onclick = async () => {
+					go.disabled = true;
+					try {
+						const name = await pairLink(input.value.trim());
+						closeSheet();
+						toast(`${name} added`);
+					} catch (e) {
+						toast(e.message, "error");
+					} finally {
+						go.disabled = false;
+					}
+				};
+				body.append(f, go);
+				if (navigator.clipboard?.readText) {
+					const paste = el("button", "btn");
+					paste.append(icon("copy"), "Paste");
+					paste.onclick = async () => {
+						try {
+							input.value = (await navigator.clipboard.readText()).trim();
+						} catch {}
+					};
+					body.appendChild(paste);
+				}
+			},
+			{ title: "Add a computer" },
+		);
+	}
+
+	async function pairLink(text) {
+		let url;
+		try {
+			url = new URL(text);
+		} catch {
+			throw new Error("That isn't a pairing link");
+		}
+		const m = /[#&]p=([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)/.exec(url.hash);
+		if (!m) throw new Error("That link has no pairing code; run /remote pair on the computer");
+		if (url.origin === location.origin) throw new Error("That's the computer this app runs on");
+		if (url.protocol !== "https:") throw new Error("Only HTTPS addresses work here (for example its Tailscale address)");
+		const key = unb64u(m[2]);
+		let res;
+		try {
+			res = await fetch(`${url.origin}/api/pair`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ p: m[1], b: seal(key, { t: Date.now(), name: deviceName() }) }),
+			});
+		} catch {
+			throw new Error(`Couldn't reach ${url.host}. Is it on your tailnet, with pi running?`);
+		}
+		const body = await res.json();
+		if (!res.ok || !body.b) throw new Error(body.error || `HTTP ${res.status}`);
+		const out = open(key, body.b);
+		fleet.add({ machine: out.machine?.id, name: out.host, origin: url.origin, d: out.d, k: out.k });
+		return out.host;
 	}
 
 	function openAgent(agent) {
@@ -1868,17 +2182,29 @@
 			store.set(AGENT_KEY, fromPush);
 			history.replaceState(null, "", location.pathname + location.hash);
 		}
+		// The service worker keeps a copy of the app (it opens while this computer sleeps) and shows notifications.
+		if (window.isSecureContext && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 		if (pushSupported()) {
-			navigator.serviceWorker.register("sw.js").catch(() => {});
+			// The key this phone's subscription was made with is the one every machine must sign with.
+			navigator.serviceWorker.ready
+				.then((reg) => reg.pushManager.getSubscription())
+				.then((sub) => {
+					const k = sub?.options?.applicationServerKey;
+					if (!k) return;
+					S.push.key = b64u(new Uint8Array(k));
+					S.push.fromSub = true;
+					S.push.on = true;
+				})
+				.catch(() => {});
 			navigator.serviceWorker.addEventListener("message", (e) => e.data?.type === "open" && openAgent(e.data.agent));
 		}
 		const paired = await pairFromHash();
 		if (paired === "failed") return;
 		if (!S.device) return unpaired();
-		showEmpty(`<span class="spinner" aria-hidden="true"></span><p>Connecting to ${esc(S.device.host || "your computer")}…</p>`);
+		showEmpty(`<span class="spinner" aria-hidden="true"></span><p>Connecting to ${esc(several() ? "your computers" : S.device.host || "your computer")}…</p>`);
 		S.current = store.get(AGENT_KEY);
 		setHeader();
-		streamLoop();
+		fleet.start();
 	}
 
 	// What voice.js needs from the app.
@@ -1891,6 +2217,11 @@
 		call,
 		toast,
 		agentName,
+		sessionLabel,
+		speechCall,
+		machineLabel: (agent) => (several() ? machineName(agent) : ""),
+		machineOf: (agent) => fleet.machineOf(agent),
+		reachable,
 		openAgent,
 		autosize,
 		openSheet,

@@ -61,7 +61,7 @@ Each machine after the first needs Tailscale with HTTPS (`tailscale serve`), and
 
 - **`src/cli.ts` + `src/enrol.ts`** (new; `bin: { "pi-mobile": "src/cli.ts" }`, run with `--experimental-strip-types` like the tests):
   - `pi-mobile enrol` reads JSON on stdin: `{ phones: [{ name, sub? }], vapid, from }`;
-  - it creates `machine.json` and one device per phone (fresh keys), adopts VAPID and subscriptions, and finds the HTTPS origin from `tailscale status --json`, running `tailscale serve --bg <port>` if needed;
+  - it creates `machine.json` and one device per phone (fresh keys), adopts VAPID and subscriptions, and finds the HTTPS origin the way the hub does (`src/expose.ts` `ensureServe`): an existing serve for the port, else `tailscale serve --bg --https=443` (or 8443 when 443 is in use);
   - it prints `{ machine, origin, devices: [{ phone, d, k }] }`;
   - it works before any pi runs; it never prints keys except in that JSON, and never takes them in argv.
 - **`src/sponsor.ts` + `src/index.ts`:**
@@ -125,6 +125,22 @@ Then update:
 - the comparison table;
 - `docs/ui.md` with the new components;
 - `plans/native-apps.md` if anything changed.
+
+## Status (2026-10-10, branch `multi-machine`)
+
+- **Done:** steps 1–5 and 7, plus step 6's computer picker. The command is `bin/pi-mobile.mjs`: plain JavaScript, because Node won't strip TypeScript types inside `node_modules`, so `npx` runs it on a fresh box.
+- **Covered by tests:**
+  - `test/machines.test.ts`: enrol/add/remove, offers, CORS, CSP and the push key;
+  - `test/fleet.test.ts`: real hubs; one list, routing, offline and back, revoked, duplicates;
+  - `matchSession`;
+  - `npm run shots -- --only machines`, in both themes at 390 and 320 px.
+- **Not built:** Scan in Add a computer (paste only for now; iOS has no `BarcodeDetector`).
+- **Not verified:**
+  - `/remote add` over real ssh, and `tailscale serve` on a real box;
+  - the iOS offline launch;
+  - Chrome Local Network Access.
+
+`npx pi-mobile@<version> enrol` only works once a version with `bin/` is published. Until then, set `PI_MOBILE_ENROL` to a command that runs this checkout's `bin/pi-mobile.mjs enrol` on the box.
 
 ## Open
 

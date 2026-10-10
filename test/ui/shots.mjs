@@ -7,7 +7,8 @@
 //   npm run shots -- --reduced           reduced motion
 //
 // Flows: app (pairing, sessions, transcript, tools, questions, sheets, focus ring), voice (dictation and
-// every voice-mode state, settings, push to talk), picker (the voice picker from the menu and voice mode).
+// every voice-mode state, settings, push to talk), picker (the voice picker from the menu and voice mode),
+// machines (a second computer offered, added, listed, offline and back).
 // Needs Chrome or Chromium: CHROME=/path/to/chrome when it isn't in the usual place. Exits 1 on any axe
 // violation, page error or failed step; report.json in the output folder lists them.
 
@@ -24,7 +25,7 @@ const { values: opt } = parseArgs({
 		out: { type: "string", default: "shots" },
 		width: { type: "string", default: "390,320" },
 		theme: { type: "string", default: "light,dark" },
-		only: { type: "string", default: "app,voice,picker" },
+		only: { type: "string", default: "app,voice,picker,machines" },
 		port: { type: "string", default: "7979" },
 		forced: { type: "boolean", default: false },
 		reduced: { type: "boolean", default: false },
@@ -77,7 +78,8 @@ async function session(theme, width, flow) {
 	]);
 	const tag = `${theme}-${width}${opt.forced ? "-forced" : ""}${opt.reduced ? "-reduced" : ""}`;
 	page.on("pageerror", (e) => report.errors.push(`${tag} ${flow}: ${e.message}`));
-	page.on("console", (m) => m.type() === "error" && report.errors.push(`${tag} ${flow} console: ${m.text()}`));
+	// The machines flow switches a computer off on purpose; its refused connections are expected.
+	page.on("console", (m) => m.type() === "error" && !(flow === "machines" && /ERR_CONNECTION_REFUSED/.test(m.text())) && report.errors.push(`${tag} ${flow} console: ${m.text()}`));
 
 	const say = async (cmd) => {
 		fx.stdin.write(`${cmd}\n`);
@@ -254,6 +256,44 @@ async function session(theme, width, flow) {
 				await page.mouse.up();
 				await sleep(400);
 				report.checks[`${tag} push to talk`] = { held, released: await state() };
+			});
+		}
+
+		if (flow === "machines") {
+			await ready();
+			await step("offer", async () => {
+				await say("box");
+				await page.waitForFunction(() => document.querySelector("#sheetTitle")?.textContent.startsWith("Add "), { timeout: 10000 });
+				await shot("m1-offer");
+				await tap(".sheet-panel .btn.primary", "Add");
+				await page.waitForFunction(() => [...document.querySelectorAll(".toast")].some((t) => t.textContent.includes("added")), { timeout: 10000 });
+				await sleep(1500);
+			});
+			await step("one list", async () => {
+				await tap("#sessionBtn");
+				await shot("m2-sessions");
+				report.checks[`${tag} sessions from two computers`] = await page.evaluate(() => [...document.querySelectorAll(".sheet-panel .row .sub")].map((x) => x.textContent));
+				await tap(".sheet-panel .row", "deploy");
+				await sleep(600);
+				await shot("m3-box-session");
+				report.checks[`${tag} header names the computer`] = await page.evaluate(() => document.querySelector("#sessionSub").textContent);
+			});
+			await step("computers", async () => {
+				await tap("#menuBtn");
+				await page.evaluate(() => [...document.querySelectorAll(".sheet-panel .section")].find((x) => x.textContent.startsWith("Computers"))?.scrollIntoView());
+				await shot("m4-menu-computers");
+				await closeSheet();
+			});
+			await step("offline", async () => {
+				await say("box off");
+				await sleep(2500);
+				await shot("m5-box-offline");
+				await tap("#sessionBtn");
+				await shot("m6-sessions-offline");
+				await closeSheet();
+				await say("box on");
+				await page.waitForFunction(() => !document.querySelector("#banner") || document.querySelector("#banner").hidden, { timeout: 12000 });
+				await shot("m7-box-back");
 			});
 		}
 

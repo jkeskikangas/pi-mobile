@@ -155,7 +155,7 @@
 		dict.busy = true;
 		showDictMessage("Understanding what you meant…", "busy");
 		try {
-			const r = await app().call("transcribe", { audio: await blobToBase64(blob), mime: blob.type, draft: before });
+			const r = await app().speechCall("transcribe", { audio: await blobToBase64(blob), mime: blob.type, draft: before });
 			if (!r.raw?.trim()) return showDictMessage("Didn't catch anything. Try again a little closer to the mic.");
 			input.value = r.editor || r.text;
 			app().autosize();
@@ -928,7 +928,7 @@
 			if (ev.type === "prompt") {
 				earcon("attention");
 				if (ev.agent === this.agent) return this.ask(ev.prompt);
-				const name = app().agentName(ev.agent);
+				const name = app().sessionLabel(ev.agent);
 				return this.tell(`${name} needs you: ${ev.prompt.title}. Say "switch to ${name}" to answer it.`, `[PI] Another session, "${name}", asks: ${ev.prompt.title}. Tell the developer briefly; they can say "switch to ${name}".`);
 			}
 			if (ev.type === "prompt_end" && ev.agent === this.agent) {
@@ -1175,18 +1175,15 @@
 				case "pi_details":
 					return a.call("details", { topic: String(args.topic || ""), mode: this.attention }, this.agent);
 				case "switch_session": {
-					const list = [...a.S.agents.values()];
+					const list = [...a.S.agents.values()].filter((x) => a.reachable(x.agent)).map((x) => ({ agent: x.agent, name: x.name, cwd: x.cwd, task: x.task, status: x.status, machine: a.machineLabel(x.agent) }));
+					const brief = (x) => ({ name: x.name, ...(x.machine ? { machine: x.machine } : {}), status: x.status, task: x.task, waiting: a.S.prompts.get(x.agent)?.size || 0 });
 					const q = V.norm(args.name);
-					if (!q || q === "list" || q === "sessions")
-						return { sessions: list.map((x) => ({ name: x.name, status: x.status, task: x.task, waiting: a.S.prompts.get(x.agent)?.size || 0 })) };
-					const score = (x) => {
-						const hay = V.norm(`${x.name} ${x.cwd?.split("/").pop() || ""} ${x.task || ""}`);
-						return q.split(" ").filter((w) => w.length > 1 && hay.includes(w)).length;
-					};
-					const best = list.map((x) => [x, score(x)]).sort((p, q2) => q2[1] - p[1])[0];
-					if (!best || !best[1]) return { error: `no session matches "${args.name}"`, sessions: list.map((x) => x.name) };
-					a.openAgent(best[0].agent);
-					return { switched: best[0].name, status: best[0].status, waiting: a.S.prompts.get(best[0].agent)?.size || 0 };
+					if (!q || q === "list" || q === "sessions") return { sessions: list.map(brief) };
+					const hit = V.matchSession(list, q);
+					if (hit.ambiguous) return { ambiguous: hit.ambiguous.map(brief), say: "Ask which computer they mean." };
+					if (!hit.match) return { error: `no session matches "${args.name}"`, sessions: list.map((x) => (x.machine ? `${x.name} on ${x.machine}` : x.name)) };
+					a.openAgent(hit.match.agent);
+					return { switched: a.sessionLabel(hit.match.agent), status: hit.match.status, waiting: a.S.prompts.get(hit.match.agent)?.size || 0 };
 				}
 				case "remain_silent":
 					return { ok: true };
@@ -1238,7 +1235,7 @@
 			};
 			const offer = await pc.createOffer();
 			await pc.setLocalDescription(offer);
-			const r = await app().call("voiceSession", { sdp: offer.sdp, mode: this.attention, persona: pickedPersona() }, this.agent);
+			const r = await app().speechCall("voiceSession", { sdp: offer.sdp, mode: this.attention, persona: pickedPersona() }, this.agent);
 			await pc.setRemoteDescription({ type: "answer", sdp: r.sdp });
 			await opened;
 			this.engine = "realtime";
@@ -1619,7 +1616,7 @@
 			for (let i = 0; i < out.length; i++) out[i] = all[Math.floor(i * ratio)];
 			let text = "";
 			try {
-				const r = await app().call("transcribe", { audio: await blobToBase64(wav(out, 16000)), mime: "audio/wav", distill: false }, this.agent);
+				const r = await app().speechCall("transcribe", { audio: await blobToBase64(wav(out, 16000)), mime: "audio/wav", distill: false }, this.agent);
 				text = String(r.raw || "").trim();
 			} catch (e) {
 				this.note(`Recognition failed: ${e.message}`);
@@ -1699,6 +1696,7 @@
 				if (/^(?:switch to|go to|open)\s+(.+)$/.test(V.norm(text))) {
 					const name = V.norm(text).replace(/^(?:switch to|go to|open)\s+/, "");
 					const r = await this.tool("switch_session", { name });
+					if (r.ambiguous) return this.speak(`On which computer? ${r.ambiguous.map((x) => x.machine).join(", or ")}.`);
 					return this.speak(r.error ? `I can't find ${name}.` : `Now on ${r.switched}${r.waiting ? ". It has a question for you" : ""}.`);
 				}
 				// A request for pi: distil it into what was meant (names grounded in the repo), then send.
@@ -1744,7 +1742,7 @@
 			const turn = (this.speakTurn = (this.speakTurn || 0) + 1);
 			if (this.serverTts !== false) {
 				try {
-					const r = await app().call("speak", { text, persona: pickedPersona() }, this.agent);
+					const r = await app().speechCall("speak", { text, persona: pickedPersona() }, this.agent);
 					if (turn !== this.speakTurn || this.closed) return;
 					const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(r.audio), (c) => c.charCodeAt(0))], { type: r.mime }));
 					const player = new Audio(url);
@@ -1901,7 +1899,7 @@
 		sampler?.pause();
 		if (info.sample) {
 			try {
-				const r = await app().call("speak", { text: sampleLine(p), persona: p.id });
+				const r = await app().speechCall("speak", { text: sampleLine(p), persona: p.id });
 				if (turn !== sampleTurn) return;
 				const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(r.audio), (c) => c.charCodeAt(0))], { type: r.mime }));
 				sampler = new Audio(url);
@@ -1923,7 +1921,7 @@
 		const a = app();
 		let info = cachedPersonas();
 		try {
-			info = await a.call("voices", {});
+			info = await a.speechCall("voices", {});
 			localStorage.setItem(PERSONAS_KEY, JSON.stringify(info));
 		} catch (e) {
 			if (!info) return a.toast(/unknown request/.test(e.message) ? "Update pi-mobile on the computer to choose a voice." : e.message, "error");
@@ -2023,6 +2021,12 @@
 			mode.said(said);
 			mode.note(note);
 			mode.setState(state);
+		},
+		/** A computer went away or came back; voice mode says so once if it's the one it follows. */
+		onMachine(id, name, back) {
+			if (!mode || mode.closed || app().machineOf(mode.agent) !== id) return;
+			if (!back) earcon("failed");
+			mode.tell(back ? `${name} is back.` : `${name} went offline.`, `[PI] The computer "${name}" ${back ? "is reachable again" : "went offline; its sessions can't be reached until it's back. Other sessions still work"}. Say only: "${name} ${back ? "is back" : "went offline"}."`);
 		},
 		// After the app has applied the event (prompts, statuses), so voice reads the updated state.
 		onEvent(ev) {
