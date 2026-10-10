@@ -63,16 +63,16 @@ All of it exists today; the web app (`web/app.js`, `web/voice.js`) is the refere
 
 `persona` is the phone's pick (`marin`, `cedar`, `coral`, `ash`); omitted, the computer's config or Marin applies. It changes only how pi sounds, never what it says.
 
-**Machines** (`plans/multi-machine.md`, shipping before this app): the phone pairs once, with a home hub, which relays sessions from other machines. The app keeps one connection and one Keychain device. It adds to the protocol above:
-- `AgentInfo.machine { id, name }`;
-- `hub` → `machines: [{ id, name, online, lastSeenAt?, voice: { realtime, speech, stt } }]`;
-- events `machine_up` / `machine_down`;
-- calls to an offline machine's session fail with "<name> is offline".
+**Machines** (`plans/multi-machine.md` v2, shipping before this app): the phone holds the list of machines and talks to each directly; no machine relays for another. The app does what `web/fleet.js` does:
+- it keeps `[{ id, name, origin, d, k }]` in the Keychain, migrating the single paired device;
+- it opens one sealed RPC and event stream per machine;
+- sessions are keyed `machine/agent`;
+- a machine that can't be reached shows as offline.
 
-The web UI shows machines with no native work. Voice follows that plan's step 7:
-- session matching via `PiVoiceCore.matchSession`;
-- the machine named only while more than one is online;
-- speech calls (`voiceSession`, `speak`, `voices`, `transcribe`, `distill`) sent to the speech machine chosen when voice mode opens, session calls to the session's own machine;
+Machines are added by a trusted machine (`/remote add box`). The offer arrives as a `machine_offer` event (or a push) and the app asks "Add box?". Add a computer (scan or paste) is the fallback. With APNs (Step 9), every machine sends its own notifications. Voice follows `plans/multi-machine.md` step 7:
+- `PiVoiceCore.matchSession` for switching;
+- one speech machine per voice mode;
+- the machine named only when there are several;
 - a dropped machine announced once.
 
 **Realtime events** handled by the web voice mode (port these exactly, `web/voice.js` `onRealtime`): `session.updated`, `input_audio_buffer.speech_started|speech_stopped`, `conversation.item.input_audio_transcription.delta|completed`, `response.created|done`, `output_audio_buffer.started|stopped|cleared`, `response.output_audio_transcript.delta|done`, `response.function_call_arguments.done`, `error`. Sent: `conversation.item.create` (message or `function_call_output`), `response.create`, `response.cancel` (only while a response is active), `output_audio_buffer.clear`, `input_audio_buffer.commit|clear`, `session.update` (turn detection off while pi speaks, restored after).
