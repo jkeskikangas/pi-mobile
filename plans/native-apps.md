@@ -1,7 +1,8 @@
 # Native apps (iOS first, Android later) — Implementation plan
 
 **Why:** voice mode is built for eyes-busy use (running, cycling, driving, cooking), and the web app cannot keep the microphone with the iPhone screen locked, and cannot be started hands-free. A native app can. See `docs/voice.md` → Platform limits.
-**Read first:** `docs/voice.md` (voice design and behaviour), `docs/voice-best-practices.md` (each practice and its evidence), `docs/native-research.md` (native platform research with sources, **[verify]** marks), `docs/design-principles.md` and `docs/ui.md` (UI rules), `README.md` (product). The web implementation that the native app must match is `web/voice.js` and `web/voice-core.js`.
+**Read first:** `docs/voice.md` (voice design and behaviour), `docs/voice-best-practices.md` (each practice and its evidence), `docs/native-research.md` (native platform research with sources, **[verify]** marks), `docs/design-principles.md` and `docs/ui.md` (UI rules), `README.md` (product). The web implementation that the native app must match is `web/voice.js` and `web/voice-core.js`; voices are defined in `src/voice/personas.ts`.
+**Last checked against the code:** 2026-10-10 (after 0.1.4: voice personas, voice mode in light and dark, hold the circle to talk, voice settings in a sheet).
 **Audience:** an agent with no other context. Every step names the files, the behaviour, and how to check it.
 
 Each step ends green: the step's own checks pass, `npm test` and `npm run typecheck` still pass, and it is committed on its own (repo convention: plain-English subject, body explaining why). Steps marked **[device]** need a real iPhone; everything else runs on this Mac (Xcode 26.6, XcodeGen installed, iOS simulator runtime present).
@@ -50,14 +51,19 @@ All of it exists today; the web app (`web/app.js`, `web/voice.js`) is the refere
 | `voiceStatus` | `{}` → `{ speech, status, elapsedMs, tools, prompts }` | "what's it doing?" |
 | `brief` | `{ mode: "eyes-busy"\|"glance" }` → `{ speech, more, report, by }` | after each run |
 | `details` | `{ topic, mode }` → `{ speech }` | `pi_details` |
-| `voiceSession` | `{ sdp, mode }` → `{ sdp, model, provider }` | realtime call; error text containing `realtime unavailable` → basic voice |
+| `voiceSession` | `{ sdp, mode, persona? }` → `{ sdp, model, provider }` | realtime call; error text containing `realtime unavailable` → basic voice |
 | `voiceState` | `{ on, mode }` | every 60 s while voice mode is on (expires after 150 s) |
 | `transcribe` | `{ audio: base64, mime, distill?, draft? }` → `{ raw, text, editor, unclear, provider, by }` | dictation, basic voice |
 | `distill` | `{ raw, draft? }` → `{ text, editor, unclear, by }` | basic voice |
-| `speak` | `{ text }` → `{ audio: base64, mime }` or error `tts unavailable` | basic voice output |
+| `speak` | `{ text, persona? }` → `{ audio: base64, mime }` or error `tts unavailable` | basic voice output, voice samples |
+| `voices` | `{}` → `{ personas: [{ id, name, blurb, rate, phone: { prefer, pitch } }], sample }` | voice picker; `sample` = the computer can speak a sample |
 | `learn` | `{ distilled, sent }` | dictation corrections |
 
 **Events:** `GET <origin>/api/stream?d=<d>&b=<seal(k, { t, hub, since, focus })>` is Server-Sent Events. Each `data:` line is `seal(k, HubEvent[])` (a batch); `: ping` comments arrive every 15 s (reconnect if nothing for 40 s). The first event is `{ type: "hello", hubId, seq, resync, client }`: keep `hubId` and the highest `seq` for resumption, call `focus { client, agent }` to receive the detailed events of one session. Every client gets `info`, `gone`, `prompt`, `prompt_end` for all sessions; the focused session also gets `item`, `stream*`, `tool_start|update|end`, `notice`, `reset` (`src/protocol.ts` `AgentEvent`, `src/hub.ts` `GLOBAL_EVENTS`).
+
+`persona` is the phone's pick (`marin`, `cedar`, `coral`, `ash`); omitted, the computer's config or Marin applies. It changes only how pi sounds, never what it says.
+
+**Machines:** `designs/multi-machine.md` (planned, not built) keeps one pairing per phone: the phone pairs with a home hub, which relays sessions from other machines and labels them with `AgentInfo.machine { id, name }`. The app needs no second connection; it shows that name wherever it names a session (session switcher, announcements, Live Activity) when present.
 
 **Realtime events** handled by the web voice mode (port these exactly, `web/voice.js` `onRealtime`): `session.updated`, `input_audio_buffer.speech_started|speech_stopped`, `conversation.item.input_audio_transcription.delta|completed`, `response.created|done`, `output_audio_buffer.started|stopped|cleared`, `response.output_audio_transcript.delta|done`, `response.function_call_arguments.done`, `error`. Sent: `conversation.item.create` (message or `function_call_output`), `response.create`, `response.cancel` (only while a response is active), `output_audio_buffer.clear`, `input_audio_buffer.commit|clear`, `session.update` (turn detection off while pi speaks, restored after).
 
@@ -114,9 +120,10 @@ native/
 
 1. First launch shows `PairingView`: "Scan the code from `/remote` on your computer" with a VisionKit `DataScannerViewController` (QR only) and a "Paste link" fallback. Parse `<origin>/#p=<id>.<key>`, call `pair`, store, then show the shell. The device name sent is "iPhone · pi app".
 2. `Shell/WebShell.swift`: a `WKWebView` loading `<origin>/`. Before any page script runs, a `WKUserScript` (`.atDocumentStart`) sets `localStorage["pi-mobile-device"] = JSON({ d, k, role, host })` (the key and shape `web/app.js` reads, `DEVICE_KEY`) and `window.PiNative = { version: 1 }`. The web app therefore starts already paired with the same device.
-3. Message handler `piNative` (`WKScriptMessageHandlerWithReply`) for the calls in Step 4 and 6. Unpairing in the web UI (`unpaired()` clears localStorage) must also clear the Keychain: the web posts `{ type: "unpaired" }`.
-4. Pull-to-refresh is off; `allowsInlineMediaPlayback = true`; the web view's background matches `--bg` to avoid flashes; safe areas are handled by the page (`viewport-fit=cover`).
-5. `PiIntegrationTests` (simulator, local network): start the fixture hub with `npm run ui` (it prints a pairing link on `127.0.0.1:7979`), pair through `HubClient`, call `hub`, open the event stream, see `info` events, answer a prompt (`ask` on the fixture's stdin raises one). Document the run in `native/ios/README.md`.
+3. Voice preferences are shared with the web UI, which owns their keys: `pi-mobile-voice-persona` (voice), `pi-mobile-voice-attention` (`eyes-busy`|`glance`), `pi-mobile-voice-turns` (`open`|`tap` = push to talk), plus `pi-mobile-voice-uses`/`-intro` (hint fading). The app keeps them in `UserDefaults`, writes them into `localStorage` in the same document-start script, and the web posts `{ type: "prefs", key, value }` when one changes, so a voice picked in the web menu is the voice of the native voice mode.
+4. Message handler `piNative` (`WKScriptMessageHandlerWithReply`) for the calls in Step 4 and 6. Unpairing in the web UI (`unpaired()` clears localStorage) must also clear the Keychain: the web posts `{ type: "unpaired" }`.
+5. Pull-to-refresh is off; `allowsInlineMediaPlayback = true`; the web view's background matches `--bg` to avoid flashes; safe areas are handled by the page (`viewport-fit=cover`).
+6. `PiIntegrationTests` (simulator, local network): start the fixture hub with `npm run ui` (it prints a pairing link on `127.0.0.1:7979`), pair through `HubClient`, call `hub`, open the event stream, see `info` events, answer a prompt (`ask` on the fixture's stdin raises one). Document the run in `native/ios/README.md`.
 
 **Check:** integration tests pass in the simulator; manually, the app pairs by scanning and shows the full web UI.
 
@@ -127,13 +134,14 @@ In `web/voice.js` only (plus one line in `web/app.js` if needed), when `window.P
 1. The header voice button calls `webkit.messageHandlers.piNative.postMessage({ type: "voice.start", agent: S.current })` instead of opening the web voice screen. The secure-context check is skipped (the native app has the microphone).
 2. Dictation: `startDictation`/`finishDictation` ask the native side to record (`{ type: "dictation.start" }`, `{ type: "dictation.stop" }`, `{ type: "dictation.cancel" }`); the reply of `dictation.stop` is `{ audio: base64, mime: "audio/mp4" }`; the rest of the existing flow (transcribe, raw/undo chips, `learn`) is unchanged. The recorder strip's waveform reads levels pushed by the native side (`window.PiNative.level(x)`).
 3. The menu hides "Notify me" (Web Push does not exist in `WKWebView`) until Step 9 replaces it.
-4. When the native voice screen closes, the web reloads the focused session (`loadCurrent()`) so the transcript catches up.
+4. The menu's Voice row (`PiVoice.sheet`, the voice picker) stays in the web; it posts `prefs` on a pick. Its samples play in the web view (`speak`, else `speechSynthesis`).
+5. When the native voice screen closes, the web reloads the focused session (`loadCurrent()`) so the transcript catches up.
 
 **Check:** `npm test`; the web app in a normal browser behaves exactly as before (no `PiNative`); in the app, the voice button opens the native screen and dictation works over plain HTTP.
 
 ## 7. Step 5 — Voice engine (the core of the app)
 
-Port `web/voice.js` `class VoiceMode` to `Voice/VoiceEngine.swift` (an `@MainActor` observable model) **behaviour for behaviour**. Decisions that `voice.js` delegates to `PiVoiceCore` go through `Voice/VoiceCore.swift`, which evaluates the hub's `voice-core.js` in a `JSContext` and exposes typed Swift wrappers (`parseCommand(_:) -> Command?`, `answerFor(prompt:text:) -> Answer`, `requestNames(prompt:said:)`, `isEcho`, `isBackchannel`, `isDestructive`, `isSignificant`, `speakPrompt(_:page:)`, `incomplete(_:)`, `chunks(_:)`, `help`, `earcons`). Do not reimplement those in Swift.
+Port `web/voice.js` `class VoiceMode` to `Voice/VoiceEngine.swift` (an `@MainActor` observable model) **behaviour for behaviour**. Decisions that `voice.js` delegates to `PiVoiceCore` go through `Voice/VoiceCore.swift`, which evaluates the hub's `voice-core.js` in a `JSContext` and exposes typed Swift wrappers (`parseCommand(_:) -> Command?`, `answerFor(prompt:text:) -> Answer`, `requestNames(prompt:said:)`, `isEcho`, `isBackchannel`, `isDestructive`, `isSignificant`, `speakPrompt(_:page:)`, `incomplete(_:)`, `chunks(_:)`, `help`, `earcons`). Do not reimplement those in Swift; the spoken settings commands (`PiVoiceCore.SETTINGS`: push to talk, open mic, eyes free, I can glance) also come from `parseCommand`.
 
 The parts to port, with their web counterparts:
 
@@ -146,7 +154,10 @@ The parts to port, with their web counterparts:
 | `tool` (`ask_pi`, `answer_question`, `stop_pi`, `pi_status`, `pi_details`, `switch_session`, `remain_silent`), `runCall` | `tools.swift` | same outputs; `ask_pi` cuts the response audio (`output_audio_buffer.clear`) |
 | `onEvent`, `settled`, `ask`, `tell`, `follow`, `tick` | `handle(hubEvent:)` | brief after a run, prompts read out, other sessions announced, significant tool failures, working tick every 6 s |
 | `startGrace`, `finishGrace`, `cancelGrace`, `dropGrace`, `namedEarlier`, `rememberHeard`, `cancelsGrace` | same | the undo window (`GRACE_MS = 4000`) and echo marking |
-| `startCascade`, `onFrame`, `endTurn`, `handleUtterance`, `speak`, `speakLocal`, `silence` | `BasicVoice.swift` | basic voice when `voiceSession` fails: mic via `AVAudioEngine` input tap (16 kHz mono PCM, WAV encode), `transcribe`/`distill`/`send`, speech via `speak` (hub TTS) else `AVSpeechSynthesizer` |
+| `pressStart`, `pressEnd(held)`, `toggleTalk`, `tap` | same names | push to talk on the circle: a press starts a turn, letting go after `HOLD_MS = 350` ends it, a shorter press toggles (tap to start, tap to stop); in open mic a tap interrupts or unmutes |
+| `applySetting`, `settingsSheet`, `setPersona` | same names | a spoken setting changes it and pi says only "Okay."; a new voice redials the realtime call with `persona` and injects "This is <name>." |
+| `basic(error)` | same | note "Using basic voice. Details in voice settings." for 8 s; the reason is kept for the settings sheet |
+| `startCascade`, `onFrame`, `endTurn`, `handleUtterance`, `speak`, `speakLocal`, `silence` | `BasicVoice.swift` | basic voice when `voiceSession` fails: mic via `AVAudioEngine` input tap (16 kHz mono PCM, WAV encode), `transcribe`/`distill`/`send`, speech via `speak` with `persona` (hub TTS) else `AVSpeechSynthesizer`: pick a voice whose name matches the persona's `phone.prefer`, apply its `phone.pitch` and `rate` |
 | `EARCONS`, `earcon()` | `Earcons.swift` | render the tone steps from `PiVoiceCore.EARCONS` to PCM buffers once; play with `AVAudioPlayerNode` on an `AVAudioEngine` that shares the session [verify it mixes with WebRTC's VPIO output] |
 
 `AudioSessionController.swift`: owns `RTCAudioSession` configuration (D5), interruptions (pause on `.began`; on `.ended` resume only with `.shouldResume`, else state `paused` with "Tap to resume"), route changes (update the route label; never stop on AirPods disconnect, switch to speaker), and `AVAudioApplication` input mute (D8: observe `inputMuteStateChangeNotification`, call `setInputMuted`, mirror to `track.isEnabled`; the engine's `muted` state follows it). On network change (`NWPathMonitor`): reopen the event stream and do an ICE restart (new offer → `voiceSession` is acceptable if ICE restart is not supported by the endpoint [verify]).
@@ -166,16 +177,17 @@ Use the real `voice-core.js` from `web/` in these tests (bundle it), so a change
 
 ## 8. Step 6 — Voice screen (SwiftUI)
 
-Mirror the web voice screen (`docs/design-principles.md` §4, `web/app.css` `.voice` block); do not invent a new design.
+Mirror the web voice screen (`docs/design-principles.md` §4, `web/app.css` `.voice` block, `web/index.html` `#voice`); do not invent a new design.
 
-- Always dark; state colours from the same table (`listening` blue/cyan, `thinking` violet, `working` amber/orange, `speaking` green/cyan, `asking` gold/pink with a pulsing ring, `paused`/`connecting`/`offline` grey); labels and hints with the same copy as `voice.js` `LABEL`, `hint()`.
+- Follows the system light or dark appearance like the rest of the app; the orb keeps the vivid dark-palette state colours (`--d-*`) in both (`listening` blue/cyan, `thinking` violet, `working` amber/orange, `speaking` green/cyan, `asking` gold with a ring, `paused`/`connecting`/`offline` grey); labels and hints with the same copy as `voice.js` `LABEL`, `hint()`.
 - `OrbView`: `TimelineView(.animation)` + `Canvas`, a blob that swells with the level (yours while listening, pi's while speaking), breathes while working; `accessibilityHidden(true)`; the state label is the accessibility element. Reduced motion (`@Environment(\.accessibilityReduceMotion)`): a still disc.
-- The stage is one big button (interrupt / unmute / talk in tap mode) with an accessibility label naming the action.
-- Captions ("You" and pi, live), the question card with tap answers (destructive in red, undo-window countdown bar, Cancel / Do it now), a 64–72 pt mute button, two segmented controls (Eyes-free | Can glance, Open mic | Tap to talk), session switcher (sheet listing `AgentInfo`s grouped Needs you / Working / Idle), close.
-- Haptics: `UIImpactFeedbackGenerator` on state changes that matter (asking, done, failed) — the native app can, the web could not.
+- The circle is one big button and the push-to-talk surface: hold while you talk, or tap to start and stop (`pressStart`/`pressEnd`); in open mic a tap interrupts or unmutes. Its accessibility label names the action; VoiceOver activation is a tap. While held it swells slightly and never overlaps the label.
+- Header: the session name (opens the session switcher, a sheet listing `AgentInfo`s grouped Needs you / Working / Idle) and a settings button. Middle: captions ("You" and pi, live; pi's caption hidden while a question card shows it) and the question card with tap answers (destructive in red, undo-window countdown bar, Cancel / Do it now). Bottom: just two labelled 68–72 pt buttons, Mute and End (red).
+- Settings sheet: Eyes-free | Can glance, Open mic | Push to talk, the voice (a native picker built from `voices`, same rows and samples as the web one, writing the shared `pi-mobile-voice-persona`), and why basic voice is in use when it is.
+- Haptics: `UIImpactFeedbackGenerator` on press start and release (as the web does where it can) and on state changes that matter (asking, done, failed), which the web cannot do outside a gesture.
 - Keep the screen awake only while unlocked and voice is on (`isIdleTimerDisabled`); locking is fine now.
 
-**Check:** SwiftUI previews for every state; snapshot each state in the simulator (light and dark system settings, both show the dark voice screen) at iPhone 16e and iPhone 16 Pro Max sizes (both simulators are installed); VoiceOver reads state, captions and controls.
+**Check:** SwiftUI previews for every state; snapshot each state in the simulator (light and dark) at iPhone 16e and iPhone 16 Pro Max sizes (both simulators are installed); VoiceOver reads state, captions and controls.
 
 ## 9. Step 7 — Live Activity, intents, AirPods
 
