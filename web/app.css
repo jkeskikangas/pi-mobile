@@ -389,6 +389,7 @@ textarea#input::placeholder { color: var(--muted); }
 .sheet-head { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; }
 .sheet-head .grow { flex: 1; min-width: 0; }
 .sheet-head h2 { margin: 6px 0 0; font-size: 20px; font-weight: 700; letter-spacing: -.015em; }
+.sheet-head h2:focus { outline: none; }
 .sheet-head .subtitle { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .sheet-close { width: 36px; height: 36px; border-radius: 50%; background: var(--panel-2); color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .sheet-close .i { width: 18px; height: 18px; stroke-width: 2.2; }

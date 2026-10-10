@@ -550,6 +550,9 @@ export class Hub {
 				this.push.set(device.id, sub ?? undefined);
 				return { ok: true, pushKey: this.push.vapid.publicKey };
 			}
+			case "vapid":
+				// The key every machine signs notifications with; the phone hands it to a machine that has another.
+				return this.push.vapid;
 			case "offerDone": {
 				const o = this.offers.forDevice(device.id).find((x) => x.id === String(p.id));
 				if (o) this.offers.remove(o.id);
