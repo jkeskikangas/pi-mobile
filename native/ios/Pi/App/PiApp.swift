@@ -2,7 +2,14 @@ import SwiftUI
 
 @main
 struct PiApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        let m = AppModel()
+        _model = State(initialValue: m)
+        // Before any scene: intents (Action button, Live Activity buttons) can launch the app headless.
+        VoiceActivityController.shared.attach(m)
+    }
     @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
 
     var body: some Scene {

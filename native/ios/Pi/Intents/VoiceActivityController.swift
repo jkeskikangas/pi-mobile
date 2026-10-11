@@ -10,26 +10,19 @@ final class VoiceActivityController {
 
     struct Target: Equatable { var agent: String; var machine: String; var name: String; var machineName: String? }
 
-    /// The engine voice mode runs on. The voice screen and the intents share this one instance.
-    private(set) var engine: VoiceEngine?
+    /// The app model, whose `voice` is the one engine (attached by `PiApp` at launch, also for headless intents).
+    private(set) var model: AppModel?
+    var engine: VoiceEngine? { model?.voice }
     private var activity: Activity<VoiceActivityAttributes>?
     private var started = Date()
     private var last: VoiceActivityAttributes.ContentState?
     private let defaults = UserDefaults.standard
     static let lastKey = "pi-native-voice-last"
 
-    /// The shared engine, created on first use.
-    func engineOrNew() -> VoiceEngine {
-        if let engine { return engine }
-        let e = VoiceEngine()
-        attach(e)
-        return e
-    }
-
-    /// Start observing `engine`; idempotent.
-    func attach(_ e: VoiceEngine) {
-        guard engine !== e else { return }
-        engine = e
+    /// Start observing `model.voice`; idempotent.
+    func attach(_ m: AppModel) {
+        guard model !== m else { return }
+        model = m
         observe()
     }
 
@@ -97,14 +90,16 @@ final class VoiceActivityController {
         endActivity()
     }
 
-    func startEngine(for t: Target) async {
-        await engineOrNew().start(agent: t.agent, machine: t.machine)
+    func startEngine(for t: Target) async throws {
+        guard let model else { throw StartVoiceError.noSession }
+        try await VoiceHost.start(model: model, agent: t.agent, machine: t.machine, dictation: nil)
     }
 
     // MARK: which session (pickAgent() in web/app.js)
 
     /// The session waiting on you first, else the one voice used last, else the first reachable one.
-    func pickSession(model: AppModel = AppModel()) async -> Target? {
+    func pickSession() async -> Target? {
+        guard let model else { return nil }
         var all: [(Target, Int)] = []
         await withTaskGroup(of: [(Target, Int)].self) { g in
             for m in model.machines {
