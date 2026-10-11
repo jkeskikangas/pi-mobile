@@ -221,6 +221,11 @@ test("realtime session: voice layer instructions, tools, semantic turn detection
 	assert.match(i, /Never ask for confirmation yourself before passing a request to pi/);
 	assert.match(i, /earlier_request/);
 	assert.match(i, /ask them to repeat instead of guessing a task/);
+	// Questions the voice can't answer from the conversation go to pi, never "I don't know" (#5).
+	assert.match(i, /no current information/);
+	assert.match(i, /never say you don't know or can't look something up when pi could answer it/);
+	assert.match(i, /Answer yourself only from this conversation or for voice controls/);
+	assert.match(VOICE_TOOLS[0].description, /current information, the web, a file or a command/);
 });
 
 test("realtime call: ChatGPT sign-in posts JSON to the Codex endpoint, an API key posts multipart", async () => {
