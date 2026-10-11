@@ -10,7 +10,7 @@
 
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { Hub } from "../../src/hub.ts";
 import { HubLink } from "../../src/link.ts";
@@ -145,6 +145,18 @@ function link(f: Fake, cfg: typeof config | typeof boxConfig, secret: string): v
 					levels: ["off", "minimal", "low", "medium", "high", "xhigh"],
 					models: fakes.map((x) => x.info.model).filter((x, i, a) => a.findIndex((y) => y?.id === x?.id) === i),
 				};
+			// herdr's "New session": logged with the computer it ran on, and the new session appears on that
+			// computer, echoing the phone's spawn id so the phone opens it.
+			if (m === "spawn") {
+				const onBox = cfg === boxConfig;
+				const cwd = String(p.cwd);
+				console.log(`spawn ${onBox ? box.name : laptop.name} ${cwd}`);
+				const n = Date.now();
+				const nf: Fake = { info: { ...f.info, agent: `f-new${n}`, pid: n % 100000, sessionId: `s${n}`, name: basename(cwd), task: p.prompt || undefined, cwd, status: "idle", cost: 0, last: undefined, spawn: p.spawnId }, items: [], n: 0 };
+				(onBox ? boxFakes : fakes).push(nf);
+				link(nf, cfg, secret);
+				return { name: nf.info.name, paneId: `p${n}` };
+			}
 			if (m === "commands") return [{ name: "review", description: "Review the current diff" }, { name: "compact", description: "Compact the conversation context" }];
 			if (m === "answer") {
 				prompts.set(f.info.agent, (prompts.get(f.info.agent) ?? []).filter((x) => x.id !== p.id));

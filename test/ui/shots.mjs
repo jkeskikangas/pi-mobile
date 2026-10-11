@@ -340,6 +340,23 @@ async function session(theme, width, flow) {
 				report.checks[`${tag} added from the notification without a sheet`] = await page.evaluate(() => !document.querySelector("#sheetTitle")?.textContent.startsWith("Add "));
 				await shot("m8-added-from-notification");
 			});
+			await step("new session on the box", async () => {
+				// herdr's New session with two computers: pick the box, see its folders, and it starts there.
+				await tap("#sessionBtn");
+				await tap(".sheet-panel .btn", "New session");
+				await tap(".sheet-panel .seg button", "hetzner-box");
+				await shot("m9-new-session-box");
+				report.checks[`${tag} new session on the box offers its folders`] = await page.evaluate(() => ({
+					picked: document.querySelector('.sheet-panel .seg button[aria-pressed="true"]')?.textContent,
+					folder: document.querySelector(".sheet-panel input").value,
+					folders: [...document.querySelectorAll("#folders option")].map((o) => o.value),
+				}));
+				const before = buf.length;
+				await tap(".sheet-panel .btn.primary", "Start pi");
+				await page.waitForFunction(() => document.querySelector("#sessionSub")?.textContent.startsWith("hetzner-box") && document.querySelector("#sessionName")?.textContent === "api", { timeout: 10000 });
+				report.checks[`${tag} new session started on the box`] = buf.slice(before).match(/spawn .*/)?.[0];
+				await shot("m10-started-on-box");
+			});
 		}
 
 		if (flow === "scan") {
