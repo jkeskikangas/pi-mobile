@@ -103,7 +103,14 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 - Browsers give `getUserMedia` only to secure contexts: phone voice needs the HTTPS address, which `/remote` sets up with Tailscale Serve (or `http://127.0.0.1` on the computer).
 - iOS stops capturing the mic when a Home Screen PWA goes to the background or locks; a Safari tab with an active capture keeps it longer. Voice mode keeps the screen awake (Wake Lock) and tells you when iOS took the mic away. Android Chrome exempts audible pages from freezing; verify on the device before relying on it.
 - CarPlay has no path for web apps; the phone's audio plays through the car as usual.
-- **A native iPhone app** would lift the hardest limits for voice mode: a background audio session keeps the mic with the screen locked (phone in a pocket), Apple's voice-processing I/O gives stronger echo cancellation for speakerphone barge-in, headset buttons work reliably, and Siri or the Action button can start a conversation, with status on the lock screen. CarPlay would still need an Apple entitlement (unverified for this kind of app). A web view wrapper is not enough, because it has the same capture limits. The suggested shape: keep the web app, and add a small native app for voice mode only that reuses the same pairing, bridge requests and voice design. Not built.
+- **The iPhone app** (`native/ios`, plan `plans/native-apps.md`) keeps the web UI in a web view and runs voice mode natively, through the same `voice-core.js` decisions, pairing and bridge requests. What it changes, all checked in the simulator only and **not yet verified on a device** (`native/ios/README.md` → Device checklist):
+  - A background audio session keeps the mic with the screen locked (phone in a pocket). [device]
+  - Apple's voice-processing I/O gives echo cancellation for speakerphone barge-in. [device]
+  - No secure (HTTPS) address needed: the app records natively and reaches the computer over plain HTTP (payloads stay end-to-end encrypted), so voice mode and dictation work on Wi-Fi pairing. Basic voice and dictation pass in the simulator; realtime voice over WebRTC needs a computer with it set up. [device]
+  - The Action button, Control Center and Siri ("Talk to pi in pi") start a conversation; a Live Activity shows the state and question on the lock screen and Dynamic Island, with Mute and End. Starting while locked may still open the app. [device]
+  - AirPods press-to-mute goes through iOS's input mute, without CallKit; unverified. [device]
+  - Notifications come through Apple's push service (needs a paid Apple developer account), with the text sealed so Apple sees only "pi". [device]
+  - CarPlay: no UI; the Live Activity appears there by itself. A CarPlay app would need an Apple entitlement.
 - The ChatGPT-sign-in realtime endpoint is the one Codex uses; it is undocumented and may change. With `OPENAI_API_KEY` set, the official `api.openai.com/v1/realtime/calls` endpoint is used instead. Without either, voice mode runs the cascaded pipeline (host STT + spoken brief + the phone's own speech synthesis).
 
 ### Other projects looked at

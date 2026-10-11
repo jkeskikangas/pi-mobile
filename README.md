@@ -61,6 +61,10 @@ Browsers only allow notifications and the microphone on HTTPS pages. Install [Ta
 
 The app offers to turn notifications on (also under **⋯**). On iPhone, add the page to the Home Screen first (iOS 16.4+). To use your own HTTPS address instead, set it in `/remote settings`; `"tailscale": false` in `config.json` turns the automatic setup off. The "cloudflared" option in `/remote settings` gives HTTPS too, but its address changes when pi-mobile restarts.
 
+### iPhone app
+
+An optional native iPhone app (`native/ios`) shows the same web UI and adds what a web page can't: scan to pair, voice mode that keeps going with the screen locked, dictation without the secure address, a Live Activity, starting voice from the Action button or Siri, and push notifications. It isn't on the App Store: build it with Xcode on a Mac (`native/ios/README.md` has the setup; a free Apple account works, push needs a paid one). It is checked in the simulator only so far; the device checklist is in that README.
+
 ### iPhone push (native app)
 
 The native iPhone app gets notifications through Apple's push service, sent by each of your computers with your own key (needs a paid Apple developer account):

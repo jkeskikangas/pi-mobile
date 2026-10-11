@@ -124,7 +124,7 @@ native/
 5. `Core/Keychain.swift`: store the device (`kSecClassGenericPassword`, accessible `AfterFirstUnlock` so voice keeps working when the phone locks mid-session), shared access group (for the widget extension and, later, the notification extension).
 6. `PiTests`: crypto vectors from `native/fixtures/crypto-vectors.json` (bundle it as a test resource); SSE parser (chunk boundaries, comments, multi-line); HubClient request shapes with a `URLProtocol` stub.
 
-**Check:** `cd native/ios && xcodegen && xcodebuild test -scheme Pi -destination 'platform=iOS Simulator,name=iPhone 16'` passes.
+**Check:** `cd native/ios && xcodegen && xcodebuild test -project Pi.xcodeproj -scheme Pi -destination 'platform=iOS Simulator,name=iPhone 16'` passes.
 
 ## 5. Step 3 — Pairing and the web shell
 

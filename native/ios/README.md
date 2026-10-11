@@ -1,27 +1,54 @@
 # pi for iOS
 
-The native iOS app: the web UI in a `WKWebView`, plus what the web can't do (QR pairing now; voice mode, dictation audio, Live Activity later). Plan: `plans/native-apps.md`. Web ↔ native contract: `BRIDGE.md`.
+The native iOS app: the web UI in a `WKWebView`, plus what the web can't do: QR pairing, voice mode that keeps going with the screen locked, dictation audio, a Live Activity, starting voice from the Action button or Siri, and push notifications. Plan: `plans/native-apps.md`. Web ↔ native contract: `BRIDGE.md`.
 
-## Build and test
+## Setup
+
+You need Xcode 26.6 with the iOS 26.5 platform (`xcodebuild -downloadPlatform iOS`) and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```sh
 cd native/ios
-xcodegen                      # writes Pi.xcodeproj (not committed)
-xcodebuild test -scheme Pi -destination 'platform=iOS Simulator,name=iPhone 16'
-./scripts/integration.sh      # PiIntegrationTests against the `npm run ui` fixture hub
+xcodegen                      # writes Pi.xcodeproj from project.yml (not committed)
+open Pi.xcodeproj
 ```
 
-Xcode 26.6 needs the iOS 26.5 platform for any simulator build (`xcodebuild -downloadPlatform iOS`). `name=iPhone 16` resolves to the newest OS, so create an iPhone 16 on 26.5 if only older runtimes have one: `xcrun simctl create "iPhone 16" com.apple.CoreSimulator.SimDeviceType.iPhone-16 com.apple.CoreSimulator.SimRuntime.iOS-26-5`.
+To run on your own iPhone, set these build settings in `project.yml` (`settings.base`) and run `xcodegen` again, or pass them to `xcodebuild`:
 
-Bundle ids come from the `PI_BUNDLE_PREFIX` build setting (default `dev.pimobile`): set it and `DEVELOPMENT_TEAM` to run on your own device.
+| Setting | Default | Set it to |
+|---|---|---|
+| `DEVELOPMENT_TEAM` | empty | Your team ID (Xcode → Settings → Accounts, or Membership details on developer.apple.com). A free Personal Team works, without push. |
+| `PI_BUNDLE_PREFIX` | `dev.pimobile` | A reverse-DNS prefix you own, e.g. `com.example`. The app is `<prefix>.pi`, the extensions `<prefix>.pi.widgets` and `<prefix>.pi.notifications`, the shared Keychain group `<prefix>.shared`. Use the app's id as the bundle ID in `/remote settings` → iPhone push. |
+| `PI_PUSH` | `NO` | `YES` with a paid team: signs with `Pi/App/PiPush.entitlements` (push capability). See Push below. |
+
+Signing is automatic: Xcode makes the profiles on the first run. Apps from a free team stop opening after 7 days; run again from Xcode to renew. `PI_WIDGETS` is not yours to set: it is the compile condition that keeps app-only code out of the `PiWidgets` extension.
+
+## Tests
+
+Always pass `-project Pi.xcodeproj`, so the command never depends on what else is in the folder.
+
+```sh
+cd native/ios
+xcodegen
+xcodebuild test -project Pi.xcodeproj -scheme Pi -destination 'platform=iOS Simulator,name=iPhone 16'
+./scripts/integration.sh      # PiIntegrationTests against the `npm run ui` fixture hub
+./scripts/e2e.sh              # PiUITests (scheme PiE2E): the app itself against the fixture hub
+```
+
+`name=iPhone 16` resolves to the newest OS, so create an iPhone 16 on 26.5 if only older runtimes have one: `xcrun simctl create "iPhone 16" com.apple.CoreSimulator.SimDeviceType.iPhone-16 com.apple.CoreSimulator.SimRuntime.iOS-26-5`. Both scripts take `DEST=` (e.g. `platform=iOS Simulator,id=<udid>`); `e2e.sh` also takes `DERIVED=` for the derived-data folder.
+
+Release builds can fail where Debug doesn't (the Debug-only launch arguments are compiled out). Before shipping, also build `xcodebuild build -project Pi.xcodeproj -scheme Pi -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO`, and the `PiWidgets` and `PiNotifications` schemes the same way.
 
 ### Integration test
 
 `scripts/integration.sh` starts `test/ui/fixture.ts` on port 7989, passes its `127.0.0.1` pairing link to the test as `TEST_RUNNER_PI_PAIR_LINK`, and types `ask` into the fixture every 4 s. The test pairs through `HubClient`, calls `hub`, opens the event stream, sees `hello` and `info`, answers the confirm prompt and waits for its `prompt_end`. Without a link the test is skipped, so the plain `xcodebuild test` stays green offline.
 
+### End to end in the simulator
+
+`scripts/e2e.sh` starts the fixture on port 7993 and runs `PiUITests/AppE2ETests` (skipped without a link). The app pairs with `-PiPairLink`; the web UI loads; the voice button opens the native voice screen, which says "Using basic voice. Details in voice settings." (the fixture has no realtime voice); End returns to the web UI; a tapped and a held dictation take each reach the fixture's `transcribe`; the menu shows the app's Notifications row, not the web's Home Screen note. The script fails unless the fixture logged both `transcribe` calls. Screenshots: `shots/e2e/`.
+
 ### Screenshots
 
-Debug builds accept launch arguments for the simulator, which has no camera: `-PiReset` forgets every computer, `-PiPairLink <link>` pairs at launch, `-PiAssumeScanner` shows the scan button. Current shots: `shots/`.
+Debug builds accept launch arguments for the simulator, which has no camera: `-PiReset` forgets every computer, `-PiPairLink <link>` pairs at launch, `-PiAssumeScanner` shows the scan button, `-PiFakeVoice <state>` shows the voice screen and Live Activity in that state (with `-PiFakeMuted`, `-PiFakeMachine`), `-PiPushDemo '<APNs JSON>'` runs the notification rewrite (Push below). Current shots: `shots/` (`voice/`, `activity/`, `push/`, `e2e/`).
 
 ## Push (needs a paid team)
 
@@ -41,16 +68,20 @@ Simulator check (no APNs needed): the simulator never runs a service extension f
 ## Layout
 
 ```
-project.yml           XcodeGen spec: Pi, PiWidgets (placeholder), PiTests, PiIntegrationTests
-Pi/App/               PiApp, AppModel (machines, prefs, one HubClient per machine), Info.plist, entitlements
-Pi/Core/              JSON, Envelope (sodium), HubClient (pair, rpc, agent, SSE events), SSEParser, Models, Keychain (+ MachineStore)
+project.yml           XcodeGen spec: Pi, PiWidgets, PiNotifications, PiTests, PiIntegrationTests, PiUITests; schemes Pi and PiE2E
+Pi/App/               PiApp, AppModel (machines, prefs, one HubClient per machine), PushCenter, Info.plist, entitlements
+Pi/Core/              JSON, Envelope (sodium), HubClient (pair, rpc, agent, SSE events), SSEParser, Models, Keychain (+ MachineStore), PushContent
 Pi/Pairing/           PairingView (scan, paste, inline errors), ScannerView (VisionKit DataScanner)
 Pi/Shell/             WebShell (WKWebView), ShellView (native loading/offline), NativeBridge (piNative handler)
 Pi/Voice/             VoiceEngine (port of web/voice.js VoiceMode), VoiceCore (web/voice-core.js in JSContext), VoicePorts (seams),
                       RealtimeClient + Levels (WebRTC), AudioSessionController, BasicVoice, Earcons, LiveFleet, VoiceHost (voice.start)
-PiWidgets/            placeholder widget bundle (Live Activity and Control arrive in Step 7)
+Pi/VoiceUI/           VoiceScreen (orb, captions, question card, Mute/End), sheets, haptics
+Pi/Dictation/         Dictation (dictation.* bridge calls), AudioRecorder (AAC .m4a)
+Pi/Intents/           StartVoiceIntent, Mute/End Live Activity intents, AppShortcuts, VoiceActivityController
+PiWidgets/            VoiceActivity (Live Activity + Dynamic Island), StartVoiceControl (Control Center / Action button)
+PiNotifications/      Notification Service Extension: opens the sealed text of a push
 Shared/               VoiceActivityAttributes (app + widgets)
-scripts/integration.sh
+scripts/              integration.sh, e2e.sh
 ```
 
 ## Notes
@@ -61,7 +92,36 @@ scripts/integration.sh
 
 ## Device checklist [device]
 
-- Scan the `/remote` code; the haptic fires and the web UI opens already paired.
-- Deny the camera: the pairing screen offers Open Settings and pasting the link.
-- Turn off the computer's hub: the app shows "Can't reach ‹name›" with Try again, never a WebKit error page.
-- Light and dark: no white flash on launch or reload.
+None of these have run on a real iPhone yet: everything above is checked in the simulator only. Fill in the Result column (date, iPhone model, iOS version) as you go.
+
+| Check | Result |
+|---|---|
+| Scan the `/remote` code: the haptic fires and the web UI opens already paired. | not yet run on device |
+| Deny the camera: the pairing screen offers Open Settings and pasting the link. | not yet run on device |
+| Turn off the computer's hub: the app shows "Can't reach ‹name›" with Try again, never a WebKit error page. | not yet run on device |
+| Light and dark: no white flash on launch or reload. | not yet run on device |
+| The full web UI works: sessions, sending, answering a question, images. | not yet run on device |
+| Voice mode answers a question with the screen locked (phone in a pocket). | not yet run on device |
+| The undo-window and "stop" scenarios from `docs/voice.md` → Verification behave as on the web. | not yet run on device |
+| A 30-minute voice session with the screen locked keeps going (events, status, the realtime call). | not yet run on device |
+| Speakerphone barge-in: pi's own voice is not heard as you (Apple voice processing). | not yet run on device |
+| Action button / Control Center "Talk to pi" starts voice, unlocked and locked. | not yet run on device |
+| "Talk to pi in pi" (Siri) starts voice. | not yet run on device |
+| The Live Activity shows the state and question; its Mute and End buttons work. | not yet run on device |
+| AirPods stem press mutes and unmutes. | not yet run on device |
+| AirPods out mid-session: audio moves to the speaker and voice keeps going. | not yet run on device |
+| A phone call interrupts: voice resumes or offers "Tap to resume". | not yet run on device |
+| Earcons are heard over the realtime audio; pi's voice ducks while you talk. | not yet run on device |
+| Dictation over plain-HTTP pairing gives the distilled text; raw/undo chips work; music resumes after. | not yet run on device |
+| `PI_PUSH=YES`, sandbox push: the lock screen shows the session and text (rewritten by `PiNotifications`); tapping opens that session; **Answer by voice** starts voice there. | not yet run on device (needs a paid team) |
+| A Tailscale `100.x` hub loads with `NSAllowsLocalNetworking` alone. | not yet run on device |
+
+## Known gaps
+
+- Nothing is verified on a real iPhone yet (checklist above). Code that depends on device behaviour is marked `[verify]`.
+- Push needs a paid Apple developer team; a free team builds without it.
+- Starting voice while locked may still need the app to open (plan §3); the intent then asks to continue in the app.
+- AirPods mute without CallKit is unverified (plan §6).
+- The ChatGPT-sign-in realtime endpoint is undocumented and may change; voice then uses basic voice, which the app supports.
+- `NSAllowsArbitraryLoads` is on; App Review may ask about it (the answer: end-to-end encryption to the user's own computer).
+- No TestFlight or App Store build yet; no CarPlay UI (the Live Activity shows on CarPlay by itself); Android is a later plan.
