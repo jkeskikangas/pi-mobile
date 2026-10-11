@@ -1723,7 +1723,10 @@
 	async function pairSheet() {
 		try {
 			const r = await rpc("pair", {});
-			const here = r.links.find((l) => l.url.startsWith(location.origin)) || r.links[0];
+			// Only a secure link: the page's own origin first, else any https one, never a plain-http loopback fallback.
+			const secure = r.links.filter((l) => l.url.startsWith("https://"));
+			const here = secure.find((l) => l.url.startsWith(`${location.origin}/`)) || secure[0];
+			if (!here) return toast("This computer has no secure address yet. Run /remote on it to set one up.", "error");
 			openSheet(
 				(body) => {
 					body.appendChild(el("p", "note", "Single use, valid for 10 minutes. Whoever opens it gets full control of your pi sessions, so send it only to your own devices."));
