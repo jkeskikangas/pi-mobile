@@ -225,7 +225,7 @@ Implement the `dictation.*` messages from Step 4 natively: record with `AVAudioR
 
 ## 12. Step 10 — Android (later, separate plan when started)
 
-Same architecture in Kotlin: a `WebView` for the UI with a JavaScript interface named `PiNative` (same messages as Step 4); voice in a `microphone` foreground service started from visible UI, a tapped notification or a Quick Settings tile; `stream-webrtc-android` with `JavaAudioDeviceModule` hardware AEC/NS, `MODE_IN_COMMUNICATION`, `setCommunicationDevice`; `voice-core.js` in a JS engine (QuickJS or `androidx.javascriptengine`); crypto with libsodium (lazysodium) against the same vectors; no Android Auto UI. Write `plans/native-android.md` before starting, reusing this plan's steps 1–8.
+Same architecture in Kotlin: a `WebView` for the UI with a JavaScript interface named `PiNative` (same messages as Step 4); voice in a `microphone` foreground service started from visible UI, a tapped notification or a Quick Settings tile; `stream-webrtc-android` with `JavaAudioDeviceModule` hardware AEC/NS, `MODE_IN_COMMUNICATION`, `setCommunicationDevice`; `voice-core.js` in a JS engine (QuickJS or `androidx.javascriptengine`); crypto with libsodium (lazysodium) against the same vectors; no Android Auto UI. Write `plans/native-android.md` before starting, reusing this plan's steps 1–8; a stub with the fixed decisions (package name `dev.pi_mobile.app`, push through the relay, deep-link files) exists already.
 
 ---
 
