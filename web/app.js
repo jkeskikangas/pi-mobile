@@ -68,6 +68,7 @@
 		models: null,
 		push: { key: null, on: false },
 		offers: [], // machines offered by another of your computers, waiting for "Add"
+		accepted: undefined, // an offer already accepted from its notification
 		pushKeys: new Map(), // machine -> the push key it signs with
 	};
 	const Unauthorized = window.PiFleet.Unauthorized;
@@ -1954,6 +1955,11 @@
 		S.offers.push({ fromId, offer });
 		if (S.offers.length === 1) showOffer();
 	}
+	/** "Add" on the offer's notification (Android): that tap was the consent, so add without asking again. */
+	function acceptOffer(id) {
+		S.accepted = id;
+		if (S.offers[0]?.offer.id === id) showOffer(); // its sheet is open: finish it; otherwise it adds on its turn
+	}
 	function showOffer() {
 		const next = S.offers[0];
 		if (!next) return;
@@ -1964,6 +1970,15 @@
 			closeSheet();
 			if (S.offers.length) setTimeout(showOffer, 300);
 		};
+		const add = () => {
+			fleet.add({ machine: offer.machine.id, name: offer.machine.name, origin: offer.origin, d: offer.d, k: offer.k });
+			toast(`${offer.machine.name} added`);
+			done();
+		};
+		if (S.accepted === offer.id) {
+			S.accepted = undefined;
+			return add();
+		}
 		let host = offer.origin;
 		try {
 			host = new URL(offer.origin).host;
@@ -1973,11 +1988,7 @@
 				body.appendChild(el("p", "note", `Its pi sessions join your list, next to the others. ${offer.from ? `You asked for this on ${offer.from}.` : ""}`.trim()));
 				body.appendChild(el("div", "linkbox", host));
 				const yes = el("button", "btn primary", "Add");
-				yes.onclick = () => {
-					fleet.add({ machine: offer.machine.id, name: offer.machine.name, origin: offer.origin, d: offer.d, k: offer.k });
-					toast(`${offer.machine.name} added`);
-					done();
-				};
+				yes.onclick = add;
 				const no = el("button", "btn", "Not now");
 				no.onclick = async () => {
 					// Leave nothing behind there: this phone's key on that computer is revoked.
@@ -2177,11 +2188,12 @@
 	async function main() {
 		wire();
 		// Opened from a notification: jump to that session.
-		const fromPush = new URLSearchParams(location.search).get("agent");
-		if (fromPush) {
-			store.set(AGENT_KEY, fromPush);
-			history.replaceState(null, "", location.pathname + location.hash);
-		}
+		const query = new URLSearchParams(location.search);
+		const fromPush = query.get("agent");
+		if (fromPush) store.set(AGENT_KEY, fromPush);
+		// "Add" on an offer's notification: accepted as soon as the offer arrives on the stream.
+		if (query.get("accept")) S.accepted = query.get("accept");
+		if (location.search) history.replaceState(null, "", location.pathname + location.hash);
 		// The service worker keeps a copy of the app (it opens while this computer sleeps) and shows notifications.
 		if (window.isSecureContext && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 		if (pushSupported()) {
@@ -2196,7 +2208,10 @@
 					S.push.on = true;
 				})
 				.catch(() => {});
-			navigator.serviceWorker.addEventListener("message", (e) => e.data?.type === "open" && openAgent(e.data.agent));
+			navigator.serviceWorker.addEventListener("message", (e) => {
+				if (e.data?.type === "open") openAgent(e.data.agent);
+				else if (e.data?.type === "accept") acceptOffer(e.data.offer);
+			});
 		}
 		const paired = await pairFromHash();
 		if (paired === "failed") return;

@@ -16,6 +16,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSy
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureServe, tailnetName } from "./tailscale.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 const DEFAULT_CONFIG = { port: 7878, expose: "network", enabled: false };
@@ -63,68 +64,27 @@ export function machine(dir = stateDir()) {
 	return { id: m.id, name: m.name || machineName() };
 }
 
-function tailscale(args) {
-	return execFileSync(process.env.PI_MOBILE_TAILSCALE_BIN || "tailscale", args, { encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] });
-}
-const tailscaleJson = (args) => {
-	try {
-		return JSON.parse(tailscale(args));
-	} catch {
-		return undefined;
-	}
-};
-/** This machine's tailnet HTTPS name, e.g. box.tail1234.ts.net, or undefined without Tailscale. */
-export function tailnetName() {
-	const name = tailscaleJson(["status", "--json"])?.Self?.DNSName;
-	return typeof name === "string" && name ? name.replace(/\.$/, "") : undefined;
-}
-/** The address an existing serve forwards to the hub's port (same rule as src/expose.ts `serveUrl`). */
-function servedAt(status, port) {
-	for (const [hostPort, web] of Object.entries(status?.Web ?? {})) {
-		const proxy = web?.Handlers?.["/"]?.Proxy;
-		if (typeof proxy !== "string" || !new RegExp(`^(https?://)?(127\\.0\\.0\\.1|localhost|\\[::1\\])?:?${port}/?$`).test(proxy)) continue;
-		const i = hostPort.lastIndexOf(":");
-		const p = hostPort.slice(i + 1);
-		if (status?.TCP?.[p]?.HTTPS !== true) continue;
-		return p === "443" ? `https://${hostPort.slice(0, i)}` : `https://${hostPort}`;
-	}
-	return undefined;
-}
-/**
- * The HTTPS address phones use: Tailscale Serve in front of the hub, as the hub itself would set it
- * up (src/expose.ts `ensureServe`): an existing serve is reused, other serves are never changed.
- */
-function httpsOrigin(config) {
+/** The HTTPS address phones use: Tailscale Serve in front of the hub, found or set up as the hub does. */
+async function httpsOrigin(config, cli) {
 	if (config.publicUrl) return config.publicUrl.replace(/\/+$/, "");
 	if (config.tailscale === false) throw new Error("this machine has no HTTPS address: set publicUrl in its pi-mobile config.json, or allow Tailscale");
-	const name = tailnetName();
-	if (!name) throw new Error("Tailscale isn't running on this machine. Install it, run `tailscale up`, then try again.");
-	const status = tailscaleJson(["serve", "status", "--json"]) ?? {};
-	const existing = servedAt(status, config.port);
-	if (existing) return existing;
-	const p = [443, 8443].find((x) => !status.TCP?.[x]);
-	if (!p) throw new Error("ports 443 and 8443 already serve something else on this machine's Tailscale address");
-	try {
-		tailscale(["serve", "--bg", `--https=${p}`, `http://127.0.0.1:${config.port}`]);
-	} catch (e) {
-		const out = `${e?.stdout || ""}${e?.stderr || ""}`;
-		const enable = /https:\/\/login\.tailscale\.com\/\S+/.exec(out)?.[0];
-		if (enable) throw new Error(`Your tailnet needs HTTPS turned on first: open ${enable}, then try again.`);
-		const why = String(out || e?.message || e).trim().split("\n")[0];
-		throw new Error(`Couldn't put pi-mobile behind Tailscale HTTPS (${why}). Run \`sudo tailscale set --operator=$USER\` on this machine, then try again.`);
-	}
-	return p === 443 ? `https://${name}` : `https://${name}:${p}`;
+	if (!(await tailnetName(cli))) throw new Error("Tailscale isn't running on this machine. Install it, run `tailscale up`, then try again.");
+	const r = await ensureServe(config.port, cli);
+	if (r.url) return r.url;
+	if (r.enable) throw new Error(`Your tailnet needs HTTPS turned on first: open ${r.enable}, then try again.`);
+	throw new Error("Couldn't put pi-mobile behind Tailscale HTTPS. Run `sudo tailscale set --operator=$USER` on this machine, then try again.");
 }
 
 /**
  * On the new machine: one device per phone of the sponsor, the fleet's push key and the phones'
  * subscriptions, sharing switched on. Works before any pi runs here; the hub reads these files.
+ * `cli` stands in for the tailscale CLI in tests.
  */
-export function enrol(input, dir = stateDir()) {
+export async function enrol(input, dir = stateDir(), cli) {
 	const phones = Array.isArray(input?.phones) ? input.phones : [];
 	if (!phones.length) throw new Error("no phones to add");
 	const config = { ...DEFAULT_CONFIG, ...readJson(join(dir, "config.json"), {}) };
-	const origin = input.origin || httpsOrigin(config);
+	const origin = input.origin || (await httpsOrigin(config, cli));
 	if (!config.enabled) writePrivate(join(dir, "config.json"), { ...config, enabled: true });
 
 	const pushPath = join(dir, "push.json");
@@ -206,7 +166,7 @@ export async function add(host, opts = {}, dir = stateDir()) {
 	const result = await (opts.run || runRemote)(host, input);
 	const origin = String(result?.origin || "");
 	if (!/^https:\/\//.test(origin)) throw new Error(`${host} gave no HTTPS address (${origin || "none"})`);
-	const mine = opts.tailnet !== undefined ? opts.tailnet : tailnetName();
+	const mine = opts.tailnet !== undefined ? opts.tailnet : await tailnetName();
 	const suffix = mine?.split(".").slice(1).join(".");
 	if (suffix && !new URL(origin).hostname.endsWith(`.${suffix}`) && !opts.allowOrigin)
 		throw new Error(`${origin} isn't on your tailnet (${suffix}). Add --allow-origin if you meant it.`);
@@ -265,7 +225,7 @@ async function main(argv) {
 		case "enrol":
 		case "enroll": {
 			try {
-				console.log(JSON.stringify(enrol(await readStdin())));
+				console.log(JSON.stringify(await enrol(await readStdin())));
 			} catch (e) {
 				console.log(JSON.stringify({ error: e.message }));
 				process.exitCode = 1;

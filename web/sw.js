@@ -2,7 +2,7 @@
 // sleeps (your other computers still answer). Payloads arrive encrypted to this browser (RFC 8291).
 "use strict";
 
-const SHELL = "pi-shell-v1";
+const SHELL = "pi-shell-v2";
 const FILES = ["./", "app.css", "app.js", "fleet.js", "voice-core.js", "voice.js", "nacl.js", "icon.svg", "manifest.json"];
 
 self.addEventListener("install", (e) => {
@@ -53,27 +53,34 @@ self.addEventListener("push", (event) => {
 	try {
 		data = event.data ? event.data.json() : {};
 	} catch {}
+	const offer = data.kind === "add" ? data.offer : undefined;
 	// One notification per session (per computer): a newer one replaces the older.
 	event.waitUntil(
 		self.registration.showNotification(data.title || "pi", {
 			body: data.body || "",
-			tag: `pi-${data.machine || "hub"}-${data.agent || (data.offer ? "offer" : "hub")}`,
+			tag: `pi-${data.machine || "hub"}-${data.agent || (data.offer ? `offer-${data.offer}` : "hub")}`,
 			renotify: true,
 			icon: "icon.svg",
-			data: { agent: data.agent },
+			// Android shows the button; iPhone shows none and a tap opens the app's Add sheet.
+			actions: offer ? [{ action: "add", title: "Add" }] : [],
+			data: { agent: data.agent, offer },
 		}),
 	);
 });
 
 self.addEventListener("notificationclick", (event) => {
 	event.notification.close();
-	const agent = event.notification.data?.agent;
-	const url = new URL(agent ? `./?agent=${encodeURIComponent(agent)}` : "./", self.registration.scope).href;
+	const { agent, offer } = event.notification.data || {};
+	// "Add" can't add here: the machine list lives in the page's storage. The page adds it, no second tap.
+	const accept = event.action === "add" && offer ? offer : undefined;
+	const query = accept ? `?accept=${encodeURIComponent(accept)}` : agent ? `?agent=${encodeURIComponent(agent)}` : "";
+	const url = new URL(`./${query}`, self.registration.scope).href;
 	event.waitUntil(
 		(async () => {
 			const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
 			for (const w of wins) {
-				if (agent) w.postMessage({ type: "open", agent });
+				if (accept) w.postMessage({ type: "accept", offer: accept });
+				else if (agent) w.postMessage({ type: "open", agent });
 				return w.focus();
 			}
 			return self.clients.openWindow(url);

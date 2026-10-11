@@ -295,6 +295,16 @@ async function session(theme, width, flow) {
 				await page.waitForFunction(() => !document.querySelector("#banner") || document.querySelector("#banner").hidden, { timeout: 12000 });
 				await shot("m7-box-back");
 			});
+			await step("add from the notification", async () => {
+				// What the service worker opens after "Add" on an offer's notification: no sheet, just added.
+				const phone = await page.evaluate(() => JSON.parse(localStorage.getItem("pi-mobile-device")).d);
+				await page.goto(`${new URL(link).origin}/?accept=fx2${phone}`);
+				await page.waitForFunction(() => !document.querySelector("#composer").hidden, { timeout: 15000 });
+				await say("box again");
+				await page.waitForFunction(() => [...document.querySelectorAll(".toast")].some((t) => t.textContent.includes("added")), { timeout: 10000 });
+				report.checks[`${tag} added from the notification without a sheet`] = await page.evaluate(() => !document.querySelector("#sheetTitle")?.textContent.startsWith("Add "));
+				await shot("m8-added-from-notification");
+			});
 		}
 
 		if (flow === "picker") {

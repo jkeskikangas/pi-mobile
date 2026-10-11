@@ -147,7 +147,7 @@ The helpers are in `web/app.js`. `voice.js` gets them through `window.PiMobile`.
 | Fields | `.field` (label span + input/textarea) | Label above, 48 px, 16 px text, focus turns the border accent |
 | Dictation strip | `#dictBar[data-kind=rec/busy/done/error]` | Replaces itself in place; never rebuilds per frame |
 | Voice mode | `#voice` with `.v-*` classes | design-principles.md §4; every voice class starts with `v-` |
-| Computers | `fleet` (`web/fleet.js`), `machineSheet`, `addComputerSheet`, the offer sheet (`showOffer`) | Name a computer only when there are two or more (`several()`): as a prefix on session rows and the header line ("hetzner-box · Working · 0:42"), and in the attention bar. A computer that can't be reached is one row, "Offline since 14:02", never a list of dead sessions |
+| Computers | `fleet` (`web/fleet.js`), `machineSheet`, `addComputerSheet`, the offer sheet (`showOffer`), and **Add** on the offer's notification (`web/sw.js`; Android only, iPhone web notifications have no buttons) | Name a computer only when there are two or more (`several()`): as a prefix on session rows and the header line ("hetzner-box · Working · 0:42"), and in the attention bar. A computer that can't be reached is one row, "Offline since 14:02", never a list of dead sessions. An offer always names the computer, its address and where it was asked for, in the sheet and on the lock screen, because that tap is the consent |
 
 ## 5. Patterns
 
@@ -200,7 +200,7 @@ npm run shots -- --only voice --theme dark --width 390 --out /tmp/s
 - **app:** pairing, sessions, transcript, open tools, working, confirm and select questions, menu, models, new session, slash commands, and focus rings, including inside a sheet;
 - **voice:** dictation, every voice-mode state, mute, the settings sheet, push to talk with a real held press;
 - **picker:** the voice picker from the menu and from voice mode;
-- **machines:** a second fixture computer offered and added, one list from both, the Computers menu, the box going offline and coming back (`box`, `box off`, `box on` on the fixture's stdin).
+- **machines:** a second fixture computer offered and added, one list from both, the Computers menu, the box going offline and coming back then a second offer added from its notification without a sheet (`box`, `box again`, `box off`, `box on` on the fixture's stdin).
 
 It exits 1 on any axe violation (WCAG 2.2 AA), page error or failed step, and writes `report.json` with the checks it measured.
 

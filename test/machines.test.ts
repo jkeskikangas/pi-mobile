@@ -141,13 +141,13 @@ test("add refuses addresses outside your tailnet, itself, and computers without 
 	await assert.rejects(cli.add("box", elsewhere, tmp()), /no phone is paired/);
 });
 
-test("enrol keeps a different push key that other phones already use, unless forced", () => {
+test("enrol keeps a different push key that other phones already use, unless forced", async () => {
 	const box = tmp();
 	const other = generateVapid();
 	writeFileSync(join(box, "push.json"), JSON.stringify({ vapid: other, subs: { someone: SUB } }));
 	const input = { from: "laptop", origin: "https://box.tail1.ts.net", vapid: generateVapid(), phones: [{ id: "p", name: "phone" }] };
-	assert.throws(() => cli.enrol(input, box), /different key/);
-	cli.enrol({ ...input, force: true }, box);
+	await assert.rejects(cli.enrol(input, box), /different key/);
+	await cli.enrol({ ...input, force: true }, box);
 	assert.equal(new PushStore(box).vapid.publicKey, input.vapid.publicKey);
 });
 
@@ -189,7 +189,7 @@ test("the API answers other origins, the page may call your tailnet, and a phone
 	assert.equal((await fetch(`${base}/api/rpc`, { method: "POST", body: "{}" })).headers.get("access-control-allow-origin"), "*");
 
 	const csp = (await fetch(`${base}/`)).headers.get("content-security-policy") ?? "";
-	assert.match(csp, /connect-src 'self' https:\/\/\*\.ts\.net https:\/\/\*\.ts\.net:8443/);
+	assert.match(csp, /connect-src 'self' https:\/\/\*\.ts\.net:\*/);
 
 	const next = generateVapid();
 	const r = await phone.rpc("push", { subscription: SUB, vapid: next });
@@ -203,34 +203,28 @@ test("offers reach a phone that is offline as one notification, then on its stre
 	const deadline = Date.now() + 5000;
 	while (!laptop.pushed.some((p) => p.payload.offer) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
 	const note = laptop.pushed.find((p) => p.payload.offer);
-	assert.match(note?.payload.body ?? "", /^Add .+ to your sessions\?$/);
+	assert.match(note?.payload.body ?? "", /^Add .+ \(box\.tail1\.ts\.net\) to your sessions\? Asked on laptop\.$/);
+	assert.equal(note?.payload.kind, "add", "the phone shows Add on the notification for this kind only");
 	assert.equal(note?.payload.machine, "laptop-id");
 });
 
-test("enrol finds the box's HTTPS address the way its hub does: an existing serve, else a free port", () => {
+test("enrol finds the box's HTTPS address the way its hub does: an existing serve, else a free port", async () => {
+	const host = "box.tail1.ts.net";
 	const fake = (serve: object) => {
-		const bin = join(tmp(), "tailscale");
-		const log = `${bin}.log`;
-		const status = JSON.stringify({ BackendState: "Running", Self: { DNSName: "box.tail1.ts.net." } });
-		writeFileSync(
-			bin,
-			`#!/bin/sh\necho "$@" >> "${log}"\ncase "$1 $2" in\n"status --json") echo '${status}';;\n"serve status") echo '${JSON.stringify(serve)}';;\nesac\n`,
-		);
-		chmodSync(bin, 0o755);
-		return { bin, log };
+		const calls: string[][] = [];
+		const run = async (args: string[]) => {
+			calls.push(args);
+			const status = { BackendState: "Running", Self: { DNSName: `${host}.` } };
+			const out = args[0] === "status" ? JSON.stringify(status) : args[1] === "status" ? JSON.stringify(serve) : "";
+			return { code: 0, out, exited: Promise.resolve(0) };
+		};
+		return { run, calls };
 	};
 	const input = { from: "laptop", vapid: generateVapid(), phones: [{ id: "p", name: "phone" }] };
-	const run = (t: { bin: string }) => {
-		process.env.PI_MOBILE_TAILSCALE_BIN = t.bin;
-		try {
-			return cli.enrol(input, tmp()).origin;
-		} finally {
-			delete process.env.PI_MOBILE_TAILSCALE_BIN;
-		}
-	};
-	const existing = { TCP: { "8443": { HTTPS: true } }, Web: { "box.tail1.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:7878" } } } } };
-	assert.equal(run(fake(existing)), "https://box.tail1.ts.net:8443");
-	const busy = fake({ TCP: { "443": { HTTPS: true } }, Web: { "box.tail1.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:3000" } } } } });
-	assert.equal(run(busy), "https://box.tail1.ts.net:8443");
-	assert.match(readFileSync(busy.log, "utf8"), /serve --bg --https=8443 http:\/\/127\.0\.0\.1:7878/);
+	const existing = fake({ TCP: { 8443: { HTTPS: true } }, Web: { [`${host}:8443`]: { Handlers: { "/": { Proxy: "http://127.0.0.1:7878" } } } } });
+	assert.equal((await cli.enrol(input, tmp(), existing.run)).origin, `https://${host}:8443`);
+	const busy = fake({ TCP: { 443: { HTTPS: true } }, Web: { [`${host}:443`]: { Handlers: { "/": { Proxy: "http://127.0.0.1:3000" } } } } });
+	assert.equal((await cli.enrol(input, tmp(), busy.run)).origin, `https://${host}:8443`);
+	assert.deepEqual(busy.calls.at(-1), ["serve", "--bg", "--https=8443", "http://127.0.0.1:7878"]);
+	await assert.rejects(cli.enrol(input, tmp(), async () => undefined), /Tailscale isn't running/);
 });

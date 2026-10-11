@@ -405,8 +405,11 @@ export class Hub {
 			this.notified.add(o.id);
 			const sub = this.push.entries().find(([id]) => id === o.device)?.[1];
 			if (!sub || !this.devices.get(o.device)) continue;
-			const body = o.kind === "add" ? `Add ${o.machine.name} to your sessions?` : `${o.machine.name} was removed`;
-			void (this.opts.sendPush ?? sendPush)(sub, { title: "pi", body, machine: this.machine.id, offer: o.id }, this.push.vapid).catch(() => {});
+			// What the phone needs to decide from the lock screen: which computer, where, and who asked.
+			const where = o.origin ? ` (${hostOf(o.origin)})` : "";
+			const body = o.kind === "add" ? `Add ${o.machine.name}${where} to your sessions? Asked on ${o.from}.` : `${o.machine.name} was removed`;
+			const payload = { title: "pi", body, machine: this.machine.id, offer: o.id, kind: o.kind };
+			void (this.opts.sendPush ?? sendPush)(sub, payload, this.push.vapid).catch(() => {});
 		}
 	}
 
@@ -522,7 +525,7 @@ export class Hub {
 				return [];
 			}
 		});
-		return ["'self'", "https://*.ts.net", "https://*.ts.net:8443", ...new Set(extra)].join(" ");
+		return ["'self'", "https://*.ts.net:*", ...new Set(extra)].join(" ");
 	}
 
 	private async pair(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -689,5 +692,13 @@ async function readJson(req: IncomingMessage): Promise<any> {
 		return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 	} catch {
 		return undefined;
+	}
+}
+
+function hostOf(url: string): string {
+	try {
+		return new URL(url).host;
+	} catch {
+		return url;
 	}
 }

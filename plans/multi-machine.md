@@ -72,7 +72,7 @@ Each machine after the first needs Tailscale with HTTPS (`tailscale serve`), and
 - **Offers:** `src/hub.ts` delivers pending offers on the phone's stream (`machine_offer`) and drops them once acknowledged.
 - **Phone:** the offer sheet, "Add box? Added from laptop · box.tailnet.ts.net", with Add (primary) and Not now.
   - Not now revokes the phone's device on box.
-  - An offer is never added without Add.
+  - An offer is never added without Add. On Android the notification has an **Add** button; the service worker can't write the machine list, so it opens the app with `?accept=<offer id>` and the app adds it without a second tap.
 - **Tests:**
   - `test/enrol.test.ts`: a temp `PI_CODING_AGENT_DIR`; devices are per phone; keys differ per machine; no secrets in argv; refuses to replace a different VAPID key without `--force`.
   - `test/sponsor.test.ts`: a fake `ssh` on `PATH`, offers persisted and delivered once.
@@ -126,9 +126,9 @@ Then update:
 - `docs/ui.md` with the new components;
 - `plans/native-apps.md` if anything changed.
 
-## Status (2026-10-10, branch `multi-machine`)
+## Status (2026-10-11, on `main`, 0.2.0)
 
-- **Done:** steps 1–5 and 7, plus step 6's computer picker. The command is `bin/pi-mobile.mjs`: plain JavaScript, because Node won't strip TypeScript types inside `node_modules`, so `npx` runs it on a fresh box.
+- **Done:** steps 1–5 and 7, plus step 6's computer picker, and **Add** on the offer's notification (Android). The command is `bin/pi-mobile.mjs`: plain JavaScript, because Node won't strip TypeScript types inside `node_modules`, so `npx` runs it on a fresh box. The Tailscale Serve logic is `bin/tailscale.mjs`, shared with the hub (`src/expose.ts` re-exports it), so `enrol` finds a box's address exactly as its hub does.
 - **Covered by tests:**
   - `test/machines.test.ts`: enrol/add/remove, offers, CORS, CSP and the push key;
   - `test/fleet.test.ts`: real hubs; one list, routing, offline and back, revoked, duplicates;
@@ -140,7 +140,7 @@ Then update:
   - the iOS offline launch;
   - Chrome Local Network Access.
 
-`npx pi-mobile@<version> enrol` only works once a version with `bin/` is published. Until then, set `PI_MOBILE_ENROL` to a command that runs this checkout's `bin/pi-mobile.mjs enrol` on the box.
+`add` runs `npx pi-mobile@<this version> enrol` on the box, so the version must be on npm (0.2.0 is the first with `bin/`). `PI_MOBILE_ENROL` overrides the command, e.g. to run a checkout's `bin/pi-mobile.mjs enrol`.
 
 ## Open
 

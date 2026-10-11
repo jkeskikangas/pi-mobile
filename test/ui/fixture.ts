@@ -218,15 +218,15 @@ function boxOff(): void {
 	boxHub = undefined;
 }
 /** What `/remote add` does, minus ssh and HTTPS: enrol the box for every phone here, offer it to each. */
-async function offerBox(): Promise<void> {
+async function offerBox(prefix = "fx"): Promise<void> {
 	await boxOn();
 	const cli: any = await import(new URL("../../bin/pi-mobile.mjs", import.meta.url).href);
 	const phones = new DeviceStore(dir).list();
 	const push = new PushStore(dir);
-	const out = cli.enrol({ from: laptop.name, vapid: push.vapid, origin: `http://127.0.0.1:${BOX_PORT}`, phones: phones.map((p) => ({ id: p.id, name: p.name, sub: push.entries().find(([id]) => id === p.id)?.[1] })) }, boxDir);
+	const out = await cli.enrol({ from: laptop.name, vapid: push.vapid, origin: `http://127.0.0.1:${BOX_PORT}`, phones: phones.map((p) => ({ id: p.id, name: p.name, sub: push.entries().find(([id]) => id === p.id)?.[1] })) }, boxDir);
 	mkdirSync(join(dir, "offers"), { recursive: true });
 	for (const d of out.devices)
-		writeFileSync(join(dir, "offers", `fx${d.phone}.json`), JSON.stringify({ id: `fx${d.phone}`, device: d.phone, kind: "add", machine: box, origin: out.origin, d: d.d, k: d.k, from: laptop.name, createdAt: Date.now() }));
+		writeFileSync(join(dir, "offers", `${prefix}${d.phone}.json`), JSON.stringify({ id: `${prefix}${d.phone}`, device: d.phone, kind: "add", machine: box, origin: out.origin, d: d.d, k: d.k, from: laptop.name, createdAt: Date.now() }));
 }
 
 const [api, web] = fakes;
@@ -272,6 +272,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 		emit(web, { type: "reset" });
 	}
 	if (cmd === "box") await offerBox();
+	if (cmd === "box again") await offerBox("fx2");
 	if (cmd === "box off") boxOff();
 	if (cmd === "box on") await boxOn();
 	if (cmd === "pair") console.log(hub.createPairing().links.map((l) => l.url).join("\n"));
@@ -280,4 +281,4 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 const lan = hub.createPairing().links;
 console.log(`pi-mobile UI fixture on port ${port}. Pair:`);
 for (const l of lan) console.log(`  ${l.label}: ${l.url}`);
-console.log("stdin: work | ask | pick | done | quiet | pair | box | box off | box on");
+console.log("stdin: work | ask | pick | done | quiet | pair | box | box again | box off | box on");
