@@ -69,10 +69,8 @@ final class AppModel {
     /// or the user confirms. Stored before published: on a failed write nothing changes and this throws.
     func webMachines(_ list: [Machine]) async throws {
         var next = machines
-        // A computer the page adds must be HTTPS (OriginPolicy); one already stored keeps its entry until re-paired.
-        if let bad = list.first(where: { m in OriginPolicy.problem(m.origin) != nil && !machines.contains { $0.id == m.id && $0.origin == m.origin } }) {
-            throw HubError.remote(OriginPolicy.problem(bad.origin) ?? OriginPolicy.plainHTTPMessage)
-        }
+        // HTTPS only (OriginPolicy): a list with a plain-HTTP computer changes nothing.
+        if let p = list.lazy.compactMap({ OriginPolicy.problem($0.origin) }).first { throw HubError.remote(p) }
         for m in list {
             if let i = next.firstIndex(where: { $0.id == m.id }) { next[i] = m } else { next.append(m) }
         }

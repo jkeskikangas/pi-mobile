@@ -25,19 +25,19 @@ final class OriginPolicyTests: XCTestCase {
         XCTAssertThrowsError(try HubClient(machine: m))
     }
 
-    func testWebCannotAddAPlainHTTPComputerButKeepsOldOnes() async throws {
+    func testWebCannotAddAPlainHTTPComputer() async throws {
         let store = MachineStore(keychain: Keychain(service: "pi-origin-tests", accessGroup: nil))
         store.clear()
         defer { store.clear() }
         let key = Base64URL.encode(Data(repeating: 3, count: 32))
-        let old = Machine(id: "old", name: "Old", origin: "http://192.168.1.5:7777", d: "d", k: key, primary: true)
+        let old = Machine(id: "old", name: "Old", origin: "https://old.tail1.ts.net", d: "d", k: key, primary: true)
         try store.save([old])
         let model = AppModel(store: store, prefs: VoicePrefs(defaults: UserDefaults(suiteName: UUID().uuidString)!))
         let added = Machine(id: "new", name: "New", origin: "http://10.0.0.9:7777", d: "d2", k: key)
         do { try await model.webMachines([old, added]); XCTFail() } catch {
             XCTAssertEqual(error as? HubError, .remote(OriginPolicy.plainHTTPMessage))
         }
-        XCTAssertEqual(model.machines.map(\.id), ["old"], "the old http computer stays, to be re-paired")
+        XCTAssertEqual(model.machines.map(\.id), ["old"], "nothing changed")
         let secure = Machine(id: "new", name: "New", origin: "https://new.tail1.ts.net", d: "d2", k: key)
         try await model.webMachines([old, secure])
         XCTAssertEqual(Set(model.machines.map(\.id)), ["old", "new"])
