@@ -1402,7 +1402,9 @@
 			clearInterval(this.vadTimer);
 			this.vadTimer = null;
 			this.cturn = null;
-			if (this.serverTurns) this.rt({ type: "session.update", session: { type: "realtime", audio: { input: { turn_detection: this.serverTurns } } } });
+			// Never leave the session without turn detection: nothing would end your next turn.
+			const turns = this.serverTurns || { type: "semantic_vad", eagerness: "auto", create_response: false, interrupt_response: false };
+			this.rt({ type: "session.update", session: { type: "realtime", audio: { input: { turn_detection: turns } } } });
 		}
 
 		clientVadFrame() {
@@ -1483,6 +1485,8 @@
 			switch (ev.type) {
 				// While pi is silent the server's semantic VAD finds your turns; while pi speaks the phone
 				// does (clientTurns below), because the server cuts pi's audio on any sound at all.
+				// The bridge sets turn detection when it creates the call, so it arrives in session.created.
+				case "session.created":
 				case "session.updated":
 					if (ev.session?.audio?.input?.turn_detection && !this.serverTurns) this.serverTurns = ev.session.audio.input.turn_detection;
 					break;
