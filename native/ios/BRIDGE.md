@@ -40,6 +40,8 @@ Handler name `piNative`, registered with `WKScriptMessageHandlerWithReply` (`add
 | `prefs` | `key: string`, `value: string` | A voice preference changed in the web UI | `null` (ignored). Store in `UserDefaults`; write it back into `localStorage` at next document start. |
 | `machines` | `machines: Entry[]` (the full list, shape above) | Every time the web saves its list: computer added (offer accepted, scan/paste), removed, renamed, re-paired, or learned its id | `null` (ignored). Native diffs against the Keychain by `id`: **new or changed entries are stored** (changed `d`/`k` = re-paired). **A missing entry is removed** only if that computer answers HTTP 401 to a sealed `hub` RPC with the stored `d`/`k`, or the user confirms a native alert ("Forget ‹name› on this iPhone?"); otherwise keep it (it is injected again next load). |
 | `unpaired` | — | The user unpaired, revoked this device, removed the last computer, or every computer answered 401 | `null` (ignored). Same rule as removals: for each Keychain entry, delete it if its computer answers 401 (the web revokes before unpairing) or the user confirms a native alert; then, if nothing is left, show the pairing screen. Not sent on the silent startup path where the page simply finds no device. A `machines` message with `[]` usually precedes it. |
+| `push.status` | — | Once at page start | `{ on: boolean, permission: "granted" \| "denied" \| "default" }`: `on` = the user turned notifications on in the app, iOS allows them, and APNs gave a token. |
+| `push.enable` | `on: boolean` | The Notifications row in the menu ("Turn on/off notifications") | The new `push.status` value. `on: true` asks iOS for permission (only here, never at first launch), gets the APNs token and sends `push { apns: { token, sandbox } }` to **every** paired computer (again whenever the token changes or a computer is added); `on: false` sends `push { apns: null }` to each. Errors: `Notifications are off for pi. Turn them on in Settings.`, or the build has no push entitlement (README → Push). |
 
 `prefs` keys (all strings):
 
@@ -67,13 +69,14 @@ Call with `webView.evaluateJavaScript("window.PiNative.<fn>(…)")` on the main 
 |---|---|---|---|
 | `level(x)` | `number` 0–1, linear RMS amplitude (e.g. `pow(10, averagePower/20)` from `AVAudioRecorder`, metering on) | While dictating, ~20–60 times a second | Drives the recorder strip's waveform (the last value is sampled every animation frame). |
 | `dictationEnded(message?)` | optional `string` | Recording stopped on the native side without the web asking (interruption, route loss, error) | Drops the take and the recording UI (also a pending start); shows `message` as an error if given. Native discards the audio. |
+| `focus(machine, agent)` | `string` hub machine id (may be `""`), `string` session id | The user tapped a notification (or "Answer by voice" on one); sent once the page has loaded | Closes any sheet and opens that session (`openAgent`). |
 | `voiceClosed()` | — | The native voice screen was dismissed and the web view is visible again | Reloads the focused session (`loadCurrent()`) so the transcript catches up. |
 
 ## What the web changes when `window.PiNative` exists
 
 - Header voice button → `voice.start` instead of the web voice screen; no HTTPS check; any dictation in progress is dropped first.
 - Composer dictation records natively (above); transcription, raw/undo chips and `learn` are unchanged.
-- The menu has no Notifications section (no Web Push in `WKWebView`) until push lands (plan Step 9).
+- The menu's Notifications row uses `push.status` / `push.enable` instead of Web Push (none in `WKWebView`); with no computer reporting `apns` in its `hub` result, a note points to `/remote settings`.
 - Voice preference writes also post `prefs`; machine-list saves post `machines`.
 - Unpairing posts `unpaired`.
 

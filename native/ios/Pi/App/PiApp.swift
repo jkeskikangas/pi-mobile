@@ -3,12 +3,14 @@ import SwiftUI
 @main
 struct PiApp: App {
     @State private var model = AppModel()
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
                 .tint(Color.accentColor)
+                .onAppear { PushCenter.shared.attach(model) }
         }
     }
 }

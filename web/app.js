@@ -165,6 +165,11 @@
 		} catch {}
 	}
 
+	/** A native call whose reply matters (inside the app only); rejects with the app's sentence. */
+	function callNative(msg) {
+		return Promise.resolve(window.webkit?.messageHandlers?.piNative?.postMessage(msg));
+	}
+
 	function unpaired(reason) {
 		// In the native app, a real unpair (always with a reason) also clears its Keychain (native/ios/BRIDGE.md).
 		if (reason) toNative({ type: "unpaired" });
@@ -260,6 +265,8 @@
 			// The subscription's own key wins; without one, the computer serving the app decides.
 			if (!S.push.fromSub && (fleet.get(id)?.primary || !S.push.key)) S.push.key = hub.pushKey;
 			S.push.on = S.push.on || !!hub.pushOn;
+			// iPhone app: a computer can send APNs once its key is set (/remote settings).
+			S.push.apns = S.push.apns || !!hub.apns;
 			// Every machine notifies on its own: give one that doesn't know this phone's subscription.
 			S.pushKeys.set(id, hub.pushKey);
 			if (S.push.on && (!hub.pushOn || hub.pushKey !== S.push.key)) shareSubscription(id);
@@ -1632,10 +1639,14 @@
 				"",
 				"refresh",
 			);
-			// Web Push does not exist in the native app's web view, so it has no Notifications section.
-			if (!window.PiNative) section(body, "Notifications");
+			section(body, "Notifications");
 			if (window.PiNative) {
-				// Native notifications arrive with Step 9 of plans/native-apps.md.
+				// The app's own notifications (APNs, native/ios/BRIDGE.md `push.*`): the permission is asked on this tap.
+				g = group(body);
+				const n = S.push.native;
+				if (n?.on) add("Turn off notifications", () => setNativePush(false), "", "bell", "You get one when pi finishes or asks");
+				else add("Turn on notifications", () => setNativePush(true), "", "bell", n?.permission === "denied" ? "Allow them for pi in iPhone Settings first" : "When pi finishes or needs you");
+				if (!S.push.apns) body.appendChild(el("p", "note", "Your computer sends them once it has an Apple push key: run /remote settings there."));
 			} else if (!pushSupported()) {
 				if (window.isSecureContext) body.appendChild(el("p", "note", "On iPhone, add this page to your Home Screen (Share → Add to Home Screen) and open pi from there to get lock-screen notifications."));
 				else secureMove(body, "Lock-screen notifications need this page on a secure (HTTPS) address.");
@@ -1834,6 +1845,16 @@
 	// ── lock-screen notifications ─────────────────────────────────────────────────
 	function pushSupported() {
 		return window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+	}
+
+	async function setNativePush(on) {
+		closeSheet();
+		try {
+			S.push.native = await callNative({ type: "push.enable", on });
+			toast(on ? "Notifications on" : "Notifications off");
+		} catch (e) {
+			toast(`Notifications: ${e.message}`, "error");
+		}
 	}
 
 	async function setPush(on) {
@@ -2207,6 +2228,16 @@
 
 	async function main() {
 		wire();
+		if (window.PiNative) {
+			// A tapped notification: show that session (native/ios/BRIDGE.md `focus`).
+			window.PiNative.focus = (machine, agent) => {
+				closeSheet();
+				openAgent(String(agent || ""));
+			};
+			callNative({ type: "push.status" })
+				.then((s) => (S.push.native = s))
+				.catch(() => {});
+		}
 		// Opened from a notification: jump to that session.
 		const query = new URLSearchParams(location.search);
 		const fromPush = query.get("agent");

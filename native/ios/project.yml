@@ -30,18 +30,25 @@ targets:
     dependencies:
       - package: Sodium
       - target: PiWidgets
-    entitlements:
-      path: Pi/App/Pi.entitlements
-      properties:
-        keychain-access-groups:
-          - $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
+      - target: PiNotifications
+    # Entitlements: Pi/App/Pi.entitlements (keychain group), or PiPush.entitlements when PI_PUSH=YES (below).
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PI_BUNDLE_PREFIX).pi
         PRODUCT_NAME: Pi
+        # Push needs a paid team: PI_PUSH=YES switches to PiPush.entitlements (aps-environment). README → Push.
+        PI_PUSH: NO
+        PI_ENTITLEMENTS_NO: Pi/App/Pi.entitlements
+        PI_ENTITLEMENTS_YES: Pi/App/PiPush.entitlements
+        CODE_SIGN_ENTITLEMENTS: $(PI_ENTITLEMENTS_$(PI_PUSH))
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         INFOPLIST_KEY_CFBundleDisplayName: pi
+      configs:
+        Debug:
+          PI_APS_ENVIRONMENT: development
+        Release:
+          PI_APS_ENVIRONMENT: production
     info:
       path: Pi/App/Info.plist
       properties:
@@ -80,6 +87,37 @@ targets:
         CFBundleDisplayName: pi
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  PiNotifications:
+    # Notification Service Extension: opens the sealed text of an APNs alert with the shared-Keychain device key.
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PiNotifications
+      - path: Pi/Core/PushContent.swift
+      - path: Pi/Core/Envelope.swift
+      - path: Pi/Core/JSON.swift
+      - path: Pi/Core/Keychain.swift
+      - path: Pi/Core/Models.swift
+    dependencies:
+      - package: Sodium
+    entitlements:
+      path: PiNotifications/PiNotifications.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PI_BUNDLE_PREFIX).pi.notifications
+        PRODUCT_NAME: PiNotifications
+        SKIP_INSTALL: YES
+    info:
+      path: PiNotifications/Info.plist
+      properties:
+        CFBundleDisplayName: pi
+        PiKeychainGroup: $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
   PiTests:
     type: bundle.unit-test
     platform: iOS

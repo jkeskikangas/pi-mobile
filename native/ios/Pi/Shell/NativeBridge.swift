@@ -35,6 +35,10 @@ struct NativeBridge {
                 let audio = try await dictation.stop()
                 return .value(["audio": .string(audio.base64EncodedString()), "mime": "audio/mp4"])
             } catch { return .error(error.localizedDescription) }
+        case "push.status":
+            return .value(await PushCenter.shared.status())
+        case "push.enable":
+            do { return .value(try await PushCenter.shared.enable(body["on"]?.bool ?? true)) } catch { return .error(error.localizedDescription) }
         case "dictation.cancel":
             dictation.cancel()
             return .value(.null)

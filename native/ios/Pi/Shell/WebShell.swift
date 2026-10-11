@@ -67,6 +67,7 @@ struct WebShell: UIViewRepresentable {
         func load(_ web: WKWebView) {
             guard let url = origin.map({ $0.appending(path: "") }) else { return parent.phase = .offline("That computer's address isn't valid. Pair it again.") }
             parent.phase = .loading
+            PushCenter.shared.pageUnloaded()
             // Fresh on every load: the Keychain is the source of truth for machines and prefs.
             let ucc = web.configuration.userContentController
             ucc.removeAllUserScripts()
@@ -112,6 +113,7 @@ struct WebShell: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             parent.phase = .ready
+            PushCenter.shared.pageLoaded { [weak webView] s in webView?.evaluateJavaScript(s) }
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

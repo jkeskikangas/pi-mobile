@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Used instead of Pi.entitlements when PI_PUSH=YES (needs a paid team; README → Push). Keep the keychain group in sync. -->
+<plist version="1.0">
+<dict>
+	<key>aps-environment</key>
+	<string>$(PI_APS_ENVIRONMENT)</string>
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared</string>
+	</array>
+</dict>
+</plist>

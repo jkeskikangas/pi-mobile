@@ -35,6 +35,7 @@ final class AppModel {
         let next = store.adding(m, to: machines)
         try store.save(next)
         machines = next
+        PushCenter.shared.machinesChanged()
     }
 
     /// One sealed client per machine; rebuilt when a computer is re-paired.
@@ -62,6 +63,7 @@ final class AppModel {
         let missing = machines.filter { m in !list.contains { $0.id == m.id } }
         machines = next
         try? store.save(machines) // the page re-sends its list on every change; the next save retries
+        PushCenter.shared.machinesChanged()
         await reconcile(missing)
     }
 
