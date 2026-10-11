@@ -18,6 +18,28 @@ final class VoiceActivityTests: XCTestCase {
         XCTAssertEqual(S.make(state: "working", label: "pi is on it", question: nil, muted: false, started: t0).started, t0)
     }
 
+    func testFitsTheSizeBudget() {
+        let huge = String(repeating: "Ä😀 ", count: 5000)
+        let s = S.make(state: "asking", label: huge, question: huge, muted: true, started: t0, sessionName: huge, machine: huge)
+        XCTAssertLessThanOrEqual(s.encodedSize, S.byteBudget)
+        XCTAssertLessThanOrEqual(s.sessionName.count, 80)
+        XCTAssertLessThanOrEqual(s.machine?.count ?? 0, 40)
+        XCTAssertTrue(s.question?.hasSuffix("…") ?? false)
+        XCTAssertEqual(S.make(state: "asking", label: "", question: "Run it?", muted: false, started: t0).question, "Run it?")
+    }
+
+    func testIdentityIsContent() {
+        let s = S.make(state: "working", label: "", question: nil, muted: false, started: t0, sessionName: " ", machine: "studio")
+        XCTAssertEqual(s.title, "pi · studio")
+        XCTAssertNotEqual(s, S.make(state: "working", label: "", question: nil, muted: false, started: t0, sessionName: "web", machine: "studio"))
+    }
+
+    @MainActor func testEngineSessionFlowsIntoContent() {
+        let e = VoiceEngine.fixture { $0.preview(state: .listening, sessionName: "api", machineName: .some("box")) }
+        let s = VoiceActivityController.content(e, started: t0)
+        XCTAssertEqual(s.title, "api · box")
+    }
+
     func testPaletteFollowsState() {
         let asking = S.make(state: "asking", label: "", question: nil, muted: false, started: t0).palette
         let listening = S.make(state: "listening", label: "", question: nil, muted: false, started: t0).palette

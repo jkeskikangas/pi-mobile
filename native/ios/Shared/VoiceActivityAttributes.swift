@@ -14,22 +14,39 @@ struct VoiceActivityAttributes: ActivityAttributes {
         /// pi's open question, only while asking.
         var question: String?
         var muted: Bool
+        /// In the content, not the attributes: switching session in voice mode changes the heading.
+        var sessionName: String
+        /// Shown only while more than one machine is online.
+        var machine: String?
     }
-
-    var sessionName: String
-    /// Shown only while more than one machine is online.
-    var machine: String?
 }
 
 extension VoiceActivityAttributes.ContentState {
+    /// ActivityKit drops updates over 4 KB (attributes + content); stay well under it.
+    static let byteBudget = 2048
+
     /// The state → content mapping (unit tested). `label` is the engine's state word; speaking has none on the
-    /// voice screen (the captions say it), so the activity names it.
-    static func make(state: String, label: String, question: String?, muted: Bool, started: Date) -> Self {
+    /// voice screen (the captions say it), so the activity names it. Text is clipped to fit `byteBudget`.
+    static func make(state: String, label: String, question: String?, muted: Bool, started: Date,
+                     sessionName: String = "pi", machine: String? = nil) -> Self {
         let q = state == "asking" ? question?.trimmingCharacters(in: .whitespacesAndNewlines) : nil
         var l = label.isEmpty ? (state == "speaking" ? "pi is speaking" : state.capitalized) : label
         if muted, state != "paused" { l += " · mic off" }
-        return Self(state: state, label: l, started: started, question: q?.isEmpty == false ? q : nil, muted: muted)
+        let name = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        var s = Self(state: state, label: clip(l, 60), started: started, question: q?.isEmpty == false ? clip(q!, 300) : nil,
+                     muted: muted, sessionName: clip(name.isEmpty ? "pi" : name, 80), machine: machine.map { clip($0, 40) })
+        // Multi-byte text can still be large: shorten the question until the encoded state fits.
+        while s.encodedSize > byteBudget, let cur = s.question, cur.count > 1 {
+            s.question = clip(cur, cur.count / 2)
+        }
+        return s
     }
+
+    var encodedSize: Int { (try? JSONEncoder().encode(self).count) ?? .max }
+
+    static func clip(_ s: String, _ n: Int) -> String { s.count <= n ? s : String(s.prefix(max(0, n - 1))) + "…" }
+
+    var title: String { machine.map { "\(sessionName) · \($0)" } ?? sessionName }
 
     /// The orb's palette (`web/app.css` `.voice[data-state]`, dark tokens): the dot's two stops.
     var palette: (Color, Color) {

@@ -21,7 +21,12 @@ struct StartVoiceIntent: AudioRecordingIntent {
             try await requestToContinueInForeground("Open pi to start voice mode.")
             try c.startActivity(for: target)
         }
-        try await c.startEngine(for: target)
+        do {
+            try await c.startEngine(for: target)
+        } catch {
+            c.endActivity()
+            throw error
+        }
         #endif
         return .result()
     }

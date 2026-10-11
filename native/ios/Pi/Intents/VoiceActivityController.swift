@@ -23,6 +23,9 @@ final class VoiceActivityController {
     func attach(_ m: AppModel) {
         guard model !== m else { return }
         model = m
+        // Left over from a crash or a kill: no engine runs them any more. Ids taken now, so a start that
+        // follows (an intent) is not ended by mistake.
+        for id in Activity<VoiceActivityAttributes>.activities.map(\.id) where id != activity?.id { endLater(id) }
         observe()
     }
 
@@ -49,7 +52,8 @@ final class VoiceActivityController {
     }
 
     static func content(_ e: VoiceEngine, started: Date) -> VoiceActivityAttributes.ContentState {
-        .make(state: e.state.rawValue, label: e.label, question: e.question?.title, muted: e.muted, started: started)
+        .make(state: e.state.rawValue, label: e.label, question: e.question?.title, muted: e.muted, started: started,
+              sessionName: e.sessionName, machine: e.machineName)
     }
 
     // MARK: activity
@@ -58,9 +62,9 @@ final class VoiceActivityController {
     func startActivity(for t: Target, state: VoiceActivityAttributes.ContentState? = nil) throws {
         if activity != nil { return }
         started = Date()
-        let s = state ?? .make(state: "connecting", label: "Connecting…", question: nil, muted: false, started: started)
-        let attrs = VoiceActivityAttributes(sessionName: t.name.isEmpty ? "pi" : t.name, machine: t.machineName)
-        activity = try Activity.request(attributes: attrs, content: .init(state: s, staleDate: nil), pushType: nil)
+        let s = state ?? .make(state: "connecting", label: "Connecting…", question: nil, muted: false, started: started,
+                               sessionName: t.name, machine: t.machineName)
+        activity = try Activity.request(attributes: VoiceActivityAttributes(), content: .init(state: s, staleDate: nil), pushType: nil)
         last = s
     }
 
@@ -71,11 +75,15 @@ final class VoiceActivityController {
         Task { await Self.find(id)?.update(.init(state: s, staleDate: nil)) }
     }
 
-    private func endActivity() {
+    /// Also the intent's rollback when the engine fails to start (no activity stuck on "Connecting…").
+    func endActivity() {
         guard let a = activity else { return }
         activity = nil
         last = nil
-        let id = a.id
+        endLater(a.id)
+    }
+
+    private func endLater(_ id: String) {
         Task { await Self.find(id)?.end(nil, dismissalPolicy: .immediate) }
     }
 
@@ -136,7 +144,6 @@ final class VoiceActivityController {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-PiFakeVoice"), i + 1 < args.count else { return }
-        for a in Activity<VoiceActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) }
         guard let e = engine, let state = VoiceState(rawValue: args[i + 1]) else { return }
         let q = VoiceQuestion(id: "q", kind: "confirm", title: "Delete the old build folder and re-run the tests?", message: nil,
                               destructive: true, options: [], grace: nil)

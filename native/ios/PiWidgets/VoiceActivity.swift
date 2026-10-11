@@ -7,7 +7,7 @@ import WidgetKit
 struct VoiceActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VoiceActivityAttributes.self) { ctx in
-            VoiceLockScreen(attributes: ctx.attributes, state: ctx.state)
+            VoiceLockScreen(state: ctx.state)
                 .activitySystemActionForegroundColor(.primary)
         } dynamicIsland: { ctx in
             let s = ctx.state
@@ -15,7 +15,7 @@ struct VoiceActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 8) {
                         VoiceDot(state: s, size: 14)
-                        Text(ctx.attributes.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                     }
                     .padding(.leading, 4)
                 }
@@ -41,10 +41,6 @@ struct VoiceActivity: Widget {
             .keylineTint(s.palette.0)
         }
     }
-}
-
-extension VoiceActivityAttributes {
-    var title: String { machine.map { "\(sessionName) · \($0)" } ?? sessionName }
 }
 
 /// The orb as a dot: a gradient in the state's colours, a slashed mic when muted. Flat in always-on.
@@ -113,7 +109,6 @@ struct VoiceButtons: View {
 }
 
 struct VoiceLockScreen: View {
-    var attributes: VoiceActivityAttributes
     var state: VoiceActivityAttributes.ContentState
 
     var body: some View {
@@ -121,7 +116,7 @@ struct VoiceLockScreen: View {
             HStack(alignment: .top, spacing: 12) {
                 VoiceDot(state: state, size: 22).padding(.top, 2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(attributes.title).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(state.title).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
                     VoiceText(state: state, prominent: true)
                 }
                 VoiceTimer(state: state).font(.subheadline).foregroundStyle(.secondary)
