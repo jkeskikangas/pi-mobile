@@ -16,6 +16,7 @@ final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate 
         }
         let s = AVAudioSession.sharedInstance()
         let url = FileManager.default.temporaryDirectory.appending(path: "dictation-\(UUID().uuidString).m4a")
+        var made: AVAudioRecorder?
         do {
             try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try s.setActive(true)
@@ -25,11 +26,15 @@ final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate 
                 AVNumberOfChannelsKey: 1,
                 AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
             ])
+            made = r
             r.delegate = self
             r.isMeteringEnabled = true
             guard r.record() else { throw DictationError(message: "couldn't start recording.") }
             recorder = r
         } catch {
+            made?.delegate = nil
+            made?.stop()
+            try? FileManager.default.removeItem(at: url)
             teardown()
             throw error is DictationError ? error : DictationError(message: "couldn't start recording (\(error.localizedDescription)).")
         }

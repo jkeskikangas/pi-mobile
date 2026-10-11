@@ -5,7 +5,8 @@ import UIKit
 @MainActor
 protocol DictationControl: AnyObject {
     /// Stops and discards a recording (or a pending start/stop) without telling the page; no-op when idle.
-    func cancelIfActive()
+    /// Returns once a pending start has resolved and released the microphone, so the caller can take audio ownership.
+    func cancelIfActive() async
 }
 
 /// The audio side, swapped for a fake in tests.
@@ -56,7 +57,11 @@ final class Dictation: DictationControl {
         guard state == .idle else { throw DictationError(message: "already recording.") }
         state = .starting
         let mine = take
-        let task = Task { try await recorder.start() }
+        let task = Task { [recorder] in
+            try await recorder.start()
+            // Cancelled (or ended) while starting: release the mic here, so draining this task means it's free.
+            if self.take != mine { recorder.cancel() }
+        }
         startTask = task
         do {
             try await task.value
@@ -67,8 +72,8 @@ final class Dictation: DictationControl {
             throw error
         }
         startTask = nil
-        // Cancelled (or ended) while starting: the take is gone; the web sends cancel anyway.
-        guard take == mine else { recorder.cancel(); return }
+        // The take was given up while starting (the task already released the mic); the web sends cancel anyway.
+        guard take == mine else { return }
         state = .recording
         haptic()
     }
@@ -98,7 +103,11 @@ final class Dictation: DictationControl {
         // .starting: start() cancels the recorder once it resolves.
     }
 
-    func cancelIfActive() { if state != .idle { cancel() } }
+    func cancelIfActive() async {
+        let pending = startTask
+        if state != .idle { cancel() }
+        _ = try? await pending?.value
+    }
 
     private func systemEnded(_ message: String) {
         guard state != .idle else { return }

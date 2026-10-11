@@ -53,6 +53,7 @@ struct WebShell: UIViewRepresentable {
 
     static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) {
         web.configuration.userContentController.removeAllScriptMessageHandlers()
+        Dictation.shared.cancel() // the page that owned the take is gone
     }
 
     @MainActor
@@ -73,6 +74,7 @@ struct WebShell: UIViewRepresentable {
             guard let url = origin.map({ $0.appending(path: "") }) else { return parent.phase = .offline("That computer's address isn't valid. Pair it again.") }
             parent.phase = .loading
             PushCenter.shared.pageUnloaded()
+            Dictation.shared.cancel() // reload or content-process loss: the old page's take is gone
             // Fresh on every load: the Keychain is the source of truth for machines and prefs.
             let ucc = web.configuration.userContentController
             ucc.removeAllUserScripts()

@@ -12,7 +12,7 @@ extension Notification.Name {
 @MainActor
 enum VoiceHost {
     static func start(model: AppModel, agent: String, machine: String, dictation: DictationControl?) async throws {
-        dictation?.cancelIfActive()
+        await dictation?.cancelIfActive()
         let e = model.voice
         if e.isOpen {
             await e.start(agent: agent, machine: machine)

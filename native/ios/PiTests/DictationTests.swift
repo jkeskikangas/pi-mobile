@@ -97,7 +97,23 @@ final class DictationTests: XCTestCase {
         XCTAssertTrue(sent[0].contains("level(0.500)"))
         XCTAssertTrue(sent[1].contains("dictationEnded(\"Dictation stopped: the microphone was disconnected.\")"))
         XCTAssertEqual(d.state, .idle)
-        d.cancelIfActive()
+        await d.cancelIfActive()
         XCTAssertEqual(f.cancels, 0)
+    }
+
+    func testCancelIfActiveDrainsAPendingStart() async throws {
+        let (d, f, _) = make()
+        f.holdStart = true
+        let s = Task { try await d.start() }
+        await spin()
+        let drained = Task { await d.cancelIfActive(); return f.cancels }
+        await spin()
+        XCTAssertEqual(f.cancels, 0)
+        f.gate?.resume()
+        let cancelsWhenDrained = await drained.value
+        XCTAssertEqual(cancelsWhenDrained, 1) // the mic was released before the caller resumed
+        try await s.value
+        XCTAssertEqual(d.state, .idle)
+        XCTAssertEqual(f.cancels, 1)
     }
 }
