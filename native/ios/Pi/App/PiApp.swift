@@ -32,6 +32,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: model.primary?.id)
         .task { await model.debugAutoPair() }
+        .task { await VoiceActivityController.shared.debugFake() }
     }
 }
 

@@ -91,8 +91,12 @@ targets:
     sources:
       - path: PiWidgets
       - path: Shared
+      # The intents the Live Activity buttons and the Control widget run (they perform in the app process).
+      - path: Pi/Intents/LiveActivityIntents.swift
+      - path: Pi/Intents/StartVoiceIntent.swift
     settings:
       base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PI_WIDGETS
         PRODUCT_BUNDLE_IDENTIFIER: $(PI_BUNDLE_PREFIX).pi.widgets
         PRODUCT_NAME: PiWidgets
         SKIP_INSTALL: YES
