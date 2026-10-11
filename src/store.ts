@@ -6,6 +6,7 @@ import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { b64u, randomKey } from "./crypto.ts";
 import type { ApnsConfig, ApnsToken } from "./apns.ts";
+import type { RelayTarget } from "./relay.ts";
 import { generateVapid, type PushSubscriptionJSON, type Vapid } from "./webpush.ts";
 
 /** Every paired device has full control. (A view-only role existed until 0.1.3.) */
@@ -260,12 +261,12 @@ export class OfferStore {
 /** VAPID keys and each device's push subscription. Only the hub writes it. */
 export class PushStore {
 	private readonly path: string;
-	private state: { vapid: Vapid; subs: Record<string, PushSubscriptionJSON>; apns?: Record<string, ApnsToken> };
+	private state: { vapid: Vapid; subs: Record<string, PushSubscriptionJSON>; apns?: Record<string, ApnsToken>; relay?: Record<string, RelayTarget> };
 
 	constructor(dir = stateDir()) {
 		this.path = join(dir, "push.json");
-		const raw = readJson<{ vapid?: Vapid; subs?: Record<string, PushSubscriptionJSON>; apns?: Record<string, ApnsToken> }>(this.path, {});
-		this.state = { vapid: raw.vapid ?? generateVapid(), subs: raw.subs ?? {}, apns: raw.apns ?? {} };
+		const raw = readJson<{ vapid?: Vapid; subs?: Record<string, PushSubscriptionJSON>; apns?: Record<string, ApnsToken>; relay?: Record<string, RelayTarget> }>(this.path, {});
+		this.state = { vapid: raw.vapid ?? generateVapid(), subs: raw.subs ?? {}, apns: raw.apns ?? {}, relay: raw.relay ?? {} };
 		if (!raw.vapid) this.save();
 	}
 
@@ -297,6 +298,18 @@ export class PushStore {
 	setApns(deviceId: string, token: ApnsToken | undefined): void {
 		const all = (this.state.apns ??= {});
 		if (token) all[deviceId] = token;
+		else delete all[deviceId];
+		this.save();
+	}
+
+	/** App Store app: a push relay URL and its capability for this device (the token stays with the relay). */
+	relayEntries(): [string, RelayTarget][] {
+		return Object.entries(this.state.relay ?? {});
+	}
+
+	setRelay(deviceId: string, target: RelayTarget | undefined): void {
+		const all = (this.state.relay ??= {});
+		if (target) all[deviceId] = target;
 		else delete all[deviceId];
 		this.save();
 	}

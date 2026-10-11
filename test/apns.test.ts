@@ -204,7 +204,7 @@ test("attention reaches iPhone tokens with a generic alert and the text sealed t
 		await assert.rejects(phone.rpc("push", { apns: { token: TOKEN, sandbox: "yes" } }), /invalid/);
 		await phone.rpc("push", { apns: { token: TOKEN } });
 		assert.deepEqual(push.apnsEntries()[0][1], { token: TOKEN }, "no sandbox flag: the machine's config decides");
-		assert.deepEqual(await phone.rpc("push", { apns: { token: TOKEN, sandbox: true } }), { ok: true, apns: true });
+		assert.deepEqual(await phone.rpc("push", { apns: { token: TOKEN, sandbox: true } }), { ok: true, apns: true, relay: true, relayOn: false });
 		assert.equal((await phone.rpc("hub")).apnsOn, true);
 
 		link.send({ t: "attention", title: "proj asks", body: "Allow rm?", urgent: true });

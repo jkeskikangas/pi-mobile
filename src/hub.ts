@@ -19,6 +19,7 @@ import { type AgentEvent, type AgentInfo, type HubEvent, PROTOCOL } from "./prot
 import { type Config, type Device, DeviceStore, type MachineIdentity, machineIdentity, type Offer, OfferStore, PushStore, type Role } from "./store.ts";
 import { type PushSubscriptionJSON, sendPush, type Vapid } from "./webpush.ts";
 import { ApnsClient, apnsConfigured, isApnsToken } from "./apns.ts";
+import { isRelayTarget, RelayClient, relayUrl } from "./relay.ts";
 
 export const LINK_PROTOCOL = "pi-mobile-link";
 const WEB_DIR = fileURLToPath(new URL("../web/", import.meta.url));
@@ -73,6 +74,8 @@ export interface HubOptions {
 	sendPush?: typeof sendPush;
 	/** Replaceable in tests; defaults to a client built from `config.apns`. */
 	apns?: ApnsClient;
+	/** Replaceable in tests; defaults to a relay client over global fetch. */
+	relay?: RelayClient;
 	offers?: OfferStore;
 	/** This machine (default: `machine.json`). */
 	machine?: MachineIdentity;
@@ -307,7 +310,7 @@ export class Hub {
 			case "revoke": {
 				const ids: string[] = Array.isArray(p?.ids) ? p.ids : [];
 				const removed = this.devices.remove(ids);
-				for (const id of ids) this.push.set(id, undefined), this.push.setApns(id, undefined);
+				for (const id of ids) this.push.set(id, undefined), this.push.setApns(id, undefined), this.push.setRelay(id, undefined);
 				this.dropStreams(ids);
 				return removed.map(publicDevice);
 			}
@@ -351,7 +354,19 @@ export class Hub {
 				const sealed = seal(unb64u(device.key), payload);
 				if ((await apns.send(token, { sealed, urgent: msg.urgent })) === "gone") this.push.setApns(id, undefined);
 			}),
+			// App Store app: the same sealed payload through the push relay; 410 means the cap is dead.
+			...this.push.relayEntries().map(async ([id, target]) => {
+				const device = this.devices.get(id);
+				if (!device) return this.push.setRelay(id, undefined);
+				const sealed = seal(unb64u(device.key), payload);
+				if ((await this.relayClient.send(target, { sealed, urgent: msg.urgent })) === "gone") this.push.setRelay(id, undefined);
+			}),
 		]);
+	}
+
+	private relayClientInstance?: RelayClient;
+	private get relayClient(): RelayClient {
+		return this.opts.relay ?? (this.relayClientInstance ??= new RelayClient());
 	}
 
 	private apns?: ApnsClient;
@@ -554,18 +569,25 @@ export class Hub {
 					// iPhone push needs this machine's APNs key (/remote settings); `apnsOn`: this device's token is stored.
 					apns: !!this.apnsClient(),
 					apnsOn: this.push.apnsEntries().some(([id]) => id === device.id),
+					// App Store app: this hub forwards to a push relay; `relayOn`: this device's relay cap is stored.
+					relay: true,
+					relayOn: this.push.relayEntries().some(([id]) => id === device.id),
 				};
 			case "focus": {
 				for (const c of this.clients) if (c.id === p.client && c.device.id === device.id) c.focus = String(p.agent ?? "") || undefined;
 				return { ok: true };
 			}
 			case "push": {
-				// iPhone app: `{ apns: { token, sandbox } }` (null to turn off), stored beside Web Push.
+				// iPhone app: `{ apns: { token, sandbox } }` (own-team builds) and/or `{ relay: { url, cap } }`
+				// (App Store app); null turns either off. Stored beside Web Push.
+				if ("relay" in p && p.relay !== null && !isRelayTarget(p.relay)) throw new Error("invalid push relay");
 				if ("apns" in p) {
 					if (p.apns !== null && !isApnsToken(p.apns)) throw new Error("invalid APNs token");
 					this.push.setApns(device.id, p.apns ? { token: p.apns.token, ...(p.apns.sandbox === undefined ? {} : { sandbox: p.apns.sandbox }) } : undefined);
-					if (!("subscription" in p)) return { ok: true, apns: !!this.apnsClient() };
 				}
+				if ("relay" in p) this.push.setRelay(device.id, p.relay ? { url: relayUrl(p.relay.url)!, cap: p.relay.cap } : undefined);
+				if (("apns" in p || "relay" in p) && !("subscription" in p))
+					return { ok: true, apns: !!this.apnsClient(), relay: true, relayOn: this.push.relayEntries().some(([id]) => id === device.id) };
 				const sub = p.subscription as PushSubscriptionJSON | null;
 				if (sub && !(typeof sub.endpoint === "string" && sub.endpoint.startsWith("https://") && sub.keys?.p256dh && sub.keys?.auth))
 					throw new Error("invalid push subscription");
@@ -592,7 +614,7 @@ export class Hub {
 			case "revoke": {
 				const ids: string[] = Array.isArray(p.ids) ? p.ids.map(String) : [];
 				const removed = this.devices.remove(ids);
-				for (const id of ids) this.push.set(id, undefined), this.push.setApns(id, undefined);
+				for (const id of ids) this.push.set(id, undefined), this.push.setApns(id, undefined), this.push.setRelay(id, undefined);
 				setImmediate(() => this.dropStreams(ids));
 				return removed.map(publicDevice);
 			}
