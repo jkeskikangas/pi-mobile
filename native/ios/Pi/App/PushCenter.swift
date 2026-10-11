@@ -201,15 +201,41 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
             guard let cap = (try? JSON.parse(data))?["cap"]?.string, !cap.isEmpty else { throw Failure(errorDescription: "The notification relay answered oddly. Try again later.") }
             return cap
         case 429: throw Failure(errorDescription: "The notification relay is busy. Try again in a minute.")
+        case 501: throw RelayNotReady()
         default: throw Failure(errorDescription: "The notification relay refused this iPhone (HTTP \(status)). Try again later.")
         }
     }
 
+    /// 501 from the relay: it is deployed but can't push yet (no APNs key). Push isn't available yet.
+    struct RelayNotReady: LocalizedError {
+        var errorDescription: String? { "Notifications aren't available yet. Try again later." }
+    }
+
+    /// Clock for the relay back-off (tests move it).
+    var now: () -> Date = Date.init
+    /// No automatic register before this (501: hours, other failures: minutes), so launches, foregrounds
+    /// and added computers never hammer a relay that can't answer. Turning notifications on ignores it.
+    private var relayPausedUntil: Date? {
+        get { defaults.object(forKey: "pi-push-relay-paused") as? Date }
+        set { defaults.set(newValue, forKey: "pi-push-relay-paused") }
+    }
+    private(set) var lastRelayError: Error?
+
     /// A fresh capability for the current token (stored), or nil when the relay can't be reached.
     @discardableResult
-    func registerRelay() async -> String? {
+    func registerRelay(force: Bool = false) async -> String? {
         guard let relay, let token else { return nil }
-        guard let c = try? await relayRegister(Self.relayRequest(relay, token: token, sandbox: Self.sandbox)) else { return nil }
+        if !force, let until = relayPausedUntil, now() < until { return nil }
+        let c: String
+        do {
+            c = try await relayRegister(Self.relayRequest(relay, token: token, sandbox: Self.sandbox))
+        } catch {
+            lastRelayError = error
+            relayPausedUntil = now().addingTimeInterval(error is RelayNotReady ? 6 * 3600 : 5 * 60)
+            return nil
+        }
+        lastRelayError = nil
+        relayPausedUntil = nil
         registered = registered.filter { !$0.hasPrefix("relay|") }
         cap = c
         return c
@@ -269,9 +295,9 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
             // Free provisioning has no push entitlement (README → Push).
             throw Failure(errorDescription: "This build of the app can't get notifications (it needs a paid developer team).")
         }
-        if relay != nil, cap == nil, await registerRelay() == nil {
+        if relay != nil, cap == nil, await registerRelay(force: true) == nil {
             enabled = false
-            throw Failure(errorDescription: "Couldn't reach the notification relay. Try again later.")
+            throw lastRelayError as? RelayNotReady ?? Failure(errorDescription: "Couldn't reach the notification relay. Try again later.")
         }
         await reconcile()
         return await status()

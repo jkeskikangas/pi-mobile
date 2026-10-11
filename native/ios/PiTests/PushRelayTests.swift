@@ -99,6 +99,24 @@ final class PushRelayTests: XCTestCase {
         XCTAssertEqual(hubs["e1"]!.pushes.last?["relay"]?["cap"], "cap-2")
     }
 
+    func testRelayNotConfiguredBacksOffInsteadOfRetrying() async {
+        let c = center()
+        var t = Date(timeIntervalSince1970: 1_000_000)
+        c.now = { t }
+        var calls = 0
+        c.relayRegister = { _ in calls += 1; throw PushCenter.RelayNotReady() }
+        XCTAssertThrowsError(try PushCenter.relayCap(status: 501, data: Data(#"{"error":"apns not configured"}"#.utf8))) { XCTAssertTrue($0 is PushCenter.RelayNotReady) }
+        let hubs = ["e1": Hub(), "e2": Hub()]
+        for _ in 0..<5 { await run(c, hubs) }
+        XCTAssertEqual(calls, 1, "one try, then it waits")
+        XCTAssertEqual(hubs["e1"]!.pushes, [], "no cap: nothing sent")
+        t += 7 * 3600
+        c.relayRegister = { _ in calls += 1; return "cap-ok" }
+        await run(c, hubs)
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(hubs["e1"]!.pushes.last?["relay"]?["cap"], "cap-ok")
+    }
+
     func testOffTakesTheRelayBackFromEveryComputer() async {
         let c = center()
         let hubs = ["e1": Hub(), "e2": Hub()]

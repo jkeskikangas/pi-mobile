@@ -61,6 +61,8 @@ targets:
           PI_APS_ENVIRONMENT: development
         Release:
           PI_APS_ENVIRONMENT: production
+          # The deployed push relay (relay/); Debug builds keep the direct own-team path. Override with PI_RELAY_URL=.
+          PI_RELAY_URL: https://pi-push-relay.pi-push-relay.workers.dev
     info:
       path: Pi/App/Info.plist
       properties:

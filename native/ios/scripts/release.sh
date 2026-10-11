@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Archive the app and upload it to App Store Connect (TestFlight first, then review). APP_STORE.md has the
 # whole checklist. Usage:
-#   DEVELOPMENT_TEAM=ABCDE12345 PI_BUNDLE_PREFIX=com.example PI_RELAY_URL=https://… scripts/release.sh <build number>
+#   DEVELOPMENT_TEAM=ABCDE12345 PI_BUNDLE_PREFIX=com.example [PI_RELAY_URL=https://…] scripts/release.sh <build number>
 # The build number (CFBundleVersion) must be higher than every build already uploaded for this version.
 # Signing is automatic: Xcode needs to be signed in to the team's account (Xcode → Settings → Accounts),
 # or use an App Store Connect API key: ASC_KEY_PATH, ASC_KEY_ID, ASC_ISSUER_ID (paths may contain spaces).
@@ -14,7 +14,8 @@ BUILD="${1:-}"
 : "${PI_BUNDLE_PREFIX:?set PI_BUNDLE_PREFIX to the reverse-DNS prefix of your bundle IDs, e.g. com.example}"
 # The App Store build pushes through the relay (relay/, deployed first; APP_STORE.md → Push).
 PI_PUSH="${PI_PUSH:-YES}"
-: "${PI_RELAY_URL:?set PI_RELAY_URL to your deployed push relay, e.g. https://pi-push.example.workers.dev}"
+# The deployed relay (relay/); override for your own deployment.
+PI_RELAY_URL="${PI_RELAY_URL:-https://pi-push-relay.pi-push-relay.workers.dev}"
 [[ "$PI_RELAY_URL" =~ ^https://[^[:space:]?#]+$ ]] || { echo "PI_RELAY_URL must be an https:// address"; exit 2; }
 AUTH=()
 if [ -n "${ASC_KEY_PATH:-}" ]; then
