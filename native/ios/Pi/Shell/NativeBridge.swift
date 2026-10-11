@@ -1,13 +1,15 @@
 import Foundation
 
 /// The page → native half of `native/ios/BRIDGE.md`, free of WebKit so it can be unit tested.
-/// Prefs, machines, unpairing, focus, voice, dictation and push are all handled here.
+/// Prefs, machines, unpairing, focus, voice, dictation, push and scan are all handled here.
 @MainActor
 struct NativeBridge {
     let model: AppModel
     let primaryOrigin: String
     var dictation: Dictation = .shared
     var focusDefaults: UserDefaults = .standard
+    /// Presents the pairing-code scanner and waits for its outcome (`scan`).
+    var scan: @MainActor () async -> ScanResult = { await ScanCenter.shared.scan() }
 
     enum Reply: Equatable {
         case value(JSON)
@@ -51,6 +53,13 @@ struct NativeBridge {
             return .value(await PushCenter.shared.status())
         case "push.enable":
             do { return .value(try await PushCenter.shared.enable(body["on"]?.bool ?? true)) } catch { return .error(error.localizedDescription) }
+        case "scan":
+            switch await scan() {
+            case .link(let link): return .value(["link": .string(link)])
+            case .cancelled: return .error("cancelled")
+            case .busy: return .error("busy")
+            case .unavailable(let message): return .error(message)
+            }
         case "dictation.cancel":
             dictation.cancel()
             return .value(.null)
@@ -77,6 +86,7 @@ struct NativeBridge {
           } catch (e) {}
           window.PiNative = window.PiNative || {};
           window.PiNative.version = 1;
+          window.PiNative.scan = true;
         })();
         """
     }

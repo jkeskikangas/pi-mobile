@@ -123,6 +123,25 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(VoiceActivityController.pick([(a, 1), (b, 2)], saved: saved), b)
     }
 
+    func testScanRepliesWithTheLinkOrCancelled() async {
+        let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
+        var bridge = NativeBridge(model: model, primaryOrigin: "http://127.0.0.1:9")
+        let link = "http://box:7/#p=abc." + Base64URL.encode(Data(repeating: 1, count: 32))
+        bridge.scan = { .link(link) }
+        let ok = await bridge.handle(["type": "scan"])
+        XCTAssertEqual(ok, .value(["link": .string(link)]))
+        bridge.scan = { .cancelled }
+        let cancelled = await bridge.handle(["type": "scan"])
+        XCTAssertEqual(cancelled, .error("cancelled"), "the web treats exactly this text as a silent cancel")
+        bridge.scan = { .busy }
+        let busy = await bridge.handle(["type": "scan"])
+        XCTAssertEqual(busy, .error("busy"))
+        bridge.scan = { .unavailable(ScanCenter.unsupported) }
+        let none = await bridge.handle(["type": "scan"])
+        XCTAssertEqual(none, .error("The camera isn't available on this iPhone. Paste the link instead."))
+        XCTAssertTrue(NativeBridge.setupScript(machines: [], prefs: [:]).contains("window.PiNative.scan = true"))
+    }
+
     func testMakePrimaryStoresFirst() throws {
         let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
         try model.added(machine("a", primary: true))

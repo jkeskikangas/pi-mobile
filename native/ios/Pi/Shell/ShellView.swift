@@ -54,6 +54,7 @@ struct ShellView: View {
         .onChange(of: scenePhase) { _, p in if p == .active && isOffline { retryNow() } }
         .onChange(of: network.changes) { if isOffline && network.online { retryNow() } }
         .voiceScreen(model.voice)
+        .scanSheet()
         .alert(forgetTitle, isPresented: forgetShown, presenting: model.forgetQueue.first) { m in
             Button("Forget", role: .destructive) { model.forget(m) }
             Button("Keep", role: .cancel) { model.keep(m) }

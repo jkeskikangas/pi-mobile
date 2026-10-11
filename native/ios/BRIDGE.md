@@ -15,7 +15,7 @@ A `WKUserScript` at `.atDocumentStart`, `forMainFrameOnly: true`. The Keychain i
 localStorage["pi-mobile-machines"] = JSON.stringify(machines);           // authoritative list from the Keychain, may be [] only if the Keychain is empty
 localStorage["pi-mobile-device"] = JSON.stringify({ d, k, role: "control", host }); // the primary entry's d, k, name
 localStorage["pi-mobile-voice-persona"] = "…";                         // each voice pref the app holds (see prefs)
-window.PiNative = { version: 1 };
+window.PiNative = { version: 1, scan: true };                           // `scan`: this build answers the `scan` message
 ```
 
 Machine entry (`web/fleet.js`): `{ id, machine, name, origin, d, k, primary, added, lastSeen }`.
@@ -42,6 +42,7 @@ Handler name `piNative`, registered with `WKScriptMessageHandlerWithReply` (`add
 | `unpaired` | — | The user unpaired, revoked this device, removed the last computer, or every computer answered 401 | `null` (ignored). Same rule as removals: for each Keychain entry, delete it if its computer answers 401 (the web revokes before unpairing) or the user confirms a native alert; then, if nothing is left, show the pairing screen. Not sent on the silent startup path where the page simply finds no device. A `machines` message with `[]` usually precedes it. |
 | `focus` | `agent: string`, `machine: string` (machines-list `id`), `name: string` (the session's name) | The session on screen changed (`loadCurrent`) | `null` (ignored). Native stores it as the last session; "Start voice" (Siri, Control Center, Action button) picks it when no session needs you. |
 | `push.status` | — | Once at page start | `{ on: boolean, permission: "granted" \| "denied" \| "default" }`: `on` = the user turned notifications on in the app, iOS allows them, and APNs gave a token. |
+| `scan` | — | Scan tapped in Add a computer (only when `window.PiNative?.scan` is true) | `{ link: string }`: the scanned pairing link (`<origin>/#p=<id>.<key>`; only codes that parse as one are accepted, others just show a hint on the scanner). Native presents its QR scanner as a sheet over the web view. Errors: exactly `cancelled` when the user closed it (✕, swipe down, or "Paste link instead"); the web treats it as a silent cancel. `busy` if a scan is already open (at most one at a time). Otherwise a sentence to show, e.g. `The camera isn't available on this iPhone. Paste the link instead.` (no scanner hardware), `Camera access is off. Turn it on in Settings, or paste the link instead.`, or `The camera isn't available right now. Paste the link instead.` Asks for camera permission on first use. |
 | `push.enable` | `on: boolean` | The Notifications row in the menu ("Turn on/off notifications") | The new `push.status` value. `on: true` asks iOS for permission (only here, never at first launch), gets the APNs token and sends `push { apns: { token, sandbox } }` to **every** paired computer (again whenever the token changes or a computer is added); `on: false` sends `push { apns: null }` to each. Errors: `Notifications are off for pi. Turn them on in Settings.`, or the build has no push entitlement (README → Push). |
 
 `prefs` keys (all strings):
@@ -80,5 +81,6 @@ Call with `webView.evaluateJavaScript("window.PiNative.<fn>(…)")` on the main 
 - The menu's Notifications row uses `push.status` / `push.enable` instead of Web Push (none in `WKWebView`); with no computer reporting `apns` in its `hub` result, a note points to `/remote settings`.
 - Voice preference writes also post `prefs`; machine-list saves post `machines`.
 - Unpairing posts `unpaired`.
+- Add a computer's Scan button uses `scan` (native scanner) when `window.PiNative?.scan` is true.
 
-Version: `window.PiNative.version` is set by native (currently `1`); bump it if this contract changes incompatibly, and gate new web behaviour on it.
+Version: `window.PiNative.version` is set by native (currently `1`); bump it if this contract changes incompatibly, and gate new web behaviour on it. Additive messages get a capability flag instead (`window.PiNative.scan = true`, set in the setup script), which the web checks before using them.
