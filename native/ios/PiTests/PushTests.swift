@@ -14,8 +14,7 @@ final class PushTests: XCTestCase {
         let c = UNMutableNotificationContent()
         c.title = "pi"
         c.body = "New activity"
-        c.threadIdentifier = "a1"
-        var aps: [String: Any] = ["alert": ["title": "pi", "body": "New activity"], "mutable-content": 1, "sound": "default", "thread-id": "a1"]
+        var aps: [String: Any] = ["alert": ["title": "pi", "body": "New activity"], "mutable-content": 1, "sound": "default"]
         if urgent { aps["interruption-level"] = "time-sensitive" }
         c.userInfo = ["aps": aps, "sealed": sealed]
         return c
@@ -40,7 +39,7 @@ final class PushTests: XCTestCase {
         XCTAssertEqual(out.userInfo["entry"] as? String, "e-mac")
         XCTAssertNil(out.userInfo["sealed"])
         XCTAssertEqual(out.categoryIdentifier, PushContent.asksCategory)
-        XCTAssertEqual(out.threadIdentifier, "a1")
+        XCTAssertEqual(out.threadIdentifier, "m-mac:a1")
     }
 
     func testNotUrgentHasNoVoiceAction() throws {
@@ -49,6 +48,17 @@ final class PushTests: XCTestCase {
         let out = PushContent.rewrite(content(sealed: sealed), machines: machines(k: k))
         XCTAssertEqual(out.body, "Done")
         XCTAssertEqual(out.categoryIdentifier, "")
+    }
+
+    /// Each computer is brought in line with its own `apnsOn`, also while off (a missed off is retried).
+    func testReconcileAction() {
+        let on = PushCenter.action(enabled: true, token: "ab", held: false, sent: false)
+        XCTAssertEqual(on?["apns"]?["token"]?.string, "ab")
+        XCTAssertNotNil(PushCenter.action(enabled: true, token: "ab", held: true, sent: false), "new token: sent again")
+        XCTAssertNil(PushCenter.action(enabled: true, token: "ab", held: true, sent: true))
+        XCTAssertEqual(PushCenter.action(enabled: false, token: "ab", held: true, sent: true)?["apns"], .null)
+        XCTAssertNil(PushCenter.action(enabled: false, token: "ab", held: false, sent: false))
+        XCTAssertNil(PushCenter.action(enabled: true, token: nil, held: false, sent: false), "no token yet")
     }
 
     func testKeepsGenericTextWhenNoKeyOpensIt() throws {

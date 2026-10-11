@@ -403,7 +403,7 @@ export class Hub {
 				const apns = this.apnsClient();
 				if (!apns) return;
 				const sealed = seal(unb64u(device.key), payload);
-				if ((await apns.send(token, { sealed, thread: agent, urgent: msg.urgent })) === "gone") this.push.setApns(id, undefined);
+				if ((await apns.send(token, { sealed, urgent: msg.urgent })) === "gone") this.push.setApns(id, undefined);
 			}),
 		]);
 	}

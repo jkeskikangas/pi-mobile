@@ -64,7 +64,7 @@ test("APNs: ES256 provider token, request path, headers and body; 410 and BadDev
 		{ production: prod.origin, sandbox: sandbox.origin },
 	);
 	try {
-		const msg: ApnsMessage = { sealed: "SEALED", thread: "agent-1", urgent: true };
+		const msg: ApnsMessage = { sealed: "SEALED", urgent: true };
 		assert.equal(await client.send({ token: TOKEN }, msg), "sent");
 		const [req] = prod.seen;
 		assert.equal(req.headers[":method"], "POST");
@@ -72,7 +72,7 @@ test("APNs: ES256 provider token, request path, headers and body; 410 and BadDev
 		assert.equal(req.headers["apns-topic"], "dev.pi.mobile");
 		assert.equal(req.headers["apns-push-type"], "alert");
 		assert.deepEqual(JSON.parse(req.body), {
-			aps: { alert: { title: "pi", body: "New activity" }, "mutable-content": 1, sound: "default", "thread-id": "agent-1", "interruption-level": "time-sensitive" },
+			aps: { alert: { title: "pi", body: "New activity" }, "mutable-content": 1, sound: "default", "interruption-level": "time-sensitive" },
 			sealed: "SEALED",
 		});
 		const jwt = String(req.headers.authorization).replace(/^bearer /, "");
@@ -210,7 +210,7 @@ test("attention reaches iPhone tokens with a generic alert and the text sealed t
 		link.send({ t: "attention", title: "proj asks", body: "Allow rm?", urgent: true });
 		await until(() => sent.length === 1);
 		assert.deepEqual(sent[0].token, { token: TOKEN, sandbox: true });
-		assert.equal(sent[0].msg.thread, "A");
+		assert.equal("thread" in sent[0].msg, false, "no plaintext session id for Apple");
 		assert.equal(sent[0].msg.urgent, true);
 		assert.deepEqual(open(phone.key, sent[0].msg.sealed)?.value, { title: "proj asks", body: "Allow rm?", agent: "A", machine: h.machine.id });
 		await until(() => push.apnsEntries().length === 0);

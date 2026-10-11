@@ -200,6 +200,7 @@
 	setInterval(() => fleet.watch(), 5000);
 	document.addEventListener("visibilitychange", () => {
 		if (document.visibilityState === "visible") fleet.watch(Date.now(), true);
+		if (document.visibilityState === "visible") refreshNativePush();
 	});
 
 	function onMachineEvent(id, ev) {
@@ -1847,6 +1848,14 @@
 		return window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 	}
 
+	/** The app's notification state; iOS Settings can change it any time (inside the app only). */
+	function refreshNativePush() {
+		if (!window.PiNative) return Promise.resolve();
+		return callNative({ type: "push.status" })
+			.then((s) => (S.push.native = s))
+			.catch(() => {});
+	}
+
 	async function setNativePush(on) {
 		closeSheet();
 		try {
@@ -2156,7 +2165,16 @@
 		new ResizeObserver(() => document.documentElement.style.setProperty("--composer-h", `${composer.offsetHeight || 0}px`)).observe(composer);
 		$("sessionBtn").onclick = () => S.device && sessionsSheet();
 		$("modelBtn").onclick = modelSheet;
-		$("menuBtn").onclick = () => S.device && menuSheet();
+		$("menuBtn").onclick = () => {
+			if (!S.device) return;
+			const before = JSON.stringify(S.push.native);
+			menuSheet();
+			// Redraw once if the permission changed in Settings since the last look (still the same sheet).
+			const title = $("sheetTitle")?.textContent;
+			refreshNativePush().then(() => {
+				if (JSON.stringify(S.push.native) !== before && !$("sheet").hidden && $("sheetTitle")?.textContent === title) menuSheet();
+			});
+		};
 		$("olderBtn").onclick = loadOlder;
 		$("jumpBtn").onclick = () => scrollToBottom(true);
 		$("scroller").addEventListener("scroll", () => {
@@ -2234,9 +2252,7 @@
 				closeSheet();
 				openAgent(String(agent || ""));
 			};
-			callNative({ type: "push.status" })
-				.then((s) => (S.push.native = s))
-				.catch(() => {});
+			refreshNativePush();
 		}
 		// Opened from a notification: jump to that session.
 		const query = new URLSearchParams(location.search);

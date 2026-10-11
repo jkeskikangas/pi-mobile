@@ -45,7 +45,8 @@ enum PushContent {
         info["machine"] = o.machine
         info["entry"] = o.entry
         out.userInfo = info
-        if !o.agent.isEmpty { out.threadIdentifier = o.agent }
+        // Grouped per session here: the hub sends no plaintext `thread-id` (Apple would see the session id).
+        if !o.agent.isEmpty { out.threadIdentifier = "\(o.machine):\(o.agent)" }
         let aps = content.userInfo["aps"] as? [String: Any]
         if aps?["interruption-level"] as? String == "time-sensitive", !o.agent.isEmpty { out.categoryIdentifier = asksCategory }
         return out

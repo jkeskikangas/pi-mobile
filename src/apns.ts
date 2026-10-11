@@ -65,8 +65,6 @@ export function apnsJwt(key: KeyObject, keyId: string, teamId: string, now = Dat
 export interface ApnsMessage {
 	/** Sealed `{ title, body, agent, machine? }` (see `seal` in crypto.ts), opened by the phone. */
 	sealed: string;
-	/** Groups notifications per session (`thread-id`). */
-	thread?: string;
 	urgent?: boolean;
 	/** Generic visible text; Apple sees only this. */
 	body?: string;
@@ -79,7 +77,7 @@ export function apnsPayload(m: ApnsMessage): unknown {
 			alert: { title: "pi", body: m.body ?? "New activity" },
 			"mutable-content": 1,
 			sound: "default",
-			...(m.thread ? { "thread-id": m.thread } : {}),
+			// No `thread-id`: it would show Apple the session id. The phone groups by the sealed agent.
 			...(m.urgent ? { "interruption-level": "time-sensitive" } : {}),
 		},
 		sealed: m.sealed,

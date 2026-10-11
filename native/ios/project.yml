@@ -65,6 +65,8 @@ targets:
       properties:
         CFBundleDisplayName: pi
         PiKeychainGroup: $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
+        # The APNs environment the entitlements use (PI_APS_ENVIRONMENT); the token's `sandbox` follows it.
+        PiAPSEnvironment: $(PI_APS_ENVIRONMENT)
         UILaunchScreen:
           UIColorName: LaunchBackground
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]

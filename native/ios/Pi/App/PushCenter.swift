@@ -9,15 +9,14 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
     static let shared = PushCenter()
 
     weak var model: AppModel?
-    /// Development builds get sandbox tokens.
-    #if DEBUG
-    static let sandbox = true
-    #else
-    static let sandbox = false
-    #endif
+    /// Sandbox tokens unless the build signs for production APNs: the same `PI_APS_ENVIRONMENT` that goes
+    /// into the entitlements reaches Info.plist as `PiAPSEnvironment`.
+    nonisolated static let sandbox = Bundle.main.object(forInfoDictionaryKey: "PiAPSEnvironment") as? String != "production"
 
     private let defaults: UserDefaults
-    private var tokenWaiters: [CheckedContinuation<String?, Never>] = []
+    private var tokenWaiters: [UUID: CheckedContinuation<String?, Never>] = [:]
+    /// A notification opened before the app model existed (cold launch from a tap).
+    private var pendingOpen: (action: String, agent: String, machine: String, entry: String)?
     /// Evaluates JavaScript in the loaded page (nil while it loads).
     private var js: ((String) -> Void)?
     private var pendingFocus: (machine: String, agent: String)?
@@ -41,9 +40,8 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: Launch
 
-    func attach(_ model: AppModel) {
-        guard self.model == nil else { return }
-        self.model = model
+    /// At launch (app delegate), before any notification response can arrive.
+    func install() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         let voice = UNNotificationAction(identifier: PushContent.answerByVoice, title: "Answer by voice", options: [.foreground], icon: UNNotificationActionIcon(systemImageName: "waveform"))
@@ -69,10 +67,19 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
             }
         }
         #endif
-        guard enabled else { return }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { PushCenter.shared.machinesChanged() }
+        }
+    }
+
+    func attach(_ model: AppModel) {
+        guard self.model == nil else { return }
+        self.model = model
+        if let o = pendingOpen { pendingOpen = nil; Task { await opened(action: o.action, agent: o.agent, machine: o.machine, entry: o.entry) } }
         Task {
             // A token can change (restore, reinstall): ask for it on every launch; every computer hears again.
-            if await permission() == "granted" { registered = []; UIApplication.shared.registerForRemoteNotifications() }
+            if enabled, await permission() == "granted" { registered = []; UIApplication.shared.registerForRemoteNotifications() }
+            await reconcile()
         }
     }
 
@@ -80,34 +87,61 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
         if hex != token { registered = [] }
         token = hex
-        resolveToken(hex)
-        if enabled { Task { await registerAll() } }
+        resolveTokens(hex)
+        Task { await reconcile() }
     }
 
     func didFail(_ error: Error) {
-        resolveToken(nil)
+        resolveTokens(nil)
     }
 
-    private func resolveToken(_ hex: String?) {
-        let w = tokenWaiters; tokenWaiters = []
-        w.forEach { $0.resume(returning: hex) }
+    private func resolveTokens(_ hex: String?) {
+        let w = tokenWaiters; tokenWaiters = [:]
+        w.values.forEach { $0.resume(returning: hex) }
+    }
+
+    /// Waits for APNs' answer; this wait's own timeout never cuts short a later one.
+    private func awaitToken(timeout: Duration = .seconds(15)) async -> String? {
+        let id = UUID()
+        return await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
+            tokenWaiters[id] = c
+            UIApplication.shared.registerForRemoteNotifications()
+            Task {
+                try? await Task.sleep(for: timeout)
+                self.tokenWaiters.removeValue(forKey: id)?.resume(returning: nil)
+            }
+        }
     }
 
     // MARK: Computers
 
-    /// Sends the token to each computer that doesn't have it yet (called when a computer is added).
-    func registerAll() async {
-        guard enabled, let token, let model else { return }
+    /// What each computer should hold, from its own `hub` answer (`apnsOn`): this phone's token while
+    /// notifications are on, nothing while off. Runs at launch, on foreground, when a computer is added and
+    /// after a change, so an off that a sleeping computer missed is retried until it lands.
+    func reconcile() async {
+        guard let model else { return }
         for m in model.machines {
-            let tag = "\(m.id)|\(m.d)|\(token)"
-            guard !registered.contains(tag), let c = model.client(for: m) else { continue }
-            if (try? await c.rpc("push", ["apns": ["token": .string(token), "sandbox": .bool(Self.sandbox)]])) != nil { registered.insert(tag) }
+            guard let c = model.client(for: m), let hub = try? await c.rpc("hub") else { continue }
+            let held = hub["apnsOn"]?.bool ?? false
+            if let p = Self.action(enabled: enabled, token: token, held: held, sent: registered.contains(tag(m))) {
+                guard (try? await c.rpc("push", p)) != nil else { continue }
+                if p["apns"]?.isNull == true { registered.remove(tag(m)) } else { registered.insert(tag(m)) }
+            }
         }
     }
 
+    private func tag(_ m: Machine) -> String { "\(m.id)|\(m.d)|\(token ?? "")" }
+
+    /// The `push` RPC that brings one computer in line, or nil when it already is.
+    nonisolated static func action(enabled: Bool, token: String?, held: Bool, sent: Bool) -> JSON? {
+        if enabled, let token {
+            return held && sent ? nil : ["apns": ["token": .string(token), "sandbox": .bool(sandbox)]]
+        }
+        return held ? ["apns": .null] : nil
+    }
+
     func machinesChanged() {
-        guard enabled else { return }
-        Task { await registerAll() }
+        Task { await reconcile() }
     }
 
     // MARK: The web's Notifications row (BRIDGE.md `push.status`, `push.enable`)
@@ -131,27 +165,20 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
 
     func enable(_ on: Bool) async throws -> JSON {
         guard on else {
+            // Persisted first: computers that miss the off now get it at the next reconcile.
             enabled = false
-            registered = []
-            if let model {
-                for m in model.machines { _ = try? await model.client(for: m)?.rpc("push", ["apns": .null]) }
-            }
+            await reconcile()
             return await status()
         }
         let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
         guard granted else { throw Failure(errorDescription: "Notifications are off for pi. Turn them on in Settings.") }
         enabled = true
-        let hex = await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
-            tokenWaiters.append(c)
-            UIApplication.shared.registerForRemoteNotifications()
-            Task { try? await Task.sleep(for: .seconds(15)); self.resolveToken(nil) }
-        }
-        if hex == nil {
+        if await awaitToken() == nil {
             enabled = false
             // Free provisioning has no push entitlement (README → Push).
             throw Failure(errorDescription: "This build of the app can't get notifications (it needs a paid developer team).")
         }
-        await registerAll()
+        await reconcile()
         return await status()
     }
 
@@ -175,10 +202,28 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
 
     func opened(action: String, agent: String, machine: String, entry: String) async {
         guard !agent.isEmpty else { return }
+        guard let model else { pendingOpen = (action, agent, machine, entry); return }
         focus(machine: machine, agent: agent)
-        if action == PushContent.answerByVoice, !entry.isEmpty {
-            if let model { try? await VoiceHost.start(model: model, agent: agent, machine: entry, dictation: Dictation.shared) }
+        guard action == PushContent.answerByVoice, !entry.isEmpty else { return }
+        do { try await VoiceHost.start(model: model, agent: agent, machine: entry, dictation: Dictation.shared) } catch {
+            await report("Voice mode didn't start: \(error.localizedDescription)")
         }
+    }
+
+    /// An alert when the app is on screen, a local notification otherwise.
+    private func report(_ text: String) async {
+        if UIApplication.shared.applicationState == .active,
+           let root = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow?.rootViewController }).first {
+            let top = sequence(first: root, next: \.presentedViewController).reversed().first ?? root
+            let a = UIAlertController(title: nil, message: text, preferredStyle: .alert)
+            a.addAction(UIAlertAction(title: "OK", style: .default))
+            top.present(a, animated: true)
+            return
+        }
+        let c = UNMutableNotificationContent()
+        c.title = "pi"
+        c.body = text
+        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
@@ -195,6 +240,12 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
 
 /// APNs callbacks arrive on the app delegate.
 final class PushAppDelegate: NSObject, UIApplicationDelegate {
+    /// The delegate and the "Answer by voice" category exist before a cold-launch tap is delivered.
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        MainActor.assumeIsolated { PushCenter.shared.install() }
+        return true
+    }
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         MainActor.assumeIsolated { PushCenter.shared.didRegister(deviceToken) }
     }
