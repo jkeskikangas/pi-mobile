@@ -12,6 +12,7 @@ final class VoiceEngineTests: XCTestCase {
     var clock: ManualScheduler!
     var engine: VoiceEngine!
     var prefs: VoicePrefs!
+    var session: FakeAudioSession!
 
     static func info(_ agent: String, _ name: String, status: String = "idle") -> JSON {
         ["agent": .string(agent), "name": .string(name), "cwd": .string("/src/\(name)"), "status": .string(status)]
@@ -36,12 +37,13 @@ final class VoiceEngineTests: XCTestCase {
         prefs = VoicePrefs(defaults: defaults)
         prefs.set(VoiceEngine.introKey, "1")
         let core = try VoiceCore.bundled()
+        session = FakeAudioSession()
         let c = clock!
         engine = VoiceEngine(deps: VoiceDeps(
             fleet: hub, core: core,
             makeRealtime: { [unowned self] in self.rt },
             makeBasic: { [unowned self] in self.basic },
-            earcons: earcons, audioSession: nil, prefs: prefs, scheduler: c,
+            earcons: earcons, audioSession: session, prefs: prefs, scheduler: c,
             now: { c.now }, ms: { c.t * 1000 }))
     }
 
@@ -119,7 +121,8 @@ final class VoiceEngineTests: XCTestCase {
 
     /// pi speaking with the mic at `level` for `seconds` (20 ms VAD frames).
     func speakingWithMic(_ level: Double, for seconds: Double) {
-        rt.micLevel = level
+        rt.micRaw = level
+        rt.micLevel = min(1, level.squareRoot() * 1.6)
         clock.advance(seconds)
     }
 
@@ -285,5 +288,168 @@ final class VoiceEngineTests: XCTestCase {
         XCTAssertFalse(engine.isOpen)
         XCTAssertEqual(hub.calls("voiceState").last?.p["on"], false)
         XCTAssertEqual(earcons.played.last, "off")
+        // The "off" earcon plays out before the session is released.
+        XCTAssertEqual(session.deactivations, 0)
+        clock.advance(0.4)
+        XCTAssertEqual(session.deactivations, 1)
+        XCTAssertEqual(earcons.stopped, 1)
+    }
+
+    // MARK: review regressions
+
+    func startGraceForDeploy(_ id: String = "p1") async {
+        say("deploy the app to production")
+        rt.emit(["type": "response.done"])
+        hub.event("m1", ["type": "prompt", "agent": "a1", "prompt": ["id": .string(id), "kind": "confirm", "title": "Deploy to production?"]])
+        await settle()
+        XCTAssertEqual(engine.grace?.prompt["id"]?.string, id)
+    }
+
+    func testGraceReplacementAnswersEachWindowOnce() async {
+        await open()
+        await startGraceForDeploy("p1")
+        clock.advance(2)
+        hub.event("m1", ["type": "prompt_end", "agent": "a1", "id": "p1", "by": "remote"])
+        hub.event("m1", ["type": "prompt", "agent": "a1", "prompt": ["id": "p2", "kind": "confirm", "title": "Deploy to production?"]])
+        await settle()
+        XCTAssertEqual(engine.grace?.prompt["id"], "p2")
+        // p1's old timer must not fire for p2.
+        clock.advance(2.5)
+        await settle()
+        XCTAssertTrue(hub.calls("answer").isEmpty)
+        clock.advance(2)
+        await settle()
+        XCTAssertEqual(hub.calls("answer").map(\.p), [["id": "p2", "value": true]])
+        // A replacement while a window is open cancels the old one (answered no) synchronously.
+        await startGraceForDeploy("p3")
+        engine.startGrace(["id": "p4", "kind": "confirm", "title": "Deploy to production?"])
+        await settle()
+        XCTAssertEqual(hub.calls("answer").last?.p, ["id": "p3", "value": false])
+        XCTAssertEqual(engine.grace?.prompt["id"], "p4")
+    }
+
+    func testInterruptionDropsGraceAndResumes() async {
+        await open()
+        await startGraceForDeploy()
+        session.onInterruption?(true)
+        XCTAssertNil(engine.grace)
+        XCTAssertEqual(engine.state, .paused)
+        XCTAssertFalse(rt.micEnabled)
+        clock.advance(5)
+        await settle()
+        XCTAssertTrue(hub.calls("answer").isEmpty, "no approval while nobody can say stop")
+        // Ended without .shouldResume, and the session can't come back yet: stay paused.
+        session.onInterruption?(nil)
+        session.failActivate = true
+        engine.tap()
+        XCTAssertEqual(engine.state, .paused)
+        XCTAssertFalse(rt.micEnabled)
+        session.failActivate = false
+        engine.tap()
+        XCTAssertEqual(engine.state, .listening)
+        XCTAssertTrue(rt.micEnabled)
+        // .shouldResume resumes by itself.
+        session.onInterruption?(true)
+        session.onInterruption?(false)
+        XCTAssertEqual(engine.state, .listening)
+    }
+
+    func testSystemMuteAtStartAndMuteDropsGrace() async {
+        session.isInputMuted = true
+        await open()
+        XCTAssertTrue(engine.muted)
+        XCTAssertEqual(engine.state, .paused)
+        XCTAssertFalse(rt.micEnabled)
+        session.onInputMute?(false)
+        XCTAssertFalse(engine.muted)
+        XCTAssertTrue(rt.micEnabled)
+        await startGraceForDeploy()
+        engine.toggleMute()
+        XCTAssertNil(engine.grace)
+        XCTAssertTrue(session.isInputMuted)
+        clock.advance(5)
+        await settle()
+        XCTAssertTrue(hub.calls("answer").isEmpty)
+    }
+
+    func testRestartForgetsEarlierRequests() async {
+        await open()
+        say("deploy the app to production")
+        engine.stop()
+        await settle()
+        await open()
+        hub.event("m1", ["type": "prompt", "agent": "a1", "prompt": deployPrompt()])
+        await settle()
+        XCTAssertNil(engine.grace, "consent from an earlier voice mode never carries over")
+        XCTAssertEqual(engine.state, .asking)
+    }
+
+    func testOldRequestsExpire() async {
+        await open()
+        say("deploy the app to production")
+        clock.advance(181)
+        XCTAssertFalse(engine.namedEarlier(deployPrompt()))
+    }
+
+    func testNothingIsSentAfterEnd() async {
+        hub.reply = { c in
+            if c.m == "voiceSession" { throw HubError.remote("realtime unavailable: off") }
+            return ["delivered": "prompt"]
+        }
+        await open()
+        XCTAssertEqual(engine.engineKind, .basic)
+        hub.hold = ["distill"]
+        let t = Task { await engine.handleUtterance("please run the whole test suite") }
+        await settle()
+        XCTAssertEqual(hub.calls("distill").first?.machine, "m1", "distill goes to the followed session")
+        engine.stop()
+        hub.release("distill")
+        await t.value
+        await settle()
+        XCTAssertTrue(hub.calls("send").isEmpty)
+        XCTAssertTrue(basic.spoken.isEmpty)
+    }
+
+    func testClientVadUsesRawLevelNotDisplayLevel() async {
+        await open()
+        startSpeaking()
+        // Display level looks loud (sqrt-scaled) but the raw RMS is below the over-pi threshold.
+        rt.micRaw = 0.02
+        rt.micLevel = 0.23
+        clock.advance(1)
+        XCTAssertEqual(rt.remoteVolume, 1)
+        XCTAssertFalse(rt.types.contains("input_audio_buffer.commit"))
+    }
+
+    func testDeadSpeechMachineIsRepickedOnce() async throws {
+        await open()
+        _ = try await engine.tool("switch_session", ["name": "api"])
+        hub.reply = { c in
+            if c.machine == "m1" { throw HubError.network("Can't reach laptop.") }
+            return ["personas": []]
+        }
+        let before = hub.calls("voices").count
+        _ = try await engine.speechCall("voices", [:])
+        XCTAssertEqual(hub.calls("voices").dropFirst(before).map(\.machine), ["m1", "m2"])
+        XCTAssertEqual(engine.speechMachine, "m2")
+        XCTAssertEqual(engine.engineKind, .realtime, "the call stays up")
+    }
+
+    func testHeadsetPlayPauseActsLikeATap() async {
+        await open()
+        startSpeaking()
+        rt.clear()
+        session.onRemoteToggle?()
+        XCTAssertEqual(rt.types, ["response.cancel", "output_audio_buffer.clear"])
+        XCTAssertEqual(engine.state, .listening)
+        rt.emit(["type": "response.done"])
+        hub.event("m1", ["type": "prompt", "agent": "a1", "prompt": ["id": "q", "kind": "confirm", "title": "Run the tests?"]])
+        await settle()
+        rt.emit(["type": "response.done"])
+        rt.clear()
+        await engine.answer(VoiceQuestion.Option(label: "Yes", value: true, destructive: false))
+        await settle()
+        XCTAssertEqual(hub.calls("answer").last?.p, ["id": "q", "value": true])
+        XCTAssertFalse(rt.types.contains("response.cancel"), "cancel only while a response is active")
     }
 }

@@ -29,6 +29,8 @@ final class BasicVoice: BasicAudio {
         stop()
         let engine = AVAudioEngine()
         let input = engine.inputNode
+        // Apple's voice processing (echo cancellation) before the tap, so pi's own voice is not heard. [verify]
+        try? input.setVoiceProcessingEnabled(true)
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw NSError(domain: "BasicVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "no microphone input"])

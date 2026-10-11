@@ -26,6 +26,11 @@ final class Earcons: EarconPlaying {
         if !player.isPlaying { player.play() }
     }
 
+    func stop() {
+        player.stop()
+        if engine.isRunning { engine.stop() }
+    }
+
     private func start() -> Bool {
         guard let format else { return false }
         if !attached {

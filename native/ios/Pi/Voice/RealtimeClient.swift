@@ -18,6 +18,7 @@ final class RealtimeClient: RealtimeTransport {
     var remoteVolume: Double = 1 { didSet { applyRemoteVolume() } }
     var micLevel: Double { levels.mic }
     var piLevel: Double { levels.pi }
+    var micRaw: Double { levels.micRaw }
 
     private static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
@@ -145,7 +146,10 @@ final class RealtimeClient: RealtimeTransport {
             channelOpen = true
             openWaiter?.resume(); openWaiter = nil
         case .closing, .closed:
+            // The events channel is the call's control: without it the call is lost.
+            let was = channelOpen
             channelOpen = false
+            if was { onLost?() }
         default: break
         }
     }

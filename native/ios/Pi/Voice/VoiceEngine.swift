@@ -179,6 +179,7 @@ final class VoiceEngine {
         }
         guard let deps else { isOpen = true; self.agent = agent; machineId = machine; return }
         closed = false
+        gen += 1
         isOpen = true
         state = .connecting
         engineKind = nil
@@ -187,7 +188,10 @@ final class VoiceEngine {
         note = ""
         muted = false
         talking = false
+        holding = false
         interrupted = false
+        workingSince = nil
+        resetConversation()
         self.agent = agent
         machineId = machine
         speechMachine = nil
@@ -207,9 +211,13 @@ final class VoiceEngine {
     func stop() {
         guard isOpen, !closed else { return }
         closed = true
+        gen += 1
         dropGrace() // pi's question stays open in the app and the terminal
         deps?.earcons.play("off")
-        heartbeat(false)
+        if let fleet = deps?.fleet, !agent.isEmpty {
+            let (m, a, mode) = (machineId, agent, settings.attention.rawValue)
+            Task { _ = try? await fleet.agentCall(machine: m, agent: a, "voiceState", ["on": false, "mode": .string(mode)]) }
+        }
         for t in timers { t.cancel() }
         timers = []
         stopRealtime()
@@ -218,12 +226,51 @@ final class VoiceEngine {
         clientVad?.cancel()
         clientVad = nil
         continueTimer?.cancel()
+        continueTimer = nil
+        redial?.cancel()
+        redial = nil
         updatesTask?.cancel()
         updatesTask = nil
-        deps?.audioSession?.deactivate()
         levels = VoiceLevels()
         isOpen = false
+        // Let the "off" earcon play out, then release the audio session (unless voice mode reopened).
+        let g = gen
+        if let deps {
+            _ = deps.scheduler.after(0.35) { [weak self] in
+                guard let self, self.gen == g else { return }
+                deps.earcons.stop()
+                deps.audioSession?.deactivate()
+            }
+        }
         onClose?()
+    }
+
+    /// Everything one voice mode learned; a new voice mode starts fresh (the web makes a new VoiceMode).
+    func resetConversation() {
+        grace?.timer.cancel()
+        grace = nil
+        recentHeard = []
+        lastHeardEcho = false
+        lastSpoken = ""
+        more = []
+        optionPage = 0
+        significant = [:]
+        saidLive = ""
+        heardLive = ""
+        active = false
+        wantResponse = false
+        userSpeaking = false
+        calls = []
+        serverTurns = nil
+        cturn = nil
+        overlap = false
+        ducked = false
+        shortTurn = false
+        capture = nil
+        pre = []
+        manual = false
+        pendingText = ""
+        serverTts = nil
     }
 
     /// Push to talk: pressing the circle starts your turn at once, over pi if it is talking.
@@ -267,7 +314,7 @@ final class VoiceEngine {
             try await sessionCall("answer", .object(params))
             if engineKind == .realtime { inject("[PI] The developer answered on screen: \(option.label). Do not ask again.", respond: false) }
             silence()
-            if engineKind == .realtime { rt(["type": "response.cancel"]) }
+            if engineKind == .realtime && active { rt(["type": "response.cancel"]) }
             earcon("heard")
         } catch {
             setNote(error.localizedDescription)
@@ -386,6 +433,10 @@ final class VoiceEngine {
     @ObservationIgnored var rtc: RealtimeTransport?
     @ObservationIgnored var basicIO: BasicAudio?
     @ObservationIgnored var closed = false
+    /// Bumped by every start and stop: async work checks it after each await.
+    @ObservationIgnored var gen = 0
+    @ObservationIgnored var redial: Task<Void, Never>?
+    @ObservationIgnored var graceSeq = 0
     @ObservationIgnored var timers: [VoiceTimer] = []
     @ObservationIgnored var updatesTask: Task<Void, Never>?
     // The world: every machine's sessions and open questions, keyed "machine/agent".
@@ -404,7 +455,8 @@ final class VoiceEngine {
     @ObservationIgnored var significant: [String: String] = [:]
     @ObservationIgnored var recentHeard: [(text: String, at: Date, echo: Bool)] = []
     @ObservationIgnored var lastHeardEcho = false
-    @ObservationIgnored var grace: (prompt: JSON, until: Date, timer: VoiceTimer)?
+    typealias Grace = (prompt: JSON, until: Date, timer: VoiceTimer, id: Int)
+    @ObservationIgnored var grace: Grace?
     @ObservationIgnored var interrupted = false
     // Realtime
     @ObservationIgnored var saidLive = ""
@@ -536,14 +588,14 @@ final class VoiceEngine {
     // MARK: calls
     @discardableResult
     func sessionCall(_ m: String, _ p: JSON = [:]) async throws -> JSON {
-        guard let fleet = deps?.fleet else { throw HubError.network("Voice mode is not connected.") }
+        guard let fleet = deps?.fleet, !closed else { throw HubError.network("Voice mode is not connected.") }
         return try await fleet.agentCall(machine: machineId, agent: agent, m, p)
     }
 
     /// Speech runs where the credentials are: the speech machine (the session's own first), then any
     /// other online machine through one of its sessions. Only "can't do speech" moves on.
     func speechCall(_ m: String, _ p: JSON) async throws -> JSON {
-        guard let fleet = deps?.fleet else { throw HubError.network("Voice mode is not connected.") }
+        guard let fleet = deps?.fleet, !closed else { throw HubError.network("Voice mode is not connected.") }
         let home = speechMachine ?? machineId
         var tries: [(String, String)] = []
         if home == machineId { tries.append((machineId, agent)) } else if let a = agentOn(home) { tries.append((home, a)) }
@@ -559,6 +611,12 @@ final class VoiceEngine {
                 return r
             } catch {
                 last = error
+                if closed { throw error }
+                // The speech machine can't be reached: forget it and re-pick from the next machine (once).
+                if case HubError.network = error, mid == home, tries.count > 1 {
+                    if speechMachine == mid { speechMachine = nil }
+                    continue
+                }
                 if error.localizedDescription.range(of: #"unavailable|not set up|no speech|no recogni|api key|sign.?in"#, options: [.regularExpression, .caseInsensitive]) == nil { throw error }
             }
         }
@@ -598,6 +656,8 @@ final class VoiceEngine {
                 return setState(.paused)
             }
             route = s.route
+            // The system input mute persists (AirPods, Control Center): start in sync with it.
+            if s.isInputMuted { muted = true }
         }
         for (k, v) in infos { statusOf[k] = v["status"]?.string }
         heartbeat(true)
@@ -641,6 +701,11 @@ final class VoiceEngine {
             self.setMuted(m)
         }
         s.onNetworkChange = { [weak self] in self?.networkChanged() }
+        // Headset / lock-screen play-pause acts like tapping the circle (web: mediaSession play/pause).
+        s.onRemoteToggle = { [weak self] in
+            guard let self, self.isOpen, !self.closed else { return }
+            self.tap() // push to talk: tap starts and ends the turn, as on the circle
+        }
     }
 
     /// Interruptions (a call, Siri): pause; resume on `.shouldResume`, else wait for a tap.
@@ -649,6 +714,8 @@ final class VoiceEngine {
         switch began {
         case true?:
             interrupted = true
+            // Nobody can say "stop" now: an undo window must not go ahead unheard (pi's question stays open).
+            dropGrace()
             silence()
             rtc?.micEnabled = false
             clientTurns(false)
@@ -657,14 +724,31 @@ final class VoiceEngine {
             resumeAfterInterruption()
         case nil:
             interrupted = true
+            dropGrace()
             setState(.paused)
         }
     }
 
     func resumeAfterInterruption() {
+        if let s = deps?.audioSession {
+            do { try s.activate() } catch {
+                // Still interrupted (e.g. a call is on): stay paused; the next tap tries again.
+                setNote("The microphone is busy. Tap to resume.")
+                return setState(.paused)
+            }
+        }
         interrupted = false
-        try? deps?.audioSession?.activate()
+        setNote("")
         rtc?.micEnabled = !muted && (settings.turns == .open || talking)
+        if engineKind == .basic, let io = basicIO {
+            // The interruption stopped the capture engine: start it again.
+            io.stop()
+            do { try io.start { [weak self] samples, rate in self?.onFrame(samples, rate) } } catch {
+                setNote("\(error.localizedDescription) Tap the circle to try again.")
+                interrupted = true
+                return setState(.paused)
+            }
+        }
         setState(muted ? .paused : listenState())
     }
 
@@ -673,13 +757,17 @@ final class VoiceEngine {
     func networkChanged() {
         guard isOpen, !closed else { return }
         deps?.fleet.reconnect()
-        guard engineKind == .realtime else { return }
-        Task { [weak self] in
+        // One redial at a time: a burst of path changes while dialling is the same change.
+        guard engineKind == .realtime, redial == nil else { return }
+        let g = gen
+        redial = Task { [weak self] in
             guard let self else { return }
+            defer { if self.gen == g { self.redial = nil } }
             self.stopRealtime()
             self.setState(.connecting)
             do { try await self.startRealtime() } catch {
-                if self.closed { return }
+                // Only this voice mode's own redial may fall back (not a newer call or a closed one).
+                guard self.gen == g, !self.closed, self.engineKind == nil else { return }
                 self.stopRealtime()
                 self.startCascade()
                 self.basic(error.localizedDescription)
@@ -821,7 +909,10 @@ final class VoiceEngine {
 
     func setMuted(_ m: Bool) {
         muted = m
-        if m { clientTurns(false) }
+        if m {
+            clientTurns(false)
+            dropGrace() // a muted mic can't hear "stop"
+        }
         deps?.audioSession?.setInputMuted(m)
         if !m { setNote("") }
         if engineKind == .realtime { rtc?.micEnabled = !m && (settings.turns == .open || talking) }
@@ -939,7 +1030,12 @@ final class VoiceEngine {
 
     func settled() async {
         let b: JSON
-        do { b = try await sessionCall("brief", ["mode": .string(settings.attention.rawValue)]) } catch {
+        let g = gen
+        do {
+            b = try await sessionCall("brief", ["mode": .string(settings.attention.rawValue)])
+            guard g == gen, !closed else { return }
+        } catch {
+            guard g == gen, !closed else { return }
             return tell("pi finished, but I couldn't get the summary.", "[PI] pi finished but the summary failed: \(error.localizedDescription)")
         }
         let report = b["report"]?.string ?? ""
@@ -964,7 +1060,9 @@ final class VoiceEngine {
     /// The claim that an earlier request named this action must hold for something actually heard.
     func namedEarlier(_ prompt: JSON, claimed: String? = nil) -> Bool {
         guard let core, core.isDestructive(prompt) else { return false }
-        let heardTexts = recentHeard.filter { !$0.echo }.map(\.text)
+        // Only what was heard in the last 3 minutes (the web keeps no older request) counts.
+        let t = deps?.now() ?? Date()
+        let heardTexts = recentHeard.filter { !$0.echo && t.timeIntervalSince($0.at) < 180 }.map(\.text)
         return (claimed == nil || claimed!.isEmpty || core.requestNames(prompt: prompt, said: claimed!)) && heardTexts.contains { core.requestNames(prompt: prompt, said: $0) }
     }
 
@@ -978,35 +1076,53 @@ final class VoiceEngine {
     func startGrace(_ prompt: JSON) {
         cancelGrace(quiet: true)
         guard let deps else { return }
-        let timer = deps.scheduler.after(Self.graceMs / 1000) { [weak self] in Task { await self?.finishGrace(true) } }
-        grace = (prompt, deps.now().addingTimeInterval(Self.graceMs / 1000), timer)
+        graceSeq += 1
+        let id = graceSeq
+        // The timer answers only its own window, never a replacement.
+        let timer = deps.scheduler.after(Self.graceMs / 1000) { [weak self] in
+            guard let self, let w = self.takeGrace(id: id) else { return }
+            Task { await self.answerGrace(w, true) }
+        }
+        grace = (prompt, deps.now().addingTimeInterval(Self.graceMs / 1000), timer, id)
         earcon("attention")
         renderAsk()
     }
 
-    /// Forgets the undo window without answering (answered elsewhere, or voice mode ended).
+    /// Forgets the undo window without answering (answered elsewhere, voice mode ended, nobody listening).
     func dropGrace() {
         grace?.timer.cancel()
         grace = nil
         renderAsk()
     }
 
-    func finishGrace(_ value: Bool) async {
-        guard let g = grace else { return }
+    /// Detaches the current window synchronously (optionally only if it is window `id`).
+    func takeGrace(id: Int? = nil) -> Grace? {
+        guard let g = grace, id == nil || g.id == id else { return nil }
         g.timer.cancel()
         grace = nil
         renderAsk()
+        return g
+    }
+
+    func answerGrace(_ g: Grace, _ value: Bool) async {
+        let mine = gen
         do {
             try await sessionCall("answer", ["id": g.prompt["id"] ?? .null, "value": .bool(value)])
+            guard mine == gen else { return }
             earcon(value ? "heard" : "off")
-        } catch { setNote(error.localizedDescription) }
+        } catch { if mine == gen { setNote(error.localizedDescription) } }
         renderAsk()
     }
 
+    func finishGrace(_ value: Bool) async {
+        guard let g = takeGrace() else { return }
+        await answerGrace(g, value)
+    }
+
     func cancelGrace(quiet: Bool) {
-        guard let g = grace else { return }
+        guard let g = takeGrace() else { return }
         let title = g.prompt["title"]?.string ?? ""
-        Task { await finishGrace(false) }
+        Task { await answerGrace(g, false) }
         if quiet { return }
         silence()
         tell("Cancelled.", "[PI] The developer cancelled: \(title). Say \"Cancelled\" and nothing else.")
@@ -1042,7 +1158,7 @@ final class VoiceEngine {
 
     func interrupt() {
         if engineKind == .realtime {
-            rt(["type": "response.cancel"])
+            if active { rt(["type": "response.cancel"]) }
             rt(["type": "output_audio_buffer.clear"])
         } else { silence() }
         setState(listenState())
@@ -1051,6 +1167,7 @@ final class VoiceEngine {
     // MARK: tools (realtime tool calls and basic voice's own intents)
     func tool(_ name: String, _ args: JSON) async throws -> JSON {
         guard let core else { return ["error": "no voice core"] }
+        if closed { return ["error": "voice mode ended"] }
         switch name {
         case "ask_pi":
             let text = (args["request"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1207,7 +1324,7 @@ final class VoiceEngine {
     /// One 20 ms frame of the client VAD. The level comes from WebRTC stats [verify against device AEC].
     func clientVadFrame() {
         guard let v = cvad, let deps else { return }
-        let rms = rtc?.micLevel ?? 0
+        let rms = rtc?.micRaw ?? 0
         let speaking = state == .speaking
         // Echo cancellation is good, not perfect: over pi's voice only clearly louder speech counts.
         v.setGain(speaking ? 3 : 1)
@@ -1370,7 +1487,9 @@ final class VoiceEngine {
         calls.insert(callId)
         let args = (try? JSON.parse(Data((rawArgs ?? "{}").utf8))) ?? [:]
         var out: JSON
+        let g = gen
         do { out = try await tool(name, args) } catch { out = ["error": .string(error.localizedDescription)] }
+        guard g == gen, !closed else { return }
         let text = (try? String(data: out.data(), encoding: .utf8)) ?? "{}"
         rt(["type": "conversation.item.create", "item": ["type": "function_call_output", "call_id": .string(callId), "output": .string(text ?? "{}")]])
         if name == "ask_pi" && out["error"] == nil {
@@ -1471,10 +1590,13 @@ final class VoiceEngine {
         setState(.thinking)
         let audio = BasicVoice.wav(BasicVoice.downsample(all, from: rate), rate: 16000)
         var text = ""
+        let g = gen
         do {
             let r = try await speechCall("transcribe", ["audio": .string(audio.base64EncodedString()), "mime": "audio/wav", "distill": false])
+            guard g == gen, !closed else { return }
             text = (r["raw"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
+            guard g == gen, !closed else { return }
             setNote("Recognition failed: \(error.localizedDescription)")
             earcon("failed")
             return setState(listenState())
@@ -1508,7 +1630,8 @@ final class VoiceEngine {
 
     /// Basic voice's own conversation logic: commands, answers to dialogs, then requests to pi.
     func handleUtterance(_ text: String) async {
-        guard let core else { return }
+        guard let core, !closed else { return }
+        let g = gen
         rememberHeard(text)
         do {
             let cmd = core.parseCommand(text)?.kind
@@ -1517,11 +1640,16 @@ final class VoiceEngine {
             if cmd == "help" { return speak(core.help) }
             if cmd == "stop" {
                 _ = try await tool("stop_pi", [:])
+                try alive(g)
                 return speak("Stopped.")
             }
             if cmd == "quiet" { return setState(listenState()) }
             if cmd == "repeat" { return speak(lastSpoken.isEmpty ? "I haven't said anything yet." : lastSpoken) }
-            if cmd == "status" { return speak(try await tool("pi_status", [:])["speech"]?.string ?? "") }
+            if cmd == "status" {
+                let s = try await tool("pi_status", [:])["speech"]?.string ?? ""
+                try alive(g)
+                return speak(s)
+            }
             if let cmd, core.settings.contains(cmd), let s = VoiceSetting(rawValue: cmd) {
                 applySetting(s)
                 return speak(s == .pushToTalk ? "Push to talk. Hold the circle while you talk." : s == .openMic ? "Open mic." : "Okay.")
@@ -1543,34 +1671,46 @@ final class VoiceEngine {
                     var params: [String: JSON] = ["id": p["id"] ?? .null]
                     if let v = r.value { params["value"] = v }
                     try await sessionCall("answer", .object(params))
+                    try alive(g)
                     return speak(r.value == .bool(false) ? "Okay, no." : r.value == nil ? "Cancelled." : "Okay.")
                 }
                 if p["kind"]?.string != "input" && text.split(separator: " ").count < 4 { return speak("Sorry. \(core.speakPrompt(p, page: optionPage))") }
             }
             if (cmd == "more" || n.range(of: #"^(yes|yeah|sure|ok|okay)\b"#, options: .regularExpression) != nil) && !more.isEmpty {
                 let topic = more.removeFirst()
-                return speak(try await tool("pi_details", ["topic": .string(topic)])["speech"]?.string ?? "")
+                let s = try await tool("pi_details", ["topic": .string(topic)])["speech"]?.string ?? ""
+                try alive(g)
+                return speak(s)
             }
             if cmd == "more" { return speak("That's all I have.") }
             if let m = n.firstMatch(of: /^(?:switch to|go to|open)\s+(.+)$/) {
                 let name = String(m.1)
                 let r = try await tool("switch_session", ["name": .string(name)])
+                try alive(g)
                 if let amb = r["ambiguous"]?.array { return speak("On which computer? \(amb.compactMap { $0["machine"]?.string }.joined(separator: ", or ")).") }
                 return speak(r["error"] != nil ? "I can't find \(name)." : "Now on \(r["switched"]?.string ?? name)\((r["waiting"]?.number ?? 0) > 0 ? ". It has a question for you" : "").")
             }
             // A request for pi: distil it into what was meant, then send.
             var request = text
-            if let d = try? await speechCall("distill", ["raw": .string(text)]), let t = d["text"]?.string, !t.isEmpty { request = d["editor"]?.string ?? t }
+            if let d = try? await sessionCall("distill", ["raw": .string(text)]), let t = d["text"]?.string, !t.isEmpty { request = d["editor"]?.string ?? t }
+            // Voice mode may have ended while distilling: never send a request after End.
+            try alive(g)
             let r = try await tool("ask_pi", ["request": .string(request)])
+            try alive(g)
             if let e = r["error"]?.string { return speak("I couldn't send that: \(e)") }
             more = []
             if r["delivered"]?.string == "prompt" { return setState(.working) }
             return speak(r["delivered"]?.string == "steer" ? "Passed on." : "Queued for after this.")
         } catch {
+            guard g == gen, !closed else { return }
             earcon("failed")
             speak("Something went wrong: \(error.localizedDescription)")
         }
     }
+
+    struct Stale: Error {}
+    /// Throws when voice mode ended (or restarted) since generation `g`.
+    func alive(_ g: Int) throws { if g != gen || closed { throw Stale() } }
 
     /// Stops whatever is speaking: the computer's audio or the phone's synthesis.
     func silence() { basicIO?.silence() }

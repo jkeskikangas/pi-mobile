@@ -1,5 +1,6 @@
 import AVFAudio
 import Network
+import MediaPlayer
 @preconcurrency import WebRTC
 
 /// D5 audio session through RTCAudioSession (manual audio), interruptions, routes, input mute (D8)
@@ -10,6 +11,7 @@ final class AudioSessionController: VoiceAudioSession {
     var onRouteChange: (@MainActor (String) -> Void)?
     var onInputMute: (@MainActor (Bool) -> Void)?
     var onNetworkChange: (@MainActor () -> Void)?
+    var onRemoteToggle: (@MainActor () -> Void)?
 
     private var observers: [NSObjectProtocol] = []
     private var monitor: NWPathMonitor?
@@ -34,6 +36,7 @@ final class AudioSessionController: VoiceAudioSession {
         active = true
         observe()
         startPathMonitor()
+        enableRemote()
     }
 
     func deactivate() {
@@ -42,11 +45,39 @@ final class AudioSessionController: VoiceAudioSession {
         for o in observers { NotificationCenter.default.removeObserver(o) }
         observers = []
         monitor?.cancel(); monitor = nil; lastPath = nil
+        disableRemote()
         let rtc = RTCAudioSession.sharedInstance()
         rtc.isAudioEnabled = false
         rtc.lockForConfiguration()
         try? rtc.setActive(false)
         rtc.unlockForConfiguration()
+    }
+
+    var isInputMuted: Bool { AVAudioApplication.shared.isInputMuted }
+
+    // MARK: - Headset / lock screen play-pause (web: mediaSession play/pause/togglemicrophone)
+
+    private var remoteTargets: [(MPRemoteCommand, Any)] = []
+
+    private func enableRemote() {
+        guard remoteTargets.isEmpty else { return }
+        let c = MPRemoteCommandCenter.shared()
+        for cmd in [c.togglePlayPauseCommand, c.playCommand, c.pauseCommand] {
+            cmd.isEnabled = true
+            let t = cmd.addTarget { [weak self] _ in
+                MainActor.assumeIsolated { self?.onRemoteToggle?() }
+                return .success
+            }
+            remoteTargets.append((cmd, t))
+        }
+        // Commands reach an app that is the "now playing" app. [verify] with .voiceChat on a device.
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: "pi voice"]
+    }
+
+    private func disableRemote() {
+        for (cmd, t) in remoteTargets { cmd.removeTarget(t) }
+        remoteTargets = []
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
     func setInputMuted(_ muted: Bool) {
@@ -65,11 +96,12 @@ final class AudioSessionController: VoiceAudioSession {
             MainActor.assumeIsolated { [weak self] in
                 guard let self, let type else { return }
                 switch type {
-                case .began: self.onInterruption?(true)
+                case .began:
+                    RTCAudioSession.sharedInstance().isAudioEnabled = false
+                    self.onInterruption?(true)
                 case .ended:
+                    // The engine reactivates (`activate()`, which re-enables WebRTC's audio unit) and handles failure.
                     if opts.contains(.shouldResume) {
-                        // Re-enable WebRTC's audio unit after the interruption. [verify]
-                        RTCAudioSession.sharedInstance().isAudioEnabled = true
                         self.onInterruption?(false)
                     } else { self.onInterruption?(nil) }
                 @unknown default: break
@@ -111,8 +143,10 @@ final class AudioSessionController: VoiceAudioSession {
         guard monitor == nil else { return }
         let m = NWPathMonitor()
         m.pathUpdateHandler = { path in
+                // The interface actually in use (Wi-Fi ↔ cellular), not every one available.
+            let kinds: [NWInterface.InterfaceType] = [.wifi, .cellular, .wiredEthernet, .other]
             let key: String? = path.status == .satisfied
-                ? path.availableInterfaces.map { "\($0.type)-\($0.name)" }.joined(separator: ",")
+                ? kinds.first(where: { path.usesInterfaceType($0) }).map { "\($0)" } ?? "loopback"
                 : nil
             Task { @MainActor [weak self] in self?.pathChanged(key) }
         }

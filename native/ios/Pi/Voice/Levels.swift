@@ -6,6 +6,8 @@ import Foundation
 final class Levels {
     private(set) var mic: Double = 0
     private(set) var pi: Double = 0
+    /// The mic's raw `audioLevel` (linear amplitude, like the web's RMS) for the VAD, unsmoothed.
+    private(set) var micRaw: Double = 0
 
     /// Raw stats `audioLevel` (0–1 linear amplitude; speech sits around 0.02–0.3) → 0–1 for display.
     /// sqrt lifts quiet speech; 1.6 gain so normal speech reaches ~0.6–0.9. [verify] feel on device.
@@ -15,9 +17,10 @@ final class Levels {
     }
 
     func update(mic rawMic: Double?, pi rawPi: Double?) {
+        if let rawMic { micRaw = rawMic.isFinite ? max(0, rawMic) : 0 }
         if let rawMic { mic = mic * 0.6 + Self.scale(rawMic) * 0.4 }
         if let rawPi { pi = pi * 0.6 + Self.scale(rawPi) * 0.4 }
     }
 
-    func reset() { mic = 0; pi = 0 }
+    func reset() { mic = 0; pi = 0; micRaw = 0 }
 }

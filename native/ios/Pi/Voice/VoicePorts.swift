@@ -50,6 +50,8 @@ protocol RealtimeTransport: AnyObject {
     /// Smoothed levels (0–1): the mic and pi's voice.
     var micLevel: Double { get }
     var piLevel: Double { get }
+    /// The mic's raw linear level for the client VAD (web: analyser RMS), not display-scaled.
+    var micRaw: Double { get }
     func close()
 }
 
@@ -77,6 +79,8 @@ protocol BasicAudio: AnyObject {
 @MainActor
 protocol EarconPlaying: AnyObject {
     func play(_ name: String)
+    /// Stops the earcon engine (before the audio session is deactivated).
+    func stop()
 }
 
 /// The audio session: D5 configuration, interruptions, routes, input mute (D8).
@@ -91,6 +95,10 @@ protocol VoiceAudioSession: AnyObject {
     /// System input mute (AirPods stem, Control Center) changed.
     var onInputMute: (@MainActor (Bool) -> Void)? { get set }
     func setInputMuted(_ muted: Bool)
+    /// The system input mute now (it persists across launches).
+    var isInputMuted: Bool { get }
+    /// Headset or lock-screen play/pause: acts like tapping the circle.
+    var onRemoteToggle: (@MainActor () -> Void)? { get set }
     /// Network path changed after being satisfied.
     var onNetworkChange: (@MainActor () -> Void)? { get set }
 }

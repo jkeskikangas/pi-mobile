@@ -42,6 +42,7 @@ final class FakeRealtime: RealtimeTransport {
     var remoteVolume = 1.0
     var micLevel = 0.0
     var piLevel = 0.0
+    var micRaw = 0.0
     private(set) var sent: [JSON] = []
     private(set) var closed = false
     var offerSdp = "v=0 offer"
@@ -82,6 +83,30 @@ final class FakeBasic: BasicAudio {
 final class FakeEarcons: EarconPlaying {
     var played: [String] = []
     func play(_ name: String) { played.append(name) }
+    var stopped = 0
+    func stop() { stopped += 1 }
+}
+
+@MainActor
+final class FakeAudioSession: VoiceAudioSession {
+    var route = "Speaker"
+    var onInterruption: (@MainActor (Bool?) -> Void)?
+    var onRouteChange: (@MainActor (String) -> Void)?
+    var onInputMute: (@MainActor (Bool) -> Void)?
+    var onNetworkChange: (@MainActor () -> Void)?
+    var onRemoteToggle: (@MainActor () -> Void)?
+    var isInputMuted = false
+    var activeNow = false
+    var failActivate = false
+    var activations = 0
+    var deactivations = 0
+    func activate() throws {
+        activations += 1
+        if failActivate { throw HubError.network("Session activation failed.") }
+        activeNow = true
+    }
+    func deactivate() { deactivations += 1; activeNow = false }
+    func setInputMuted(_ muted: Bool) { isInputMuted = muted }
 }
 
 /// Machines, sessions and RPCs; records every call.
@@ -93,6 +118,17 @@ final class FakeHub: VoiceFleet {
     var calls: [Call] = []
     /// Per-method replies; throw to fail.
     var reply: (Call) throws -> JSON = { _ in [:] }
+    /// Methods whose replies wait for `release`.
+    var hold: Set<String> = []
+    private var held: [String: [CheckedContinuation<Void, Never>]] = [:]
+    func release(_ m: String) {
+        hold.remove(m)
+        for c in held.removeValue(forKey: m) ?? [] { c.resume() }
+    }
+    private func wait(_ m: String) async {
+        guard hold.contains(m) else { return }
+        await withCheckedContinuation { held[m, default: []].append($0) }
+    }
     private var cont: AsyncStream<FleetUpdate>.Continuation?
 
     init(_ machines: [FleetMachine]) { self.machines = machines }
@@ -107,6 +143,7 @@ final class FakeHub: VoiceFleet {
         let c = Call(machine: machine, agent: agent, m: m, p: p)
         calls.append(c)
         if m == "snapshot" { return ["prompts": []] }
+        await wait(m)
         return try reply(c)
     }
     func focus(machine: String, agent: String) async {}
