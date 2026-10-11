@@ -81,7 +81,14 @@
 		unb64u,
 		fetch: (...a) => fetch(...a),
 		origin: location.origin,
-		storage: store,
+		// The native app keeps the machines in its Keychain (native/ios/BRIDGE.md, `machines`).
+		storage: {
+			get: (k) => store.get(k),
+			set(k, v) {
+				store.set(k, v);
+				if (k === "pi-mobile-machines") toNative({ type: "machines", machines: v || [] });
+			},
+		},
 		onHello: (id) => resync(id),
 		onEvent: (id, ev) => onMachineEvent(id, ev),
 		onState: (id) => machineStateChanged(id),
@@ -150,9 +157,17 @@
 		}
 	}
 
+	/** Tells the native app (only inside it) about a change; the reply does not matter. */
+	function toNative(msg) {
+		if (!window.PiNative) return;
+		try {
+			Promise.resolve(window.webkit?.messageHandlers?.piNative?.postMessage(msg)).catch(() => {});
+		} catch {}
+	}
+
 	function unpaired(reason) {
 		// In the native app, a real unpair (always with a reason) also clears its Keychain (native/ios/BRIDGE.md).
-		if (reason && window.PiNative) window.webkit?.messageHandlers?.piNative?.postMessage({ type: "unpaired" })?.catch?.(() => {});
+		if (reason) toNative({ type: "unpaired" });
 		fleet.stop();
 		for (const m of fleet.machines) fleet.remove(m.id);
 		store.set(DEVICE_KEY, null);

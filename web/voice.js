@@ -61,9 +61,10 @@
 	// Inside the iOS app, window.PiNative exists and the native side records dictation and runs voice
 	// mode. Without it, nothing below changes behaviour.
 	const native = () => !!window.PiNative;
-	function nativePost(msg) {
+	async function nativePost(msg) {
 		const h = window.webkit?.messageHandlers?.piNative;
-		return h ? Promise.resolve(h.postMessage(msg)) : Promise.reject(new Error("the app is not reachable"));
+		if (!h) throw new Error("the app is not reachable");
+		return await h.postMessage(msg);
 	}
 	/** Stores a voice preference; the native app keeps its own copy for native voice mode. */
 	function setPref(key, value) {
@@ -112,20 +113,43 @@
 	// The computer recognises the speech and distils it into the message you meant, which lands in
 	// the composer for review. "raw" shows what was heard, "undo" restores your text.
 	const HOLD_MS = 350;
-	const dict = { rec: null, stream: null, chunks: [], started: 0, raf: 0, last: null, busy: false, analyser: null, held: false, levels: [] };
+	// Native takes (native/ios/BRIDGE.md): `phase` is idle | starting | rec | stopping; `gen` numbers each
+	// take so a late reply for a dropped one is ignored; `then` is what the user asked for while starting.
+	const dict = { rec: null, stream: null, chunks: [], started: 0, raf: 0, last: null, busy: false, analyser: null, held: false, levels: [], phase: "idle", gen: 0, then: null };
+
+	/** Drops the current native take on the web side; a pending reply for it is ignored. */
+	function dropNativeTake() {
+		dict.gen++;
+		dict.phase = "idle";
+		dict.then = null;
+		dict.rec = null;
+		stopStream();
+	}
 
 	async function startDictation(held) {
-		if (dict.busy || dict.rec) return;
+		if (dict.busy || dict.rec || dict.phase !== "idle") return;
 		dict.held = held;
+		let then = null;
 		if (native()) {
-			dict.busy = true;
+			const gen = ++dict.gen;
+			dict.phase = "starting";
+			dict.then = null;
 			try {
 				await nativePost({ type: "dictation.start" });
 			} catch (e) {
+				if (gen !== dict.gen) return;
+				dict.phase = "idle";
 				return showDictMessage(`Microphone: ${e?.message || e}`, "error");
-			} finally {
-				dict.busy = false;
 			}
+			// Given up while starting (dictationEnded, voice mode): stop the recording that just began.
+			if (gen !== dict.gen) return void nativePost({ type: "dictation.cancel" }).catch(() => {});
+			then = dict.then;
+			dict.then = null;
+			if (then === "cancel") {
+				dict.phase = "idle";
+				return void nativePost({ type: "dictation.cancel" }).catch(() => {});
+			}
+			dict.phase = "rec";
 			dict.rec = NATIVE_REC;
 			dict.level = 0;
 			dict.levels = [];
@@ -156,6 +180,8 @@
 		showRecorder();
 		navigator.vibrate?.(15);
 		earcon("listen");
+		// Released before the native recording had started: finish now (too short, most likely).
+		if (dict.rec === NATIVE_REC && then === "stop") finishDictation(true);
 	}
 
 	function stopStream() {
@@ -169,20 +195,42 @@
 	}
 
 	async function finishDictation(keep) {
+		if (dict.phase === "starting") {
+			// Applied once the start resolves (BRIDGE.md, dictation ordering).
+			dict.then = keep ? "stop" : "cancel";
+			return;
+		}
+		if (dict.phase === "stopping") {
+			// ✕ while the stop is pending: discard whatever it returns.
+			if (keep) return;
+			dropNativeTake();
+			hideDictBar();
+			return void nativePost({ type: "dictation.cancel" }).catch(() => {});
+		}
 		const rec = dict.rec;
 		dict.rec = null;
 		if (!rec) return;
 		let audio, mime, size;
 		if (rec === NATIVE_REC) {
+			if (!keep) {
+				dropNativeTake();
+				hideDictBar();
+				return void nativePost({ type: "dictation.cancel" }).catch(() => {});
+			}
+			const gen = dict.gen;
+			dict.phase = "stopping";
+			cancelAnimationFrame(dict.raf);
 			let r;
 			try {
-				r = await nativePost({ type: keep ? "dictation.stop" : "dictation.cancel" });
+				r = await nativePost({ type: "dictation.stop" });
 			} catch (e) {
-				stopStream();
-				return keep ? showDictMessage(`Voice input failed: ${e?.message || e}`, "error") : hideDictBar();
+				if (gen !== dict.gen) return;
+				dropNativeTake();
+				return showDictMessage(`Voice input failed: ${e?.message || e}`, "error");
 			}
+			if (gen !== dict.gen) return;
+			dict.phase = "idle";
 			stopStream();
-			if (!keep) return hideDictBar();
 			audio = r?.audio || "";
 			mime = r?.mime || "audio/mp4";
 			size = Math.floor((audio.length * 3) / 4);
@@ -361,7 +409,8 @@
 			if (!downAt) return;
 			const held = Date.now() - downAt >= HOLD_MS;
 			downAt = 0;
-			if (held && dict.rec) finishDictation(true);
+			if (held && dict.phase === "starting") finishDictation(true);
+			else if (held && dict.rec) finishDictation(true);
 			else if (dict.rec) {
 				// A quick tap: keep recording until the next tap.
 				dict.held = false;
@@ -2008,10 +2057,29 @@
 		if (!app()?.S.device) return;
 		if (!app().S.current) return app().toast("No session to talk to yet.", "warning");
 		// The app runs voice mode natively and has the microphone, so no secure-context check.
-		if (native()) return void nativePost({ type: "voice.start", agent: app().S.current }).catch((e) => app().toast(e?.message || String(e), "error"));
+		if (native()) return void startNativeVoice();
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return secureSheet();
 		mode = new VoiceMode();
 		mode.open();
+	}
+
+	/** One voice.start at a time; any dictation is dropped first (native cancels its recording). */
+	let voiceStarting = false;
+	async function startNativeVoice() {
+		if (voiceStarting) return;
+		voiceStarting = true;
+		if (dict.phase !== "idle") {
+			dropNativeTake();
+			hideDictBar();
+		}
+		const agent = app().S.current;
+		try {
+			await nativePost({ type: "voice.start", agent, machine: app().machineOf(agent) || "" });
+		} catch (e) {
+			app().toast(e?.message || String(e), "error");
+		} finally {
+			voiceStarting = false;
+		}
 	}
 
 	/** The microphone needs HTTPS: offer the computer's secure address instead of failing. */
@@ -2097,9 +2165,8 @@
 			},
 			/** The native side stopped recording on its own (interruption, error): drop the take. */
 			dictationEnded(message) {
-				if (dict.rec !== NATIVE_REC) return;
-				dict.rec = null;
-				stopStream();
+				if (dict.phase === "idle") return;
+				dropNativeTake();
 				if (message) showDictMessage(String(message), "error");
 				else hideDictBar();
 			},
