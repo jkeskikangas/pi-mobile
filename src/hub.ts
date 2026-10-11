@@ -270,6 +270,7 @@ export class Hub {
 		this.extra.clear();
 		clearTimeout(this.idleTimer);
 		this.tunnel?.stop();
+		this.apns?.close();
 		for (const c of this.clients) c.res.end();
 		this.clients.clear();
 		for (const a of this.agents.values()) a.ch.close();
@@ -616,7 +617,7 @@ export class Hub {
 				// iPhone app: `{ apns: { token, sandbox } }` (null to turn off), stored beside Web Push.
 				if ("apns" in p) {
 					if (p.apns !== null && !isApnsToken(p.apns)) throw new Error("invalid APNs token");
-					this.push.setApns(device.id, p.apns ? { token: p.apns.token, sandbox: !!p.apns.sandbox } : undefined);
+					this.push.setApns(device.id, p.apns ? { token: p.apns.token, ...(p.apns.sandbox === undefined ? {} : { sandbox: p.apns.sandbox }) } : undefined);
 					if (!("subscription" in p)) return { ok: true, apns: !!this.apnsClient() };
 				}
 				const sub = p.subscription as PushSubscriptionJSON | null;

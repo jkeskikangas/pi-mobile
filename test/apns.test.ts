@@ -99,6 +99,85 @@ test("APNs: ES256 provider token, request path, headers and body; 410 and BadDev
 	}
 });
 
+test("APNs: one connection is reused; reconnects after GOAWAY or a dead connection; timeouts fail; close shuts down", async () => {
+	const { file } = p8();
+	let mode: "ok" | "goaway" | "hang" = "ok";
+	const sessions = new Set<unknown>();
+	const seen: string[] = [];
+	const server = createServer();
+	server.on("session", (s) => sessions.add(s));
+	server.on("stream", (stream: ServerHttp2Stream, headers) => {
+		stream.resume();
+		stream.on("end", () => {
+			seen.push(String(headers[":path"]));
+			if (mode === "hang") return;
+			stream.respond({ ":status": 200 });
+			stream.end();
+			if (mode === "goaway") stream.session?.goaway();
+		});
+	});
+	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+	const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	const client = new ApnsClient({ keyFile: file, keyId: "K", teamId: "T", topic: "t" }, { production: origin, sandbox: origin }, 300);
+	const msg = { sealed: "x" };
+	try {
+		assert.equal(await client.send({ token: TOKEN }, msg), "sent");
+		assert.equal(await client.send({ token: TOKEN }, msg), "sent");
+		assert.equal(sessions.size, 1, "reuses the HTTP/2 connection");
+		mode = "goaway";
+		assert.equal(await client.send({ token: TOKEN }, msg), "sent");
+		mode = "ok";
+		await until(() => client.connections === 0);
+		assert.equal(await client.send({ token: TOKEN }, msg), "sent");
+		assert.equal(sessions.size, 2, "reconnects after GOAWAY");
+		mode = "hang";
+		assert.equal(await client.send({ token: TOKEN }, msg), "failed", "times out");
+		assert.equal(client.connections, 0, "drops a connection that timed out");
+		mode = "ok";
+		assert.equal(await client.send({ token: TOKEN }, msg), "sent");
+		assert.equal(sessions.size, 3);
+		client.close();
+		assert.equal(client.connections, 0, "close shuts every connection");
+	} finally {
+		client.close();
+		server.close();
+	}
+});
+
+test("APNs: DeviceTokenNotForTopic is gone; ExpiredProviderToken re-signs and retries once; config.sandbox is the default", async () => {
+	const { file } = p8();
+	const replies: [number, unknown?][] = [];
+	const prod = await fakeApple(() => replies.shift() ?? [200]);
+	const sandbox = await fakeApple(() => [200]);
+	const client = new ApnsClient({ keyFile: file, keyId: "K", teamId: "T", topic: "t", sandbox: true }, { production: prod.origin, sandbox: sandbox.origin });
+	const msg = { sealed: "x" };
+	try {
+		assert.equal(await client.send({ token: TOKEN }, msg), "sent");
+		assert.equal(sandbox.seen.length, 1, "no per-token flag: the configured sandbox default");
+		assert.equal(prod.seen.length, 0);
+
+		replies.push([400, { reason: "DeviceTokenNotForTopic" }]);
+		assert.equal(await client.send({ token: TOKEN, sandbox: false }, msg), "gone");
+
+		const before = client.providerToken();
+		await new Promise((r) => setTimeout(r, 1100)); // a new iat second, so the re-signed token differs
+		replies.push([403, { reason: "ExpiredProviderToken" }]);
+		assert.equal(await client.send({ token: TOKEN, sandbox: false }, msg), "sent");
+		const [first, retry] = prod.seen.slice(-2).map((s) => s.headers.authorization);
+		assert.equal(first, `bearer ${before}`);
+		assert.notEqual(retry, first, "retried with a fresh provider token");
+
+		replies.push([403, { reason: "ExpiredProviderToken" }], [403, { reason: "ExpiredProviderToken" }]);
+		const n = prod.seen.length;
+		assert.equal(await client.send({ token: TOKEN, sandbox: false }, msg), "failed");
+		assert.equal(prod.seen.length, n + 2, "retries only once");
+	} finally {
+		client.close();
+		prod.server.close();
+		sandbox.server.close();
+	}
+});
+
 test("attention reaches iPhone tokens with a generic alert and the text sealed to the device key; gone tokens are dropped", async () => {
 	const port = await freePort();
 	const dir = tmp();
@@ -122,6 +201,9 @@ test("attention reaches iPhone tokens with a generic alert and the text sealed t
 		assert.equal(h.apns, true);
 		assert.equal(h.apnsOn, false);
 		await assert.rejects(phone.rpc("push", { apns: { token: "nothex" } }), /invalid/);
+		await assert.rejects(phone.rpc("push", { apns: { token: TOKEN, sandbox: "yes" } }), /invalid/);
+		await phone.rpc("push", { apns: { token: TOKEN } });
+		assert.deepEqual(push.apnsEntries()[0][1], { token: TOKEN }, "no sandbox flag: the machine's config decides");
 		assert.deepEqual(await phone.rpc("push", { apns: { token: TOKEN, sandbox: true } }), { ok: true, apns: true });
 		assert.equal((await phone.rpc("hub")).apnsOn, true);
 

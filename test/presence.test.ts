@@ -58,6 +58,7 @@ test("typing in a pi terminal marks this machine's user as present", async () =>
 	};
 	await fire("session_start", { reason: "startup" });
 	await until(() => !!processHub() && ((processHub() as any).agents?.size ?? 0) === 1);
+	// Typing before the link finishes its handshake must still reach the hub (it is queued until linked).
 	assert.ok(onInput, "listens to terminal input");
 	assert.equal((processHub() as any).lastPresence, 0);
 

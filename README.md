@@ -65,7 +65,7 @@ The app offers to turn notifications on (also under **⋯**). On iPhone, add the
 
 The native iPhone app gets notifications through Apple's push service, sent by each of your computers with your own key (needs a paid Apple developer account):
 
-1. In [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list) → Keys, create a key with **Apple Push Notifications service (APNs)** enabled and download `AuthKey_<KEYID>.p8` (Apple lets you download it once; keep it private, e.g. `~/.pi/remote/`).
+1. In [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list) → Keys, create a key with **Apple Push Notifications service (APNs)** enabled and download `AuthKey_<KEYID>.p8` (Apple lets you download it once; keep it private: `chmod 600 AuthKey_<KEYID>.p8`).
 2. On every computer that should notify: `/remote settings` → **iPhone push** → the `.p8` path, the key ID, your team ID (Membership details), the app's bundle ID, and *production* (TestFlight/App Store) or *sandbox* (run from Xcode). This writes `apns: { keyFile, keyId, teamId, topic, sandbox }` to `config.json`.
 
 Apple sees only a generic "pi" alert; the session name and text travel encrypted to your phone's device key and are opened on the phone.

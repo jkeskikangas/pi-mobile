@@ -39,7 +39,19 @@ export function apnsConfigured(c: Partial<ApnsConfig> | undefined): c is ApnsCon
 }
 
 export function isApnsToken(t: unknown): t is ApnsToken {
-	return !!t && typeof (t as ApnsToken).token === "string" && /^[0-9a-fA-F]{32,200}$/.test((t as ApnsToken).token);
+	const a = t as ApnsToken;
+	return !!a && typeof a.token === "string" && /^[0-9a-fA-F]{32,200}$/.test(a.token) && (a.sandbox === undefined || typeof a.sandbox === "boolean");
+}
+
+/** Checks that `pem` is an APNs signing key (EC P-256); returns the problem, or undefined when fine. */
+export function apnsKeyProblem(pem: string): string | undefined {
+	try {
+		const k = createPrivateKey(pem);
+		if (k.asymmetricKeyType !== "ec" || k.asymmetricKeyDetails?.namedCurve !== "prime256v1") return "not an EC P-256 key (APNs keys are)";
+		return undefined;
+	} catch {
+		return "not a private key in PEM (.p8) format";
+	}
 }
 
 /** ES256 provider token: header `{alg, kid}`, claims `{iss, iat}`. */
@@ -83,9 +95,18 @@ export class ApnsClient {
 	readonly config: ApnsConfig;
 	private readonly hosts: { production: string; sandbox: string };
 
-	constructor(config: ApnsConfig, hosts = { production: APNS_HOST, sandbox: APNS_SANDBOX_HOST }) {
+	private readonly timeoutMs: number;
+
+	/** `hosts` and `timeoutMs` are replaceable in tests (a local http2 server). */
+	constructor(config: ApnsConfig, hosts = { production: APNS_HOST, sandbox: APNS_SANDBOX_HOST }, timeoutMs = 10_000) {
 		this.config = config;
 		this.hosts = hosts;
+		this.timeoutMs = timeoutMs;
+	}
+
+	/** Open HTTP/2 connections (for tests). */
+	get connections(): number {
+		return this.sessions.size;
 	}
 
 	/** Cached provider token, re-signed every 30 minutes. */
@@ -98,52 +119,75 @@ export class ApnsClient {
 	private session(origin: string): ClientHttp2Session {
 		let s = this.sessions.get(origin);
 		if (!s || s.closed || s.destroyed) {
-			s = connect(origin);
-			s.on("error", () => {});
-			s.on("close", () => this.sessions.get(origin) === s && this.sessions.delete(origin));
-			s.unref();
-			this.sessions.set(origin, s);
+			const fresh = connect(origin);
+			const forget = () => this.sessions.get(origin) === fresh && this.sessions.delete(origin);
+			fresh.on("error", forget);
+			fresh.on("goaway", forget);
+			fresh.on("close", forget);
+			fresh.unref();
+			this.sessions.set(origin, fresh);
+			s = fresh;
 		}
 		return s;
 	}
 
 	async send(device: ApnsToken, m: ApnsMessage): Promise<ApnsResult> {
-		try {
-			const sandbox = device.sandbox ?? this.config.sandbox ?? false;
-			const origin = sandbox ? this.hosts.sandbox : this.hosts.production;
-			const body = JSON.stringify(apnsPayload(m));
-			const req = this.session(origin).request({
-				":method": "POST",
-				":path": `/3/device/${device.token}`,
-				authorization: `bearer ${this.providerToken()}`,
-				"apns-topic": this.config.topic,
-				"apns-push-type": "alert",
-				"apns-priority": "10",
-				"apns-expiration": String(Math.floor(Date.now() / 1000) + 3600),
-				"content-type": "application/json",
-			});
-			const { status, text } = await new Promise<{ status: number; text: string }>((resolve, reject) => {
-				let status = 0;
-				let text = "";
-				const timer = setTimeout(() => req.close(), 10_000);
-				req.on("response", (h) => (status = Number(h[":status"])));
-				req.setEncoding("utf8");
-				req.on("data", (c) => (text += c));
-				req.on("end", () => (clearTimeout(timer), resolve({ status, text })));
-				req.on("error", (e) => (clearTimeout(timer), reject(e)));
-				req.end(body);
-			});
+		const sandbox = device.sandbox ?? this.config.sandbox ?? false;
+		const origin = sandbox ? this.hosts.sandbox : this.hosts.production;
+		const body = JSON.stringify(apnsPayload(m));
+		for (let attempt = 0; attempt < 2; attempt++) {
+			let status = 0;
+			let text = "";
+			try {
+				({ status, text } = await this.post(origin, device.token, body));
+			} catch {
+				const s = this.sessions.get(origin);
+				this.sessions.delete(origin);
+				s?.destroy();
+				return "failed";
+			}
 			if (status === 200) return "sent";
 			let reason = "";
 			try {
 				reason = JSON.parse(text).reason ?? "";
 			} catch {}
 			if (status === 410 || (status === 400 && (reason === "BadDeviceToken" || reason === "DeviceTokenNotForTopic"))) return "gone";
-			if (status === 403 && reason === "ExpiredProviderToken") this.jwt = undefined;
-			return "failed";
-		} catch {
+			// Apple rejected the provider token (e.g. clock skew): sign a fresh one and retry once.
+			if (status === 403 && reason === "ExpiredProviderToken" && attempt === 0) {
+				this.jwt = undefined;
+				continue;
+			}
 			return "failed";
 		}
+		return "failed";
+	}
+
+	private post(origin: string, token: string, body: string): Promise<{ status: number; text: string }> {
+		const req = this.session(origin).request({
+			":method": "POST",
+			":path": `/3/device/${token}`,
+			authorization: `bearer ${this.providerToken()}`,
+			"apns-topic": this.config.topic,
+			"apns-push-type": "alert",
+			"apns-priority": "10",
+			"apns-expiration": String(Math.floor(Date.now() / 1000) + 3600),
+			"content-type": "application/json",
+		});
+		return new Promise((resolve, reject) => {
+			let status = 0;
+			let text = "";
+			const timer = setTimeout(() => {
+				req.close();
+				reject(new Error("APNs timeout"));
+			}, this.timeoutMs);
+			req.on("response", (h) => (status = Number(h[":status"])));
+			req.setEncoding("utf8");
+			req.on("data", (c) => (text += c));
+			req.on("end", () => (clearTimeout(timer), resolve({ status, text })));
+			req.on("error", (e) => (clearTimeout(timer), reject(e)));
+			req.on("close", () => (clearTimeout(timer), status ? resolve({ status, text }) : reject(new Error("APNs stream closed"))));
+			req.end(body);
+		});
 	}
 
 	close(): void {

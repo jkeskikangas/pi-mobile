@@ -96,7 +96,13 @@ export class Bridge {
 			info: () => this.info(),
 			onRequest: (m, p) => this.handle(m, p),
 			onMessage: (msg) => this.onMessage(msg),
-			onState: (s) => this.onState(s),
+			onState: (s) => {
+				if (s.kind === "linked" && this.presencePending) {
+					this.presencePending = false;
+					this.presence();
+				}
+				this.onState(s);
+			},
 		});
 	}
 
@@ -145,9 +151,16 @@ export class Bridge {
 	presence(): void {
 		const now = Date.now();
 		if (now - this.lastPresence < 15_000) return;
+		// Not linked yet (startup, hub restart): send it as soon as the link is up.
+		if (!this.link.linked) {
+			this.presencePending = true;
+			return;
+		}
 		this.lastPresence = now;
 		this.link.send({ t: "presence" });
 	}
+
+	private presencePending = false;
 
 	private emit(ev: AgentEvent): void {
 		this.link.send({ t: "ev", ev: { ...ev, n: eventCounter(true) } });

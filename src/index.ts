@@ -12,11 +12,11 @@
 //   /remote add <host> add a machine you can ssh to; your phone approves it (also `pi-mobile add`)
 //   /remote remove <m> remove a machine from your phone's list
 
-import { createPrivateKey } from "node:crypto";
 import { readFileSync, unwatchFile, watchFile } from "node:fs";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { apnsKeyProblem } from "./apns.ts";
 import { Bridge } from "./bridge.ts";
 import { registerHerdrBlocked } from "./herdr.ts";
 import { closeProcessHub, type LinkState } from "./link.ts";
@@ -419,11 +419,13 @@ export default function piMobile(pi: ExtensionAPI): void {
 			if (!keyFile.trim()) next.apns = undefined;
 			else {
 				const file = keyFile.trim().replace(/^~(?=\/)/, homedir());
+				let problem: string | undefined;
 				try {
-					createPrivateKey(readFileSync(file, "utf8"));
+					problem = apnsKeyProblem(readFileSync(file, "utf8"));
 				} catch {
-					return c.ui.notify(`Can't read a .p8 key from ${file}.`, "warning");
+					problem = "can't read the file";
 				}
+				if (problem) return c.ui.notify(`${file}: ${problem}.`, "warning");
 				const keyId = await c.ui.input("Key ID (10 characters, also in the file name)", a?.keyId ?? /AuthKey_(\w{10})/.exec(file)?.[1] ?? "");
 				if (!keyId?.trim()) return;
 				const teamId = await c.ui.input("Team ID (Membership details)", a?.teamId ?? "");
