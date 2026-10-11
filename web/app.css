@@ -394,7 +394,9 @@ footer#composer > * { max-width: var(--measure); margin-inline: auto; }
 }
 .compose-box { display: flex; align-items: flex-end; gap: 2px; padding: 4px; border-radius: var(--r-xl); background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-1); transition: border-color .15s, box-shadow .15s; }
 .compose-box:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
-textarea#input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent; font-size: 16px; line-height: 1.4; padding: 10px 4px; max-height: 40dvh; min-height: 44px; color: var(--text); }
+textarea#input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent; font-size: 16px; line-height: 22px; padding: 9px 4px; max-height: 40dvh; min-height: 40px; color: var(--text); }
+/* One line is exactly as tall as the 40px buttons beside it (9 + 22 + 9), so with the box's flex-end the text
+   and the icons share a centre line; a fractional line (1.4 × 16 = 22.4) in a 44px box sat ~3px above them. */
 textarea#input::placeholder { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .compose-box .icon-btn { width: 40px; height: 40px; border-radius: 50%; }
 .attach { cursor: pointer; }
