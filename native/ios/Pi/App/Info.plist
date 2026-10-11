@@ -36,6 +36,8 @@
 	<string>$(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared</string>
 	<key>PiPushAvailable</key>
 	<string>$(PI_PUSH)</string>
+	<key>PiRelayURL</key>
+	<string>$(PI_RELAY_URL)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

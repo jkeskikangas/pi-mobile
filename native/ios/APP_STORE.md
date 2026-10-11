@@ -19,7 +19,8 @@ Then work through **README → Device checklist**. It is the gate: no TestFlight
 - [ ] Paid Apple Developer Program membership (individual or organisation; organisation shows your company as the seller and needs a D-U-N-S number).
 - [ ] Certificates, Identifiers & Profiles → Identifiers: the three App IDs Xcode makes on the first signed build (`<prefix>.pi`, `<prefix>.pi.widgets`, `<prefix>.pi.notifications`). Check that `<prefix>.pi` has **Push Notifications** on (if shipping with `PI_PUSH=YES`) and that all three have the **Keychain Sharing** group `<prefix>.shared` (from the entitlements). Automatic signing creates these; fix them by hand only if it fails.
 - [ ] Agreements, Tax, and Banking: accept the Free Apps agreement (the app is free).
-- [ ] Push (**self-built apps only**, own team; the App Store build will use a push relay, decided separately): create an APNs auth key (Keys → +, Apple Push Notifications service) and set it on each computer with `/remote settings` → iPhone push (bundle ID `<prefix>.pi`).
+- [ ] **Push relay (App Store build):** the App Store build sends notifications through the open-source Cloudflare Worker in `relay/` (its README has the deploy steps). Deploy it first with **your** APNs auth key (Keys → +, Apple Push Notifications service, topic `<prefix>.pi`), then pass its address to `release.sh` as `PI_RELAY_URL` (required; the script builds with `PI_PUSH=YES`). The phone registers its APNs token there (`POST /v1/register`) and gives each computer the relay address plus a capability; computers need no Apple key.
+- [ ] Push (**self-built apps only**, own team, no `PI_RELAY_URL`): create an APNs auth key (Keys → +, Apple Push Notifications service) and set it on each computer with `/remote settings` → iPhone push (bundle ID `<prefix>.pi`).
 
 ## 2. App Store Connect record
 
@@ -36,7 +37,8 @@ Match `Pi/Resources/PrivacyInfo.xcprivacy` and `PRIVACY.md` exactly. Apple count
 - **Audio Data**: App Functionality; **linked** to the user's identity: **Yes** (processed under the user's OpenAI/ChatGPT account); used for tracking: **No**.
 - **Photos or Videos** (image attachments sent to the computer and on to its AI model): App Functionality; linked: **Yes**; tracking: **No**.
 - **Other User Content** (messages, dictated text, session context given to the realtime model): App Functionality; linked: **Yes**; tracking: **No**.
-- Everything else (contact info, identifiers, usage data, diagnostics, location, etc.): **not collected**. No analytics or crash SDKs are included.
+- **Device ID** is not declared: the APNs device token goes to the push relay you run (Cloudflare processes it as your host, together with sealed ciphertext it can't read) only to deliver notifications. If you'd rather be stricter, declare **Device ID**, App Functionality, not linked, no tracking, and add it to the manifest too.
+- Everything else (contact info, usage data, diagnostics, location, etc.): **not collected**. No analytics or crash SDKs are included.
 - Tracking: **No** (`NSPrivacyTracking` false, no tracking domains).
 
 ## 4. Age rating
@@ -103,7 +105,7 @@ The reviewer's iPhone must reach a computer over **HTTPS** (the app refuses plai
 1. Bump `MARKETING_VERSION` in `project.yml` when the user-visible version changes (now `1.0.0`); commit.
 2. `DEVELOPMENT_TEAM=XXXXXXXXXX PI_BUNDLE_PREFIX=com.example PI_PUSH=YES scripts/release.sh <build number>` (the number must grow with every upload; the script refuses a dirty tree, checks the privacy manifest and ATS, archives and uploads).
 3. App Store Connect → TestFlight: answer export compliance (§5) for the build; add yourself as an internal tester; install with the TestFlight app.
-4. Run the Device checklist again on the TestFlight build (Release config: push uses production APNs, so set the computers' APNs key environment accordingly).
+4. Run the Device checklist again on the TestFlight build (Release config: production APNs tokens, so the relay must push to production APNs for them; the phone sends `sandbox: false`).
 5. External testers need a short beta review: fill in the test information with the review notes above.
 
 ## 9. Release gates

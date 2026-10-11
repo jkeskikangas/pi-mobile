@@ -10,6 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     PI_BUNDLE_PREFIX: dev.pimobile
+    PI_RELAY_URL: ""
     MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""
@@ -69,6 +70,8 @@ targets:
         PiKeychainGroup: $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
         # Whether this build signs with aps-environment (PI_PUSH); the web hides push setup when it doesn't.
         PiPushAvailable: $(PI_PUSH)
+        # The push relay (App Store build; release.sh requires it). Empty: own-team direct APNs (README → Push).
+        PiRelayURL: $(PI_RELAY_URL)
         # The APNs environment the entitlements use (PI_APS_ENVIRONMENT); the token's `sandbox` follows it.
         PiAPSEnvironment: $(PI_APS_ENVIRONMENT)
         UILaunchScreen:

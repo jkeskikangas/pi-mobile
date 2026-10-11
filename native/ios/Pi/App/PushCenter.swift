@@ -15,6 +15,24 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
     /// The build signs with the push entitlement (`PI_PUSH=YES` reaches Info.plist as `PiPushAvailable`).
     /// Without it the web's Notifications row says push isn't in this build instead of offering it.
     nonisolated static let available = (Bundle.main.object(forInfoDictionaryKey: "PiPushAvailable") as? String)?.uppercased() == "YES"
+    /// The push relay (`PI_RELAY_URL` → Info.plist `PiRelayURL`, e.g. the App Store build's Cloudflare Worker).
+    /// Empty: self-builds send the APNs token to each computer, which pushes with its own key.
+    nonisolated static let plistRelay: URL? = (Bundle.main.object(forInfoDictionaryKey: "PiRelayURL") as? String).flatMap(relayURL)
+
+    nonisolated static func relayURL(_ s: String) -> URL? {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, !t.hasPrefix("$("), let u = URL(string: t), u.scheme == "https", u.host() != nil, u.query == nil, u.fragment == nil else { return nil }
+        return u
+    }
+
+    /// Seams for tests: the build's answers by default.
+    var pushAvailable = PushCenter.available
+    var relay = PushCenter.plistRelay
+    /// `POST <relay>/v1/register` → the capability (`relayRegister` in tests).
+    var relayRegister: @MainActor (URLRequest) async throws -> String = { req in
+        let (data, resp) = try await URLSession.shared.data(for: req, delegate: RedirectGuard.shared)
+        return try PushCenter.relayCap(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+    }
 
     private let defaults: UserDefaults
     private var tokenWaiters: [UUID: CheckedContinuation<String?, Never>] = [:]
@@ -27,13 +45,18 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     /// The user turned notifications on in the app.
-    private(set) var enabled: Bool {
+    var enabled: Bool {
         get { defaults.bool(forKey: "pi-push-on") }
         set { defaults.set(newValue, forKey: "pi-push-on") }
     }
-    private(set) var token: String? {
+    var token: String? {
         get { defaults.string(forKey: "pi-push-token") }
         set { defaults.set(newValue, forKey: "pi-push-token") }
+    }
+    /// The relay's capability for `capToken` (a new APNs token needs a new one).
+    private(set) var cap: String? {
+        get { defaults.string(forKey: "pi-push-relay-cap").flatMap { defaults.string(forKey: "pi-push-relay-cap-token") == token ? $0 : nil } }
+        set { defaults.set(newValue, forKey: "pi-push-relay-cap"); defaults.set(newValue == nil ? nil : token, forKey: "pi-push-relay-cap-token") }
     }
     /// `entry id|device id|token` already sent: a new computer or a new token registers again.
     private var registered: Set<String> {
@@ -81,7 +104,7 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
         if let o = pendingOpen { pendingOpen = nil; Task { await opened(action: o.action, agent: o.agent, machine: o.machine, entry: o.entry) } }
         Task {
             // A token can change (restore, reinstall): ask for it on every launch; every computer hears again.
-            if Self.available, enabled, await permission() == "granted" { registered = []; UIApplication.shared.registerForRemoteNotifications() }
+            if pushAvailable, enabled, await permission() == "granted" { registered = []; UIApplication.shared.registerForRemoteNotifications() }
             await reconcile()
         }
     }
@@ -123,18 +146,81 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
     /// after a change, so an off that a sleeping computer missed is retried until it lands.
     func reconcile() async {
         guard let model else { return }
-        for m in model.machines {
-            guard let c = model.client(for: m), let hub = try? await c.rpc("hub") else { continue }
+        await reconcile(model.machines) { m, method, p in
+            guard let c = model.client(for: m) else { throw HubError.network("no client") }
+            return try await c.rpc(method, p)
+        }
+    }
+
+    /// One pass over `machines`; `rpc` reaches one computer (a fake in tests).
+    func reconcile(_ machines: [Machine], rpc: @MainActor (Machine, String, JSON) async throws -> JSON) async {
+        // A build without push never enrols, and takes back an enrolment an earlier build left behind.
+        let on = pushAvailable && enabled
+        if on, relay != nil, token != nil, cap == nil { _ = await registerRelay() }
+        for m in machines {
+            guard let hub = try? await rpc(m, "hub", [:]) else { continue }
+            if let relay {
+                // Through the relay: each computer holds {url, cap}; a direct token an older build left goes.
+                if hub["apnsOn"]?.bool == true { _ = try? await rpc(m, "push", ["apns": .null]) }
+                guard hub["relay"]?.bool == true else { continue } // a computer too old for the relay
+                var step = Self.relayAction(enabled: on, url: relay, cap: cap, relayOn: hub["relayOn"]?.bool ?? false, sent: registered.contains(relayTag(m)))
+                if step.reregister, let fresh = await registerRelay() {
+                    step = Self.relayAction(enabled: on, url: relay, cap: fresh, relayOn: false, sent: false)
+                }
+                if let p = step.rpc {
+                    guard (try? await rpc(m, "push", p)) != nil else { continue }
+                    if p["relay"]?.isNull == true { registered.remove(relayTag(m)) } else { registered.insert(relayTag(m)) }
+                }
+                continue
+            }
             let held = hub["apnsOn"]?.bool ?? false
-            // A build without push never enrols, and takes back an enrolment an earlier build left behind.
-            if let p = Self.action(enabled: Self.available && enabled, token: token, held: held, sent: registered.contains(tag(m))) {
-                guard (try? await c.rpc("push", p)) != nil else { continue }
+            if let p = Self.action(enabled: on, token: token, held: held, sent: registered.contains(tag(m))) {
+                guard (try? await rpc(m, "push", p)) != nil else { continue }
                 if p["apns"]?.isNull == true { registered.remove(tag(m)) } else { registered.insert(tag(m)) }
             }
         }
     }
 
     private func tag(_ m: Machine) -> String { "\(m.id)|\(m.d)|\(token ?? "")" }
+    private func relayTag(_ m: Machine) -> String { "relay|\(m.id)|\(m.d)|\(cap ?? "")" }
+
+    // MARK: Relay
+
+    /// `POST <relay>/v1/register {platform, token, sandbox}`.
+    nonisolated static func relayRequest(_ relay: URL, token: String, sandbox: Bool) -> URLRequest {
+        var req = URLRequest(url: relay.appending(path: "v1/register"), timeoutInterval: 20)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.httpBody = try? JSON.object(["platform": "apns", "token": .string(token), "sandbox": .bool(sandbox)]).data()
+        return req
+    }
+
+    nonisolated static func relayCap(status: Int, data: Data) throws -> String {
+        switch status {
+        case 200, 201:
+            guard let cap = (try? JSON.parse(data))?["cap"]?.string, !cap.isEmpty else { throw Failure(errorDescription: "The notification relay answered oddly. Try again later.") }
+            return cap
+        case 429: throw Failure(errorDescription: "The notification relay is busy. Try again in a minute.")
+        default: throw Failure(errorDescription: "The notification relay refused this iPhone (HTTP \(status)). Try again later.")
+        }
+    }
+
+    /// A fresh capability for the current token (stored), or nil when the relay can't be reached.
+    @discardableResult
+    func registerRelay() async -> String? {
+        guard let relay, let token else { return nil }
+        guard let c = try? await relayRegister(Self.relayRequest(relay, token: token, sandbox: Self.sandbox)) else { return nil }
+        registered = registered.filter { !$0.hasPrefix("relay|") }
+        cap = c
+        return c
+    }
+
+    /// The `push` RPC for one computer through the relay; `reregister` when it dropped a cap it was sent.
+    nonisolated static func relayAction(enabled: Bool, url: URL, cap: String?, relayOn: Bool, sent: Bool) -> (reregister: Bool, rpc: JSON?) {
+        guard enabled, let cap else { return (false, relayOn ? ["relay": .null] : nil) }
+        if relayOn && sent { return (false, nil) }
+        return (!relayOn && sent, ["relay": ["url": .string(url.absoluteString), "cap": .string(cap)]])
+    }
 
     /// The `push` RPC that brings one computer in line, or nil when it already is.
     nonisolated static func action(enabled: Bool, token: String?, held: Bool, sent: Bool) -> JSON? {
@@ -160,7 +246,7 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
 
     func status() async -> JSON {
         let p = await permission()
-        return ["on": .bool(Self.available && enabled && p == "granted" && token != nil), "permission": .string(p), "available": .bool(Self.available)]
+        return ["on": .bool(pushAvailable && enabled && p == "granted" && token != nil), "permission": .string(p), "available": .bool(pushAvailable)]
     }
 
     struct Failure: LocalizedError {
@@ -174,7 +260,7 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
             await reconcile()
             return await status()
         }
-        guard Self.available else { throw Failure(errorDescription: "Notifications aren't available in this build of the app.") }
+        guard pushAvailable else { throw Failure(errorDescription: "Notifications aren't available in this build of the app.") }
         let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
         guard granted else { throw Failure(errorDescription: "Notifications are off for pi. Turn them on in Settings.") }
         enabled = true
@@ -182,6 +268,10 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
             enabled = false
             // Free provisioning has no push entitlement (README → Push).
             throw Failure(errorDescription: "This build of the app can't get notifications (it needs a paid developer team).")
+        }
+        if relay != nil, cap == nil, await registerRelay() == nil {
+            enabled = false
+            throw Failure(errorDescription: "Couldn't reach the notification relay. Try again later.")
         }
         await reconcile()
         return await status()

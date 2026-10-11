@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Archive the app and upload it to App Store Connect (TestFlight first, then review). APP_STORE.md has the
 # whole checklist. Usage:
-#   DEVELOPMENT_TEAM=ABCDE12345 PI_BUNDLE_PREFIX=com.example [PI_PUSH=YES] scripts/release.sh <build number>
+#   DEVELOPMENT_TEAM=ABCDE12345 PI_BUNDLE_PREFIX=com.example PI_RELAY_URL=https://… scripts/release.sh <build number>
 # The build number (CFBundleVersion) must be higher than every build already uploaded for this version.
 # Signing is automatic: Xcode needs to be signed in to the team's account (Xcode → Settings → Accounts),
 # or use an App Store Connect API key: ASC_KEY_PATH, ASC_KEY_ID, ASC_ISSUER_ID (paths may contain spaces).
@@ -12,7 +12,10 @@ BUILD="${1:-}"
 [[ "$BUILD" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "usage: DEVELOPMENT_TEAM=… PI_BUNDLE_PREFIX=… $0 <build number>"; exit 2; }
 : "${DEVELOPMENT_TEAM:?set DEVELOPMENT_TEAM to your 10-character team ID}"
 : "${PI_BUNDLE_PREFIX:?set PI_BUNDLE_PREFIX to the reverse-DNS prefix of your bundle IDs, e.g. com.example}"
-PI_PUSH="${PI_PUSH:-NO}"
+# The App Store build pushes through the relay (relay/, deployed first; APP_STORE.md → Push).
+PI_PUSH="${PI_PUSH:-YES}"
+: "${PI_RELAY_URL:?set PI_RELAY_URL to your deployed push relay, e.g. https://pi-push.example.workers.dev}"
+[[ "$PI_RELAY_URL" =~ ^https://[^[:space:]?#]+$ ]] || { echo "PI_RELAY_URL must be an https:// address"; exit 2; }
 AUTH=()
 if [ -n "${ASC_KEY_PATH:-}" ]; then
   AUTH=(-authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "${ASC_KEY_ID:?set ASC_KEY_ID}" -authenticationKeyIssuerID "${ASC_ISSUER_ID:?set ASC_ISSUER_ID}")
@@ -34,7 +37,7 @@ xcodegen -q
 echo "Archiving build $BUILD ($(git rev-parse --short HEAD)) for $PI_BUNDLE_PREFIX.pi, push $PI_PUSH…"
 xcodebuild archive -project Pi.xcodeproj -scheme Pi -configuration Release \
   -destination generic/platform=iOS -archivePath "$ARCHIVE" -allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"} \
-  DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" PI_BUNDLE_PREFIX="$PI_BUNDLE_PREFIX" PI_PUSH="$PI_PUSH" \
+  DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" PI_BUNDLE_PREFIX="$PI_BUNDLE_PREFIX" PI_PUSH="$PI_PUSH" PI_RELAY_URL="$PI_RELAY_URL" \
   CURRENT_PROJECT_VERSION="$BUILD"
 
 APP="$ARCHIVE/Products/Applications/Pi.app"
