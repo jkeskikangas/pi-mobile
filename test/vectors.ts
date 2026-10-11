@@ -18,7 +18,7 @@ export function vectors() {
 		["string", "plain"],
 		["large", { text: "x".repeat(100 * 1024) }],
 	];
-	const valid = values.map(([name, value]) => ({ name, value, sealed: sealWithNonce(key, nonce, value) }));
+	const valid = values.map(([name, value]) => ({ name, value, json: JSON.stringify(value), sealed: sealWithNonce(key, nonce, value) }));
 	const good = Buffer.from(valid[0].sealed, "base64url");
 	const tampered = Buffer.from(good);
 	tampered[tampered.length - 1] ^= 1;
