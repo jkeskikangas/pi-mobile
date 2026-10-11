@@ -4,6 +4,10 @@
 import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomId } from "./crypto.ts";
+import { actionKey, Once } from "./once.ts";
+
+/** Phone requests that change the session: run at most once per idempotency key. */
+const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "spawn"]);
 import { HubLink, type LinkState } from "./link.ts";
 import {
 	type AgentEvent,
@@ -375,6 +379,15 @@ export class Bridge {
 
 	private async handle(m: string, p: any): Promise<unknown> {
 		const device = p?._device as { id: string; name: string } | undefined;
+		const k = actionKey(p?._k);
+		// A repeated phone action (same key) runs once; repeats get the first outcome (issue #1).
+		if (k && device && ACTIONS.has(m)) return this.once.run(`${device.id}:${m}:${k}`, () => this.dispatch(m, p, device));
+		return this.dispatch(m, p, device);
+	}
+
+	private readonly once = new Once();
+
+	private async dispatch(m: string, p: any, device: { id: string; name: string } | undefined): Promise<unknown> {
 		switch (m) {
 			case "snapshot":
 				return this.snapshot(Number(p.limit) || 120, p.before === undefined ? undefined : Number(p.before));

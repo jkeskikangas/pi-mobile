@@ -20,6 +20,7 @@
 	function createFleet(deps) {
 		const conns = new Map(); // id -> runtime state
 		const agentMachine = new Map(); // agent -> machine id
+		const actionKeys = new Map(); // agent+method+params -> { k, at }: idempotency keys of actions with an unknown outcome
 		let machines = load();
 		let running = false;
 
@@ -79,7 +80,7 @@
 			const body = await res.json();
 			if (!body.b) throw new Error(body.error || `HTTP ${res.status}`);
 			const out = deps.open(key, body.b);
-			if (out.e !== undefined) throw new Error(out.e);
+			if (out.e !== undefined) throw Object.assign(new Error(out.e), { answered: true });
 			return out.r;
 		}
 
@@ -105,7 +106,23 @@
 			const id = agentMachine.get(agent);
 			if (!id) throw new Error("that pi session is no longer connected");
 			if (conn(id).state === "offline") throw new Error(`${byId(id)?.name || "That computer"} is offline`);
-			return rpc(id, "agent", { agent, m, p: p || {} });
+			if (!ACTIONS.has(m)) return rpc(id, "agent", { agent, m, p: p || {} });
+			// An action whose reply was lost may have reached pi: repeating it with the same params reuses its key,
+			// so pi performs it once and answers with the first result. Changed params (an edited composer) are a new action.
+			const now = Date.now();
+			for (const [s, v] of actionKeys) if (now - v.at > ACTION_KEY_MS) actionKeys.delete(s);
+			const sig = `${agent}\n${m}\n${JSON.stringify(p || {})}`;
+			const k = actionKeys.get(sig)?.k ?? actionKey();
+			actionKeys.set(sig, { k, at: actionKeys.get(sig)?.at ?? now });
+			try {
+				const r = await rpc(id, "agent", { agent, m, p: p || {}, k });
+				actionKeys.delete(sig);
+				return r;
+			} catch (e) {
+				// The computer answered (an error from pi or the hub): the outcome is known, the next attempt is new.
+				if (e instanceof Unauthorized || e?.answered) actionKeys.delete(sig);
+				throw e;
+			}
 		}
 		/** The sessions a machine reported (after a resync): they now route there, others of it are gone. */
 		function adopt(id, agents) {
@@ -306,6 +323,15 @@
 		};
 	}
 	const pick = (c) => ({ state: c.state, error: c.error });
+	/** Phone actions that change a session: each carries an idempotency key (issue #1). */
+	const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "spawn"]);
+	/** Pi remembers a key for 15 minutes; the phone reuses one for 10. */
+	const ACTION_KEY_MS = 10 * 60_000;
+	function actionKey() {
+		const b = new Uint8Array(12);
+		globalThis.crypto.getRandomValues(b);
+		return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+	}
 	function localId() {
 		const b = new Uint8Array(6);
 		globalThis.crypto.getRandomValues(b);

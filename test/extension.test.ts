@@ -233,6 +233,26 @@ test("streaming output and tool activity reach the phone", async () => {
 	await phone.waitFor((e) => e.type === "info" && e.info.status === "idle");
 });
 
+test("a repeated phone action runs once and answers with the first result", async () => {
+	const keyed = (m: string, p: unknown, k: string) => phone.rpc("agent", { agent, m, p, k });
+	const before = h.sent.length;
+	const [a, b] = await Promise.all([keyed("send", { text: "ship it" }, "k-send-0001"), keyed("send", { text: "ship it" }, "k-send-0001")]);
+	assert.deepEqual(b, a);
+	assert.deepEqual(await keyed("send", { text: "ship it" }, "k-send-0001"), a);
+	assert.equal(h.sent.length, before + 1, "one prompt, however often it is retried");
+	await keyed("send", { text: "ship it" }, "k-send-0002");
+	assert.equal(h.sent.length, before + 2, "a new key is a new action");
+
+	const answer = h.ctx.ui.confirm("Deploy?", "");
+	const prompt = await phone.waitFor((e) => e.type === "prompt" && e.prompt.title === "Deploy?");
+	const first = await keyed("answer", { id: prompt.prompt.id, value: true }, "k-answer-01");
+	assert.equal(await answer, true);
+	assert.deepEqual(await keyed("answer", { id: prompt.prompt.id, value: true }, "k-answer-01"), first, "no 'already answered' for a retry");
+	await assert.rejects(call("answer", { id: prompt.prompt.id, value: true }), /already answered/);
+	await phone.waitFor((e) => e.type === "prompt_end");
+	phone.events = [];
+});
+
 test("extension dialogs can be answered from the phone; the terminal dialog is dismissed", async () => {
 	phone.events = [];
 	const answer = h.ctx.ui.confirm("Allow rm -rf build?", "bash wants to run it");

@@ -46,12 +46,14 @@ async function machine(name: string, agent: string, port?: number, dir = tmp()) 
 	});
 	await hub.listen();
 	const calls: string[] = [];
+	const keys: (string | undefined)[] = [];
 	const link = new HubLink({
 		config: () => ({ port: port!, enabled: true }),
 		secret,
 		info: () => info(agent, `${name} session`),
-		onRequest: (m) => {
+		onRequest: (m, p) => {
 			calls.push(m);
+			keys.push(p?._k);
 			return { from: name, m };
 		},
 	});
@@ -62,10 +64,10 @@ async function machine(name: string, agent: string, port?: number, dir = tmp()) 
 		hub.close();
 	};
 	cleanup.push(stop);
-	return { hub, link, calls, port, dir, url: `http://127.0.0.1:${port}`, stop };
+	return { hub, link, calls, keys, port, dir, url: `http://127.0.0.1:${port}`, stop };
 }
 
-function phoneFleet(origin: string, seed: Record<string, unknown> = {}) {
+function phoneFleet(origin: string, seed: Record<string, unknown> = {}, fetchImpl: typeof fetch = fetch) {
 	const mem = new Map<string, unknown>(Object.entries(seed));
 	const events: { id: string; ev: any }[] = [];
 	const states: string[] = [];
@@ -78,7 +80,7 @@ function phoneFleet(origin: string, seed: Record<string, unknown> = {}) {
 			return o.value;
 		},
 		unb64u,
-		fetch,
+		fetch: fetchImpl,
 		origin,
 		storage: { get: (k: string) => mem.get(k) ?? null, set: (k: string, v: unknown) => (v == null ? mem.delete(k) : mem.set(k, v)) },
 		onHello: async (id: string) => {
@@ -152,6 +154,44 @@ test("two machines in one list: calls route by session, and one going away leave
 	await until(() => !!fleet.machineOf("B"));
 	assert.deepEqual(await fleet.call("B", "status", {}), { from: "box", m: "status" });
 	assert.deepEqual(again.calls, ["status"]);
+});
+
+test("actions carry an idempotency key: reused when retrying after a lost reply, new after an edit or a known outcome", async () => {
+	const laptop = await machine("laptop", "A");
+	let dropReply = false;
+	// Mobile networks lose replies: the request reaches the computer, the answer never arrives.
+	const flaky = (async (url: string, init: RequestInit) => {
+		const res = await fetch(url, init);
+		if (dropReply && String(url).endsWith("/api/rpc")) {
+			dropReply = false;
+			throw new TypeError("Load failed");
+		}
+		return res;
+	}) as typeof fetch;
+	const { fleet } = phoneFleet(laptop.url, {}, flaky);
+	fleet.add({ ...(await pairWith(laptop.hub)), primary: true });
+	fleet.start();
+	await until(() => !!fleet.machineOf("A"));
+
+	dropReply = true;
+	await assert.rejects(fleet.call("A", "send", { text: "run the tests" }), /Load failed/);
+	await fleet.call("A", "send", { text: "run the tests" });
+	const [first, retry] = laptop.keys;
+	assert.match(first!, /^[0-9a-f]{24}$/);
+	assert.equal(retry, first, "the retry is the same action");
+
+	await fleet.call("A", "send", { text: "run the tests" });
+	assert.notEqual(laptop.keys[2], first, "after a reply, sending the same text again is a new action");
+
+	dropReply = true;
+	await assert.rejects(fleet.call("A", "send", { text: "run the tests" }));
+	await fleet.call("A", "send", { text: "run the tests, then lint" });
+	assert.notEqual(laptop.keys[4], laptop.keys[3], "an edited composer is a new action");
+
+	await fleet.call("A", "snapshot", {});
+	assert.equal(laptop.keys[5], undefined, "reads carry no key");
+	for (const m of ["answer", "abort", "setModel", "setThinking", "compact", "spawn"]) await fleet.call("A", m, {});
+	assert.ok(laptop.keys.slice(6).every((k) => typeof k === "string"));
 });
 
 test("a machine that revokes this phone is reported; removing one forgets its sessions", async () => {

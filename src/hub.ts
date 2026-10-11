@@ -20,6 +20,7 @@ import { type Config, type Device, DeviceStore, type MachineIdentity, machineIde
 import { type PushSubscriptionJSON, sendPush, type Vapid } from "./webpush.ts";
 import { ApnsClient, apnsConfigured, isApnsToken } from "./apns.ts";
 import { isRelayTarget, RelayClient, relayUrl } from "./relay.ts";
+import { actionKey } from "./once.ts";
 
 export const LINK_PROTOCOL = "pi-mobile-link";
 const WEB_DIR = fileURLToPath(new URL("../web/", import.meta.url));
@@ -102,7 +103,7 @@ export class Hub {
 	private ring: HubEvent[] = [];
 	private seq = 0;
 	private pairings = new Map<string, Pairing>();
-	private replay = new ReplayGuard();
+	private replay: ReplayGuard;
 	private devices: DeviceStore;
 	private push: PushStore;
 	private offers: OfferStore;
@@ -128,6 +129,8 @@ export class Hub {
 		this.config = opts.config;
 		this.secret = Buffer.from(opts.secret);
 		this.devices = opts.devices ?? new DeviceStore();
+		// Seen requests are on disk, so a captured request can't be replayed to the next hub (another pi process).
+		this.replay = new ReplayGuard(undefined, join(this.devices.dir, "seen.json"));
 		this.push = opts.push ?? new PushStore();
 		this.offers = opts.offers ?? new OfferStore();
 		this.handler = (req, res) => {
@@ -625,7 +628,9 @@ export class Hub {
 				const conn = this.agents.get(String(p.agent));
 				if (!conn) throw new Error("that pi session is no longer connected");
 				const method = String(p.m);
-				return conn.ch.request(method, { ...(p.p ?? {}), _device: { id: device.id, name: device.name } }, 10 * 60_000);
+				// `k`: the phone's idempotency key for an action; the session runs each key once (issue #1).
+				const k = actionKey(p.k);
+				return conn.ch.request(method, { ...(p.p ?? {}), _device: { id: device.id, name: device.name }, _k: k }, 10 * 60_000);
 			}
 			default:
 				throw new Error(`unknown method ${m}`);

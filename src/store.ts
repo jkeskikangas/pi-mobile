@@ -95,8 +95,11 @@ export class DeviceStore {
 	private cache: Device[] = [];
 	private mtime = -1;
 	private readonly path: string;
+	/** The state directory this store lives in (the hub keeps its seen-request record beside it). */
+	readonly dir: string;
 
 	constructor(dir = stateDir()) {
+		this.dir = dir;
 		this.path = join(dir, "devices.json");
 	}
 
