@@ -9,8 +9,6 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
     static let shared = PushCenter()
 
     weak var model: AppModel?
-    /// The app's one voice engine (`AppModel.voice`), which "Answer by voice" starts; AppModel sets it.
-    weak var voice: VoiceEngine?
     /// Development builds get sandbox tokens.
     #if DEBUG
     static let sandbox = true
@@ -178,7 +176,9 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
     func opened(action: String, agent: String, machine: String, entry: String) async {
         guard !agent.isEmpty else { return }
         focus(machine: machine, agent: agent)
-        if action == PushContent.answerByVoice, !entry.isEmpty { await voice?.start(agent: agent, machine: entry) }
+        if action == PushContent.answerByVoice, !entry.isEmpty {
+            if let model { try? await VoiceHost.start(model: model, agent: agent, machine: entry, dictation: Dictation.shared) }
+        }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
