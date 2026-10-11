@@ -22,7 +22,11 @@ export function randomId(bytes = 9): string {
 }
 
 export function seal(key: Uint8Array, value: unknown): string {
-	const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+	return sealWithNonce(key, nacl.randomBytes(nacl.secretbox.nonceLength), value);
+}
+
+/** `seal` with a caller-chosen nonce. Only for deterministic test vectors: never reuse a nonce in real traffic. */
+export function sealWithNonce(key: Uint8Array, nonce: Uint8Array, value: unknown): string {
 	const box = nacl.secretbox(new TextEncoder().encode(JSON.stringify(value)), nonce, key);
 	const out = new Uint8Array(nonce.length + box.length);
 	out.set(nonce);

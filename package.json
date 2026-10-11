@@ -42,7 +42,8 @@
     "test": "PI_MOBILE_TAILSCALE=off node --experimental-strip-types --test test/*.test.ts",
     "typecheck": "tsc --noEmit -p .",
     "ui": "node --experimental-strip-types --no-warnings test/ui/fixture.ts",
-    "shots": "node test/ui/shots.mjs"
+    "shots": "node test/ui/shots.mjs",
+    "vectors": "node --experimental-strip-types --no-warnings test/vectors.ts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

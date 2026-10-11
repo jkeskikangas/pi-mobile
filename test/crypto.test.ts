@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { open, randomKey, ReplayGuard, seal } from "../src/crypto.ts";
+import { readFileSync } from "node:fs";
+import { open, randomKey, ReplayGuard, seal, sealWithNonce, unb64u } from "../src/crypto.ts";
+import { render, VECTORS_PATH, vectors } from "./vectors.ts";
+
+test("sealWithNonce round-trips and the committed native vectors match regeneration", () => {
+	const v = vectors();
+	const key = unb64u(v.key);
+	for (const c of v.valid) {
+		assert.deepEqual(open(key, c.sealed)?.value, c.value);
+		assert.equal(open(key, c.sealed)?.nonce, v.nonce);
+	}
+	for (const c of v.invalid) assert.equal(open(unb64u(c.key), c.sealed), undefined, c.name);
+	assert.equal(sealWithNonce(key, unb64u(v.nonce), 1), sealWithNonce(key, unb64u(v.nonce), 1));
+	assert.equal(readFileSync(VECTORS_PATH, "utf8"), render(), "run npm run vectors");
+});
 
 test("seal/open round-trips and rejects the wrong key or tampering", () => {
 	const key = randomKey();
