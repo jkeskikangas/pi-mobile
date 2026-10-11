@@ -43,6 +43,8 @@ final class Dictation: DictationControl {
     var haptic: () -> Void = { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
     /// Shown when the microphone is denied (offers Settings).
     var onDenied: @MainActor (String) -> Void = { Dictation.offerSettings($0) }
+    /// The user's OK to send audio (AIConsent); asked before the first take.
+    var consent: @MainActor () async throws -> Void = { try await AIConsent.shared.ensure(.dictation) }
 
     init(recorder: DictationRecorder) {
         self.recorder = recorder
@@ -54,6 +56,8 @@ final class Dictation: DictationControl {
     }
 
     func start() async throws {
+        guard state == .idle else { throw DictationError(message: "already recording.") }
+        try await consent()
         guard state == .idle else { throw DictationError(message: "already recording.") }
         state = .starting
         let mine = take

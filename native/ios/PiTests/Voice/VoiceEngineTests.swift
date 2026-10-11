@@ -334,13 +334,8 @@ final class VoiceEngineTests: XCTestCase {
         XCTAssertEqual(earcons.stopped, 1)
     }
 
-    func testEveryEntryPointDrainsDictationAndCoreLoadsOnlyOverTrustedTransport() {
+    func testEveryEntryPointDrainsDictation() {
         XCTAssertTrue(VoiceHost.dictationToDrain(nil) === Dictation.shared)
-        XCTAssertEqual(VoiceHost.trustedCoreOrigin("https://box.tail1234.ts.net"), "https://box.tail1234.ts.net")
-        XCTAssertEqual(VoiceHost.trustedCoreOrigin("http://127.0.0.1:7989"), "http://127.0.0.1:7989")
-        XCTAssertNil(VoiceHost.trustedCoreOrigin("http://192.168.1.20:7777"))
-        XCTAssertNil(VoiceHost.trustedCoreOrigin("http://100.101.1.2:7777"))
-        XCTAssertNil(VoiceHost.trustedCoreOrigin(nil))
     }
 
     func testEndDuringPersonaRedialStartsNothing() async {

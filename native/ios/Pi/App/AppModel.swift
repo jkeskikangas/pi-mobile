@@ -140,7 +140,7 @@ final class AppModel {
     func debugAutoPair() async {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        if args.contains("-PiReset") { forgetAll() }
+        if args.contains("-PiReset") { forgetAll(); AIConsent.shared.revoke() }
         if let i = args.firstIndex(of: "-PiPairLink"), i + 1 < args.count, let link = PairingLink(args[i + 1]) {
             try? await pair(link)
         }

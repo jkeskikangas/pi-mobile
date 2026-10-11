@@ -28,6 +28,7 @@ final class DictationTests: XCTestCase {
         let f = FakeRecorder()
         let d = Dictation(recorder: f)
         d.haptic = {}
+        d.consent = {}
         return (d, f, [])
     }
 

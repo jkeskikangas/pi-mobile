@@ -12,7 +12,7 @@ extension Notification.Name {
 @MainActor
 enum VoiceHost {
     /// Every entry point (bridge, intent, push) gets the same handoff: dictation is drained first.
-    static func start(model: AppModel, agent: String, machine: String, dictation: DictationControl? = nil) async throws {
+    static func start(model: AppModel, agent: String, machine: String, dictation: DictationControl? = nil, consent: AIConsent = .shared) async throws {
         await dictationToDrain(dictation).cancelIfActive()
         let e = model.voice
         if e.isOpen {
@@ -20,10 +20,12 @@ enum VoiceHost {
             return
         }
         guard model.machines.contains(where: { $0.id == machine }) else { throw HubError.network("That computer isn't paired with this iPhone.") }
+        // Every entry point (bridge, Siri/Action button, Answer by voice) passes here: no audio leaves before the OK.
+        try await consent.ensure(.voice)
         guard await AVAudioApplication.requestRecordPermission() else {
             throw HubError.network("Microphone access is off. Turn it on in Settings.")
         }
-        guard let core = await VoiceCore.load(origin: trustedCoreOrigin(model.primary?.origin)) else { throw HubError.network("Voice mode couldn't load.") }
+        guard let core = try? VoiceCore.bundled() else { throw HubError.network("Voice mode couldn't load.") }
         let fleet = LiveFleet(machines: model.machines)
         // 401 from a computer: the app's verified-removal path (asks the hub again, then forgets it).
         fleet.onUnauthorized = { [weak model] id in if let model { Task { await machineRejected(model, id) } } }
@@ -61,13 +63,4 @@ enum VoiceHost {
     }
 
     static func dictationToDrain(_ d: DictationControl?) -> DictationControl { d ?? Dictation.shared }
-
-    /// The hub's voice-core.js decides safety (destructive confirmations), so it is taken only over a
-    /// transport that can't be tampered with on the way: HTTPS (e.g. Tailscale serve) or this device.
-    /// Plain-HTTP LAN hubs use the copy bundled in the app.
-    static func trustedCoreOrigin(_ origin: String?) -> String? {
-        guard let origin, let url = URL(string: origin), let host = url.host()?.lowercased() else { return nil }
-        if url.scheme?.lowercased() == "https" { return origin }
-        return ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host) ? origin : nil
-    }
 }

@@ -8,6 +8,7 @@ struct NativeBridge {
     let primaryOrigin: String
     var dictation: Dictation = .shared
     var focusDefaults: UserDefaults = .standard
+    var consent: AIConsent = .shared
     /// Presents the pairing-code scanner and waits for its outcome (`scan`).
     var scan: @MainActor () async -> ScanResult = { await ScanCenter.shared.scan() }
 
@@ -60,6 +61,11 @@ struct NativeBridge {
             case .busy: return .error("busy")
             case .unavailable(let message): return .error(message)
             }
+        case "consent.status":
+            return .value(["granted": .bool(consent.granted)])
+        case "consent.revoke":
+            consent.revoke()
+            return .value(["granted": false])
         case "dictation.cancel":
             dictation.cancel()
             return .value(.null)
@@ -87,6 +93,7 @@ struct NativeBridge {
           window.PiNative = window.PiNative || {};
           window.PiNative.version = 1;
           window.PiNative.scan = true;
+          window.PiNative.consent = true;
         })();
         """
     }

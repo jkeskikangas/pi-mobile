@@ -96,6 +96,10 @@ struct PairingView: View {
             } else {
                 primaryButton("Paste link", symbol: "doc.on.clipboard") { pasting = true }
             }
+            Link("Privacy policy", destination: PiLinks.privacy)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 32)
         }
         .padding(.horizontal, 24)
         .padding(.top, 12)

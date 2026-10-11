@@ -15,6 +15,10 @@ struct StartVoiceIntent: AudioRecordingIntent {
         guard let target = await c.pickSession() else {
             throw StartVoiceError.noSession
         }
+        // No OK yet to send the voice to OpenAI and the computer (AIConsent): ask in the app, never headless.
+        if !AIConsent.shared.granted {
+            try await requestToContinueInForeground("Open pi to allow voice mode first.")
+        }
         do {
             try c.startActivity(for: target)
         } catch {

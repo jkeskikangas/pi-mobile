@@ -152,6 +152,7 @@ struct StatusDot: View {
 struct VoiceSettingsSheet: View {
     let engine: VoiceEngine
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmRevoke = false
 
     var body: some View {
         let s = engine.settings
@@ -198,6 +199,27 @@ struct VoiceSettingsSheet: View {
                     Text("Voice")
                 } footer: {
                     Text("\(engine.engineKind == .basic ? "Basic voice: recognition on your computer and a spoken brief\(s.basicReason.map { ", because realtime voice is unavailable (\($0))" } ?? "")." : "Realtime voice.") You can also say “push to talk”, “open mic”, “eyes free” or “I can glance”.")
+                }
+                Section {
+                    Button(role: .destructive) { confirmRevoke = true } label: {
+                        Label("Stop sharing my voice", systemImage: "hand.raised")
+                    }
+                    .confirmationDialog("Stop sharing your voice?", isPresented: $confirmRevoke, titleVisibility: .visible) {
+                        Button("Stop sharing and end voice mode", role: .destructive) {
+                            AIConsent.shared.revoke()
+                            dismiss()
+                            engine.stop()
+                        }
+                    } message: {
+                        Text("Voice mode ends now. pi asks again before voice mode or dictation next time.")
+                    }
+                    Link(destination: PiLinks.privacy) {
+                        Label("Privacy policy", systemImage: "lock.doc")
+                    }
+                } header: {
+                    Text("Privacy")
+                } footer: {
+                    Text("Your voice goes to OpenAI for realtime speech and to your computer. The developer of pi never receives it.")
                 }
             }
             .navigationTitle("Voice settings")
