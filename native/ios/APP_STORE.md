@@ -9,7 +9,7 @@ What the owner does by hand, in order. The code side (privacy manifest, consent 
 3. Xcode → Settings → Accounts: sign in with your Apple ID (a free Personal Team works, without push).
 4. In `project.yml` `settings.base` set `DEVELOPMENT_TEAM` (your team ID) and `PI_BUNDLE_PREFIX` (e.g. `com.yourname`), run `xcodegen` again. With a paid team you may also set `PI_PUSH: YES` on the `Pi` target.
 5. Plug in the iPhone, turn on Developer Mode (Settings → Privacy & Security), pick it as the run destination, press Run. First time: Settings → General → VPN & Device Management → trust your developer certificate.
-6. On your computer run `/remote` in pi and scan the code. Use the **Tailscale HTTPS address** away from home: plain `http://100.x` is refused (README → ATS).
+6. On your computer run `/remote` in pi and scan the code. The app is **HTTPS only** (README → ATS): install Tailscale on the computer and the iPhone so `/remote` shows a `https://….ts.net` code.
 7. Free-team builds stop opening after 7 days; press Run again.
 
 Then work through **README → Device checklist**. It is the gate: no TestFlight build goes to external testers or review until every row has a result.
@@ -85,11 +85,13 @@ Paste into App Review Information → Notes, with a contact phone and email:
 >
 > **Native features (4.2):** beyond the web UI it hosts, the app adds: QR pairing with the camera (VisionKit); keys in the Keychain; native voice mode (WebRTC realtime audio with Apple voice processing, echo cancellation, earcons, haptics); native dictation; a Live Activity and Dynamic Island with Mute/End intents; App Shortcuts, Siri and a Control Center / Action button control to start voice; push notifications decrypted on device by a Notification Service Extension, with "Answer by voice"; VoiceOver and Dynamic Type throughout the native screens.
 >
+> **Network:** HTTPS only; no App Transport Security exceptions.
+>
 > **Code (2.5.2):** the app runs no downloaded code. The web UI shown in WKWebView comes from the user's own computer, and the voice decision logic is bundled in the app.
 
 ### The demo computer for the reviewer
 
-The reviewer's iPhone must reach a computer over **HTTPS** (plain HTTP outside a home network is refused by design). Options:
+The reviewer's iPhone must reach a computer over **HTTPS** (the app refuses plain HTTP). Options:
 
 - A small always-on box (a cheap VPS or a Raspberry Pi) running pi with this extension, exposed with **Tailscale Funnel** (`tailscale funnel <port>`, giving a public `https://<box>.<tailnet>.ts.net`), or behind any public HTTPS reverse proxy with `publicUrl` set in its pi-mobile config.
 - Give it a harmless project and a model with spending limits; keep `/remote` sessions running so there is something to look at; set an OpenAI key or ChatGPT sign-in if you want realtime voice reviewed (else basic voice runs).

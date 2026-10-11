@@ -4,7 +4,7 @@ import XCTest
 final class HubClientTests: XCTestCase {
     let key = Data((0..<32).map { UInt8($0 + 7) })
     let pairKey = Data((0..<32).map { UInt8(200 - $0) })
-    var machine: Machine { Machine(id: "m1", name: "Laptop", origin: "http://10.0.0.2:7979", d: "dev1", k: Base64URL.encode(key), primary: true) }
+    var machine: Machine { Machine(id: "m1", name: "Laptop", origin: "https://box.tail1.ts.net:7979", d: "dev1", k: Base64URL.encode(key), primary: true) }
 
     func json(_ v: JSON) -> Data { try! v.data() }
 
@@ -46,7 +46,7 @@ final class HubClientTests: XCTestCase {
 
     func testPairExpiredCode() async throws {
         StubProtocol.reset { _, _ in .init(status: 410, body: Data(#"{"error":"pairing expired"}"#.utf8)) }
-        let link = try XCTUnwrap(PairingLink("http://h:1/#p=pid.\(Base64URL.encode(pairKey))"))
+        let link = try XCTUnwrap(PairingLink("https://h:1/#p=pid.\(Base64URL.encode(pairKey))"))
         do { _ = try await HubClient.pair(link: link, name: "x", session: StubProtocol.session()); XCTFail() } catch { XCTAssertEqual(error as? HubError, .expired) }
     }
 
@@ -62,7 +62,7 @@ final class HubClientTests: XCTestCase {
         XCTAssertEqual(info.features, ["voice"])
 
         let (req, body) = try XCTUnwrap(StubProtocol.recorded.last)
-        XCTAssertEqual(req.url?.absoluteString, "http://10.0.0.2:7979/api/rpc")
+        XCTAssertEqual(req.url?.absoluteString, "https://box.tail1.ts.net:7979/api/rpc")
         let sent = try JSON.parse(body)
         XCTAssertEqual(sent["d"], "dev1")
         XCTAssertEqual(Envelope.open(key: key, sealed: try XCTUnwrap(sent["b"]?.string)), ["t": 1_000_000, "m": "hub", "p": [:]])

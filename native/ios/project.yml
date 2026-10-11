@@ -83,10 +83,8 @@ targets:
         NSSupportsLiveActivities: true
         # The voice orb animates at 120 Hz on ProMotion iPhones.
         CADisableMinimumFrameDurationOnPhone: true
-        # Plain HTTP only on your own network (LAN, Tailscale 100.x, .local); everything else needs HTTPS.
-        # OriginPolicy refuses other plain-HTTP addresses with a clear message. See README → ATS.
-        NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
+        # No ATS exceptions: hubs are HTTPS only (OriginPolicy; README → ATS). Loopback stays reachable
+        # for the simulator fixture because ATS doesn't apply to it.
   PiWidgets:
     type: app-extension
     platform: iOS

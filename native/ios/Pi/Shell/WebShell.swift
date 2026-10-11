@@ -112,7 +112,7 @@ struct WebShell: UIViewRepresentable {
 
         func load(_ web: WKWebView) {
             guard let url = origin.map({ $0.appending(path: "") }) else { return parent.phase = .offline("That computer's address isn't valid. Pair it again.") }
-            if let p = OriginPolicy.problem(parent.machine.origin) { return parent.phase = .offline(p) }
+            if OriginPolicy.problem(parent.machine.origin) != nil { return parent.phase = .offline(OriginPolicy.repairMessage) }
             parent.phase = .loading
             PushCenter.shared.pageUnloaded()
             Dictation.shared.cancel() // reload or content-process loss: the old page's take is gone

@@ -118,7 +118,7 @@ native/
 ## 4. Step 2 — Project skeleton and Core
 
 1. `native/ios/project.yml`: iOS 18.0 deployment target (iOS 26 SDK), Swift 6, targets `Pi` (app), `PiWidgets` (widget extension), `PiTests`, `PiIntegrationTests`; packages `jedisct1/swift-sodium` and `stasel/WebRTC` (pin exact versions; record them in `native/ios/README.md`). Bundle id prefix from a build setting `PI_BUNDLE_PREFIX` (default `dev.pimobile`) so a developer can set their own team.
-2. Info.plist keys: `UIBackgroundModes: [audio]`; `NSMicrophoneUsageDescription` ("pi listens while voice mode or dictation is on"); `NSCameraUsageDescription` ("scan the pairing code"); `NSLocalNetworkUsageDescription` ("reach pi on your computer"); `NSSupportsLiveActivities: YES`; ATS: `NSAllowsLocalNetworking: YES` only. Checked in the simulator: that covers LAN, `.local` and single-label names but not Tailscale `100.x` IPs, so a tailnet hub needs its Tailscale HTTPS address (`OriginPolicy` says so; README → ATS).
+2. Info.plist keys: `UIBackgroundModes: [audio]`; `NSMicrophoneUsageDescription` ("pi listens while voice mode or dictation is on"); `NSCameraUsageDescription` ("scan the pairing code"); `NSLocalNetworkUsageDescription` ("reach pi on your computer"); `NSSupportsLiveActivities: YES`; ATS: no exceptions. *Changed for the App Store:* the app is HTTPS only, except plain-HTTP loopback for the simulator fixture (`OriginPolicy`; README → ATS). Plain-HTTP LAN and Tailscale `100.x` pairing are gone; an old http computer is shown as needing re-pairing.
 3. `Core/Envelope.swift`: `seal(key:value:) -> String`, `open<T: Decodable>(key:sealed:) -> T?`, base64url helpers. JSON with `JSONSerialization`/`Codable`; values sent are `[String: Any]` encoded through `JSONSerialization` to keep key order irrelevant.
 4. `Core/HubClient.swift` (actor): `pair(link:name:) async throws -> Device`, `rpc(_ m: String, _ p: [String: Any]) async throws -> Any`, `agent(_ agent: String, _ m: String, _ p:) async throws -> Any`, `events(since:) -> AsyncThrowingStream<HubEvent, Error>` (URLSession `bytes(for:)`, line-based SSE parser, batches decoded with `open`, reconnect with backoff 0.5–8 s, stall detection 40 s, `hello` handling and re-`focus`). Errors: `.unauthorized` (401, the app unpairs), `.remote(String)`, `.network`.
 5. `Core/Keychain.swift`: store the device (`kSecClassGenericPassword`, accessible `AfterFirstUnlock` so voice keeps working when the phone locks mid-session), shared access group (for the widget extension and, later, the notification extension).
@@ -212,7 +212,7 @@ Mirror the web voice screen (`docs/design-principles.md` §4, `web/app.css` `.vo
 
 Implement the `dictation.*` messages from Step 4 natively: record with `AVAudioRecorder` (AAC in `.m4a`, mono 16 kHz — the hub's Apple recogniser reads it without ffmpeg), push levels to the page, return base64 on stop. Use the `.playAndRecord` session only while recording, then deactivate with `.notifyOthersOnDeactivation` so music resumes.
 
-**Check:** dictation in the app over plain-HTTP pairing produces the distilled text; the raw/undo chips work; `learn` is called on send.
+**Check:** dictation in the app over HTTPS pairing produces the distilled text; the raw/undo chips work; `learn` is called on send.
 
 ## 11. Step 9 — Push notifications (optional, needs a paid account)
 
@@ -242,5 +242,5 @@ Same architecture in Kotlin: a `WebView` for the UI with a JavaScript interface 
 - **AirPods mute** for a non-CallKit `.voiceChat` WebRTC app is unverified (§6).
 - **Earcons mixing with WebRTC output** and **ducking the remote track** need a device check; fallback for ducking: set the realtime model's output to silence by pausing the remote track and resuming (`RTCAudioTrack.isEnabled`) — loses the "quieter" cue but keeps the decision logic.
 - **The ChatGPT-sign-in realtime endpoint** is undocumented and may change; the hub already falls back to basic voice, which the app supports.
-- **ATS for plain-HTTP hubs:** settled: `NSAllowsLocalNetworking` only; tailnet hubs use the Tailscale HTTPS address (README → ATS).
+- **ATS:** settled: HTTPS only, no exceptions (README → ATS).
 - **App Review** for background audio: the mic is live only during a visible session with a Live Activity (guideline 2.5.4).

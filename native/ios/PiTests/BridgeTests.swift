@@ -59,7 +59,7 @@ final class BridgeTests: XCTestCase {
         try? model.added(machine("a", primary: true))
         let bridge = NativeBridge(model: model, primaryOrigin: "http://127.0.0.1:9")
         let entryA = machine("a", primary: true).webEntry
-        let entryB = machine("b", origin: "http://box:1").webEntry
+        let entryB = machine("b", origin: "https://box:1").webEntry
         _ = await bridge.handle(["type": "machines", "machines": [entryA, entryB]])
         XCTAssertEqual(model.machines.map(\.id), ["a", "b"])
         XCTAssertEqual(model.machines.first?.origin, "http://127.0.0.1:9")

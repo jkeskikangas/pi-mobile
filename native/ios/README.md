@@ -71,7 +71,7 @@ Simulator check (no APNs needed): the simulator never runs a service extension f
 project.yml           XcodeGen spec: Pi, PiWidgets, PiNotifications, PiTests, PiIntegrationTests, PiUITests; schemes Pi and PiE2E
 Pi/App/               PiApp, AppModel (machines, prefs, one HubClient per machine), PushCenter, Info.plist, entitlements
 Pi/Core/              JSON, Envelope (sodium), HubClient (pair, rpc, agent, SSE events), SSEParser, Models, Keychain (+ MachineStore), PushContent,
-                      OriginPolicy (which plain-HTTP addresses are allowed)
+                      OriginPolicy (HTTPS only, plus loopback)
 Pi/Pairing/           PairingView (scan, paste, inline errors), ScannerView (VisionKit DataScanner)
 Pi/Consent/           AIConsent (the stored OK, the gate), ConsentSheet (who receives your voice)
 Pi/Resources/         Assets, PrivacyInfo.xcprivacy
@@ -91,7 +91,7 @@ ExportOptions.plist   App Store Connect export (release.sh)
 ## Notes
 
 - **Machines** live in the Keychain as `[{ id, machine, name, origin, d, k, primary, added, lastSeen }]` (account `machines`, service `pi-mobile`, accessible after first unlock, shared access group `$(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared` when entitled). A single older `device` entry is migrated. The page's `localStorage` copy is rewritten at every load (`BRIDGE.md`).
-- **ATS:** the only exception is `NSAllowsLocalNetworking`. HTTPS works anywhere; plain HTTP only on your own network: loopback, private LAN (10/8, 172.16/12, 192.168/16), link-local, `*.local` and single-label names such as a MagicDNS short name. Tailscale's `100.x` addresses over plain HTTP are **blocked by ATS** (checked in the simulator: "App Transport Security has blocked a cleartext HTTP connection to 100.88.…"), so on a tailnet use the Tailscale HTTPS address that `/remote` sets up (`https://….ts.net`). `OriginPolicy` refuses any other plain-HTTP address at pairing, in `HubClient` and in the web shell, with a sentence that says so. Every hub request and event is end-to-end encrypted either way; the web UI files on a plain-HTTP LAN address are not, which is one more reason to prefer HTTPS.
+- **ATS: HTTPS only.** Info.plist has no ATS exceptions at all. The app accepts only `https://` computers: when pairing (scan or paste), for computers the web adds (`machines`), in `HubClient` (RPC, events, push registration) and in the web shell. The only exception is plain HTTP to loopback (`127.0.0.1`, `localhost`, `::1`), which ATS doesn't cover, so the simulator works against the `npm run ui` fixture (checked: e2e passes with no exceptions). A plain-HTTP link (LAN, Tailscale `100.x`, `.local`) gets "This computer needs its secure address" with the steps: install Tailscale, run `/remote`, and scan the new code (root README → *Lock-screen notifications and HTTPS*). A computer already paired over plain HTTP stays in the list. Its screen says to pair it again over HTTPS; it is never dropped silently. `OriginPolicy` holds the rule. In browsers the hub and web app behave as before.
 - **Voice engine** (plan Step 5): every decision goes through `web/voice-core.js`, **only the copy the `Bundle voice-core.js` pre-build phase puts in the app** (App Review 2.5.2: no downloaded code; plan D3). A newer computer stays compatible through the hub's protocol and feature flags. `PiTests/Voice` drives the engine with `FakeRealtime` + `FakeHub` and that real file. Device-only checks are marked `[verify]` in the code.
 - **Consent** (App Review 5.1.2(i)): before the first voice mode or dictation, `ConsentSheet` says who receives what (voice mode: OpenAI realtime via the computer's ChatGPT sign-in or API key, and the computer; dictation: the computer, which transcribes with its configured provider). Allow / Not now. The answer is stored as `AIConsent.version` in `UserDefaults` (`pi-ai-consent`); bump the version when the recipients change and everyone is asked again. The gate sits in `VoiceHost.start` (bridge, Siri / Action button, Answer by voice) and `Dictation.start`; a headless intent without consent continues in the app to ask. Revoke: voice settings → Stop sharing my voice, or the web menu (BRIDGE.md `consent.*`). `-PiReset` also clears it. Shots: `shots/consent/` (`TEST_RUNNER_CONSENT_SHOTS=<dir> … -only-testing:PiTests/ConsentShotsTests`).
 - **Privacy:** `Pi/Resources/PrivacyInfo.xcprivacy` (required-reason APIs: UserDefaults CA92.1, `systemUptime` 35F9.1; audio and other user content collected for app functionality, not linked, no tracking). The extensions use no required-reason APIs. Policy: `PRIVACY.md` at the repo root, linked from the pairing screen, the consent sheet and voice settings. App Store steps: `APP_STORE.md`.
@@ -118,9 +118,9 @@ None of these have run on a real iPhone yet: everything above is checked in the 
 | AirPods out mid-session: audio moves to the speaker and voice keeps going. | not yet run on device |
 | A phone call interrupts: voice resumes or offers "Tap to resume". | not yet run on device |
 | Earcons are heard over the realtime audio; pi's voice ducks while you talk. | not yet run on device |
-| Dictation over plain-HTTP pairing gives the distilled text; raw/undo chips work; music resumes after. | not yet run on device |
+| Dictation over HTTPS pairing gives the distilled text; raw/undo chips work; music resumes after. | not yet run on device |
 | `PI_PUSH=YES`, sandbox push: the lock screen shows the session and text (rewritten by `PiNotifications`); tapping opens that session; **Answer by voice** starts voice there. | not yet run on device (needs a paid team) |
-| A Tailscale HTTPS (`https://….ts.net`) hub loads; a plain `http://100.x` link is refused with the HTTPS hint. | simulator: `http://100.x` blocked by ATS, so refused by design; device not yet run |
+| A Tailscale HTTPS (`https://….ts.net`) hub loads; a plain-HTTP link is refused with the secure-address hint; an old http computer asks to be re-paired. | unit tests; device not yet run |
 | First voice mode and first dictation show the consent sheet; Not now starts nothing; Stop sharing my voice asks again. | simulator (e2e); device not yet run |
 
 ## Known gaps
@@ -131,5 +131,5 @@ None of these have run on a real iPhone yet: everything above is checked in the 
 - AirPods mute without CallKit is unverified (plan §6).
 - Voice mode uses the `voice-core.js` bundled in the app, which can lag a newer computer's web UI until the app is updated.
 - The ChatGPT-sign-in realtime endpoint is undocumented and may change; voice then uses basic voice, which the app supports.
-- Plain-HTTP Tailscale `100.x` addresses don't work (ATS); use the Tailscale HTTPS address.
+- The app is HTTPS only: a computer needs a secure address (Tailscale Serve via `/remote`, or your own HTTPS URL), even on the home Wi-Fi.
 - No TestFlight or App Store build yet (`APP_STORE.md`, `scripts/release.sh`); no CarPlay UI (the Live Activity shows on CarPlay by itself); Android is a later plan.
