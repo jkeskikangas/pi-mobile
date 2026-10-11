@@ -137,17 +137,12 @@ final class VoiceActivityController {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-PiFakeVoice"), i + 1 < args.count else { return }
         for a in Activity<VoiceActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) }
-        let state = args[i + 1]
-        let labels = ["listening": "Listening", "working": "pi is on it", "asking": "pi needs you", "speaking": "", "paused": "Mic off"]
-        let s = VoiceActivityAttributes.ContentState.make(
-            state: state, label: labels[state] ?? state, question: "Delete the old build folder and re-run the tests?",
-            muted: args.contains("-PiFakeMuted"), started: Date().addingTimeInterval(-83))
-        do {
-            try startActivity(for: Target(agent: "a", machine: "m", name: "pi-mobile", machineName: args.contains("-PiFakeMachine") ? "studio" : nil), state: s)
-            NSLog("PiFakeVoice: activity \(activity?.id ?? "-")")
-        } catch {
-            NSLog("PiFakeVoice: \(error)")
-        }
+        guard let e = engine, let state = VoiceState(rawValue: args[i + 1]) else { return }
+        let q = VoiceQuestion(id: "q", kind: "confirm", title: "Delete the old build folder and re-run the tests?", message: nil,
+                              destructive: true, options: [], grace: nil)
+        // The real path: the engine's observable state drives the activity through `sync()`.
+        e.preview(state: state, question: state == .asking ? .some(q) : nil, muted: args.contains("-PiFakeMuted"),
+                  sessionName: "pi-mobile", machineName: args.contains("-PiFakeMachine") ? .some("studio") : nil)
         #endif
     }
 }
