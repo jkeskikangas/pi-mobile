@@ -94,7 +94,9 @@ New pieces:
 - **The said line.** pi's answer gets its spoken sentence as a first line; the brief writer exists (`speech.ts`).
 - **The typing gate.** Speech is held while keys arrive (`ctx.ui.onTerminalInput`), questions and failures excepted.
 
-Model: GPT-Live where an OpenAI API key is set (full duplex, backchannels, delegation built in); today's `gpt-realtime-2` path with the ChatGPT sign-in otherwise. The rules above don't depend on the model.
+Model: the same realtime API and ChatGPT sign-in as pi-mobile's voice mode (`gpt-realtime-2`, `realtime.ts`): `ask_pi` and a `park` tool, pi's events injected as context, soft barge-in handled client-side. The GPT-Live events in the table are the equivalent if it is ever adopted; nothing in the rules needs it. GPT-Live would add true full duplex (backchannels while listening) but needs an OpenAI API key and is billed per second.
+
+Transport: the ChatGPT sign-in endpoint (`chatgpt.com/backend-api/codex/realtime/calls`) takes a WebRTC offer, which Node has no built-in support for. Options: a pure-TypeScript WebRTC stack (`werift`, no native build), or a WebSocket path if that endpoint offers one.
 
 ## Alternatives considered
 
@@ -114,7 +116,7 @@ Model: GPT-Live where an OpenAI API key is set (full duplex, backchannels, deleg
 
 ## Open questions
 
-1. Can GPT-Live be used with the ChatGPT sign-in (as Codex does with `gpt-live-1-codex`), or only with an API key?
+1. Transport from the terminal: does the ChatGPT sign-in realtime endpoint accept a WebSocket connection, or do we need WebRTC in Node (`werift`)? Also worth one test: does that endpoint accept `gpt-live-1-codex`, which Codex uses, giving full duplex without an API key?
 2. Can an extension show a marked spoken segment *inside* pi's editor, or only beside it (a widget above the editor)? Decides how rule 2 looks.
 3. Remote sessions: how does a remote pi's editor show a parked request, given the voice runs on the laptop? Through the machine link's editor commands, or the laptop keeps the parked text and pastes on Enter.
 4. Typing-pause length and the parking word list are starting values to tune.
