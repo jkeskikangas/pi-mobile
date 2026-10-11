@@ -8,7 +8,9 @@
 //
 // Flows: app (pairing, sessions, transcript, tools, questions, sheets, focus ring), voice (dictation and
 // every voice-mode state, settings, push to talk), picker (the voice picker from the menu and voice mode),
-// machines (a second computer offered, added, listed, offline and back).
+// machines (a second computer offered, added, listed, offline and back), scan (Add a computer's QR scan
+// sheet: a live camera reading a code that isn't pi's, through BarcodeDetector and through the vendored
+// jsQR, then camera access off and no camera).
 // Needs Chrome or Chromium: CHROME=/path/to/chrome when it isn't in the usual place. Exits 1 on any axe
 // violation, page error or failed step; report.json in the output folder lists them.
 
@@ -25,7 +27,7 @@ const { values: opt } = parseArgs({
 		out: { type: "string", default: "shots" },
 		width: { type: "string", default: "390,320" },
 		theme: { type: "string", default: "light,dark" },
-		only: { type: "string", default: "app,voice,picker,machines" },
+		only: { type: "string", default: "app,voice,picker,machines,scan" },
 		port: { type: "string", default: "7979" },
 		forced: { type: "boolean", default: false },
 		reduced: { type: "boolean", default: false },
@@ -50,6 +52,18 @@ if (!existsSync(silence)) {
 	writeFileSync(silence, b);
 }
 
+// A fake camera showing a QR code that isn't pi's (Chrome loops the clip), for the scan flow.
+const camera = join(tmpdir(), "pi-mobile-camera-qr.y4m");
+{
+	const { modules } = createRequire(import.meta.url)("qrcode").create("https://example.com/not-a-pi-code", { errorCorrectionLevel: "M" });
+	const W = 640, H = 480, scale = 10, n = modules.size;
+	const x0 = (W - n * scale) >> 1, y0 = (H - n * scale) >> 1;
+	const y = Buffer.alloc(W * H, 200);
+	for (let r = 0; r < n * scale; r++) for (let c = 0; c < n * scale; c++) y[(y0 + r) * W + x0 + c] = modules.get(Math.floor(r / scale), Math.floor(c / scale)) ? 20 : 245;
+	const frame = Buffer.concat([Buffer.from("FRAME\n"), y, Buffer.alloc(W * H / 2, 128)]);
+	writeFileSync(camera, Buffer.concat([Buffer.from(`YUV4MPEG2 W${W} H${H} F10:1 Ip A1:1 C420jpeg\n`), frame, frame]));
+}
+
 const report = { errors: [], axe: {}, checks: {} };
 
 async function session(theme, width, flow) {
@@ -67,7 +81,13 @@ async function session(theme, width, flow) {
 	const browser = await puppeteer.launch({
 		executablePath: CHROME,
 		headless: true,
-		args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${silence}`, "--autoplay-policy=no-user-gesture-required"],
+		args: [
+			"--use-fake-ui-for-media-stream",
+			"--use-fake-device-for-media-stream",
+			`--use-file-for-fake-audio-capture=${silence}`,
+			...(flow === "scan" ? [`--use-file-for-fake-video-capture=${camera}`] : []),
+			"--autoplay-policy=no-user-gesture-required",
+		],
 	});
 	const page = await browser.newPage();
 	await page.setViewport({ width, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -319,6 +339,61 @@ async function session(theme, width, flow) {
 				await page.waitForFunction(() => [...document.querySelectorAll(".toast")].some((t) => t.textContent.includes("added")), { timeout: 10000 });
 				report.checks[`${tag} added from the notification without a sheet`] = await page.evaluate(() => !document.querySelector("#sheetTitle")?.textContent.startsWith("Add "));
 				await shot("m8-added-from-notification");
+			});
+		}
+
+		if (flow === "scan") {
+			await ready();
+			const openScan = async () => {
+				await tap("#menuBtn");
+				await tap(".sheet-panel .row", "Add a computer");
+				await tap(".sheet-panel .btn", "Scan QR code");
+			};
+			const wrongCode = () => page.waitForFunction(() => document.querySelector(".scan-hint")?.textContent.includes("isn't from pi"), { timeout: 10000 });
+			await step("add sheet", async () => {
+				await tap("#menuBtn");
+				await tap(".sheet-panel .row", "Add a computer");
+				await shot("s1-add-computer");
+				await closeSheet();
+			});
+			await step("live camera", async () => {
+				await openScan();
+				await wrongCode();
+				await shot("s2-scan-not-pi");
+				report.checks[`${tag} scan reads a code (${await page.evaluate(() => ("BarcodeDetector" in window ? "BarcodeDetector" : "jsQR"))})`] = true;
+				await tap(".sheet-panel .btn", "Cancel");
+				report.checks[`${tag} cancel turns the camera off and goes back`] = await page.evaluate(() => document.querySelector("#sheetTitle")?.textContent === "Add a computer" && !document.querySelector(".scan-view"));
+				await closeSheet();
+			});
+			await step("vendored decoder", async () => {
+				await page.evaluate(() => delete window.BarcodeDetector);
+				await openScan();
+				await wrongCode();
+				report.checks[`${tag} jsQR reads the camera`] = await page.evaluate(() => typeof window.jsQR === "function");
+				await closeSheet();
+			});
+			const failCamera = (name) => page.evaluate((n) => (navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("no", n))), name);
+			await step("camera off", async () => {
+				await failCamera("NotAllowedError");
+				await openScan();
+				await page.waitForFunction(() => document.querySelector(".scan-view")?.dataset.state === "denied", { timeout: 5000 });
+				await shot("s3-scan-denied");
+				await closeSheet();
+			});
+			await step("no camera", async () => {
+				await failCamera("NotFoundError");
+				await openScan();
+				await page.waitForFunction(() => document.querySelector(".scan-view")?.dataset.state === "none", { timeout: 5000 });
+				await shot("s4-scan-no-camera");
+				await tap(".sheet-panel .btn", "Paste link instead");
+				report.checks[`${tag} paste link focuses the field`] = await page.evaluate(() => document.activeElement?.tagName === "INPUT");
+				await closeSheet();
+			});
+			await step("starting", async () => {
+				await page.evaluate(() => (navigator.mediaDevices.getUserMedia = () => new Promise(() => {})));
+				await openScan();
+				await shot("s5-scan-starting");
+				await closeSheet();
 			});
 		}
 

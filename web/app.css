@@ -581,6 +581,19 @@ body.voice-on .toasts { z-index: 70; }
 /* Asking: the card is the question. pi's caption subtitles it while spoken, then gives way. */
 .voice[data-state="asking"] .v-cap.pi { display: none; }
 .sheet .sub-note { margin: 8px 4px 14px; font-size: 13px; color: var(--text-2); }
+/* Scan sheet: a camera viewfinder. It is dark in both themes, like any camera, so it uses the dark palette. */
+.scan-view { position: relative; width: min(100%, 48dvh); aspect-ratio: 1; margin: 4px auto 0; border-radius: var(--r-l); overflow: hidden; background: var(--d-bg); color: var(--d-text); }
+.scan-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.scan-frame { position: absolute; inset: 18%; border: 3px solid var(--d-text); border-radius: var(--r-l); box-shadow: 0 0 0 999px var(--d-scrim); transition: border-color .2s var(--ease); }
+.scan-view[data-wrong] .scan-frame { border-color: var(--d-warn); }
+.scan-view:not([data-state="live"]) .scan-frame, .scan-view:not([data-state="live"]) video { visibility: hidden; }
+.scan-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 20px; text-align: center; font-size: 14px; color: var(--d-text-2); }
+.scan-state:empty { display: none; }
+.scan-state strong { font-size: 17px; font-weight: 650; color: var(--d-text); }
+.scan-state .i { width: 28px; height: 28px; margin-bottom: 4px; color: var(--d-text); }
+.scan-state .spinner { border-color: var(--d-fill-2); border-top-color: var(--d-text); }
+.scan-hint { margin: 12px 4px 0; min-height: 40px; font-size: 15px; font-weight: 550; text-align: center; color: var(--text-2); }
+@media (forced-colors: active) { .scan-frame { border-color: CanvasText; } }
 @media (min-height: 760px) { .v-btn-face { width: 72px; height: 72px; } }
 @media (prefers-reduced-motion: reduce) { .mic.rec::after, .dict-bar[data-kind="busy"] .grow::before { animation: none !important; } .voice { transition: none; animation: none; } }
 @media (prefers-contrast: more) { .voice { --muted: #d4d6db; --border-strong: rgba(255, 255, 255, .45); } }

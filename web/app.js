@@ -1378,8 +1378,16 @@
 
 	// ── sheets ─────────────────────────────────────────────────────────────────────
 	let sheetOpener = null;
+	/** Runs when the current sheet goes away (closed or replaced), e.g. to turn the camera off. */
+	let sheetGone = null;
+	function endSheet() {
+		const f = sheetGone;
+		sheetGone = null;
+		f?.();
+	}
 	/** Bottom sheet. `head` gives it a title (and subtitle) with a close button. */
 	function openSheet(build, head) {
+		endSheet();
 		const body = $("sheetBody");
 		body.replaceChildren();
 		if (head) {
@@ -1411,6 +1419,7 @@
 	}
 	function closeSheet() {
 		if ($("sheet").hidden) return;
+		endSheet();
 		$("sheet").hidden = true;
 		sheetOpener?.focus?.({ preventScroll: true });
 		sheetOpener = null;
@@ -2067,11 +2076,20 @@
 		fleet.rpc(fromId, "offerDone", { id: offer.id }).catch(() => {});
 	}
 
-	/** Adds a computer by its pairing link (from `/remote pair` there), when no computer of yours can add it. */
-	function addComputerSheet() {
+	/**
+	 * Adds a computer by its pairing link (from `/remote pair` there), when no computer of yours can add it.
+	 * `link` comes from a scan: it is filled in and added at once, exactly as if pasted.
+	 */
+	function addComputerSheet(link) {
 		openSheet(
 			(body) => {
-				body.appendChild(el("p", "note", "Easiest: in pi on a computer this phone already uses, run /remote add <host>. Otherwise run /remote pair on the new computer and paste its link here."));
+				body.appendChild(el("p", "note", "Easiest: in pi on a computer this phone already uses, run /remote add <host>. Otherwise run /remote pair on the new computer and scan its code or paste its link here."));
+				if (canScan()) {
+					const scan = el("button", "btn");
+					scan.append(icon("qr"), "Scan QR code");
+					scan.onclick = startScan;
+					body.appendChild(scan);
+				}
 				const input = el("input");
 				input.type = "url";
 				input.placeholder = "https://….ts.net/#p=…";
@@ -2100,11 +2118,160 @@
 							input.value = (await navigator.clipboard.readText()).trim();
 						} catch {}
 					};
-					body.appendChild(paste);
+					body.insertBefore(paste, go);
+				}
+				if (typeof link === "string") {
+					input.value = link;
+					go.click();
 				}
 			},
 			{ title: "Add a computer" },
 		);
+	}
+
+	// ── scanning a pairing QR ──────────────────────────────────────────────────────
+	// The iPhone app scans natively (VisionKit, bridge `scan`). A browser uses the camera, with
+	// BarcodeDetector where it exists, else the vendored decoder `qr.js` (jsQR), loaded on first use.
+	const canScan = () => !!window.PiNative?.scan || !!navigator.mediaDevices?.getUserMedia;
+
+	async function startScan() {
+		if (!window.PiNative?.scan) return scanSheet();
+		try {
+			const r = await callNative({ type: "scan" });
+			if (r?.link) addComputerSheet(r.link);
+		} catch (e) {
+			if (e?.message !== "cancelled") toast(e?.message || "Couldn't scan", "error");
+		}
+	}
+
+	const SCAN_STATES = {
+		starting: { title: "Starting the camera…", spinner: true },
+		denied: { icon: "lock", title: "Camera access is off", text: "Allow the camera for this site in your browser's settings, or paste the link instead." },
+		none: { icon: "alert", title: "No camera found", text: "Paste the link that /remote pair shows instead." },
+		failed: { icon: "alert", title: "The camera didn't start", text: "Another app may be using it. Try again, or paste the link instead." },
+	};
+	const SCAN_HINT = "Point the camera at the QR code that /remote pair shows on the new computer.";
+
+	function scanSheet() {
+		let stream = null;
+		let alive = true;
+		let timer = 0;
+		openSheet(
+			(body) => {
+				const view = el("div", "scan-view");
+				const video = el("video");
+				video.muted = true;
+				video.playsInline = true;
+				video.setAttribute("playsinline", "");
+				video.setAttribute("aria-hidden", "true");
+				const frame = el("div", "scan-frame");
+				frame.setAttribute("aria-hidden", "true");
+				const over = el("div", "scan-state");
+				view.append(video, frame, over);
+				const hint = el("p", "scan-hint", SCAN_HINT);
+				hint.setAttribute("role", "status");
+				const paste = el("button", "btn");
+				paste.append(icon("copy"), "Paste link instead");
+				paste.onclick = () => {
+					addComputerSheet();
+					$("sheetBody").querySelector("input")?.focus();
+				};
+				const cancel = el("button", "btn", "Cancel");
+				cancel.onclick = () => addComputerSheet();
+				body.append(view, hint, paste, cancel);
+
+				const show = (state) => {
+					view.dataset.state = state;
+					const s = SCAN_STATES[state];
+					over.replaceChildren();
+					hint.hidden = !!s && !s.spinner;
+					// With no camera, pasting is the one thing left to do.
+					paste.classList.toggle("primary", !!s && !s.spinner);
+					if (!s) return;
+					if (s.spinner) over.appendChild(el("span", "spinner"));
+					else over.appendChild(icon(s.icon));
+					over.appendChild(el("strong", "", s.title));
+					if (s.text) over.appendChild(el("span", "", s.text));
+					over.setAttribute("role", s.spinner ? "status" : "alert");
+				};
+				show("starting");
+
+				(async () => {
+					try {
+						stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+					} catch (e) {
+						if (alive) show(e?.name === "NotAllowedError" || e?.name === "SecurityError" ? "denied" : e?.name === "NotFoundError" || e?.name === "OverconstrainedError" ? "none" : "failed");
+						return;
+					}
+					if (!alive) return stopStream(stream);
+					video.srcObject = stream;
+					try {
+						await video.play();
+					} catch {}
+					const read = await qrReader().catch(() => null);
+					if (!alive) return;
+					if (!read) return show("failed");
+					show("live");
+					let last = "";
+					const tick = async () => {
+						if (!alive) return;
+						const text = video.readyState >= 2 ? await read(video).catch(() => null) : null;
+						if (!alive) return;
+						if (text && PiFleet.pairingLink(text)) {
+							return addComputerSheet(text.trim());
+						}
+						if (text && text !== last) {
+							last = text;
+							hint.textContent = "That code isn't from pi. Scan the one /remote pair shows.";
+							view.dataset.wrong = "";
+						}
+						timer = setTimeout(tick, 200);
+					};
+					tick();
+				})();
+			},
+			{ title: "Scan the code" },
+		);
+		sheetGone = () => {
+			alive = false;
+			clearTimeout(timer);
+			stopStream(stream);
+		};
+	}
+	function stopStream(s) {
+		for (const t of s?.getTracks?.() ?? []) t.stop();
+	}
+
+	/** A function reading the QR text in a video frame (or null): BarcodeDetector, else jsQR. */
+	async function qrReader() {
+		if ("BarcodeDetector" in window) {
+			try {
+				if ((await BarcodeDetector.getSupportedFormats()).includes("qr_code")) {
+					const d = new BarcodeDetector({ formats: ["qr_code"] });
+					return async (video) => (await d.detect(video))[0]?.rawValue || null;
+				}
+			} catch {}
+		}
+		if (!window.jsQR)
+			await new Promise((resolve, reject) => {
+				const s = el("script");
+				s.src = "qr.js";
+				s.onload = resolve;
+				s.onerror = reject;
+				document.head.appendChild(s);
+			});
+		const canvas = el("canvas");
+		const ctx = canvas.getContext("2d", { willReadFrequently: true });
+		return async (video) => {
+			const scale = Math.min(1, 720 / Math.max(video.videoWidth, video.videoHeight));
+			const w = Math.round(video.videoWidth * scale);
+			const h = Math.round(video.videoHeight * scale);
+			if (!w || !h) return null;
+			canvas.width = w;
+			canvas.height = h;
+			ctx.drawImage(video, 0, 0, w, h);
+			return window.jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" })?.data || null;
+		};
 	}
 
 	async function pairLink(text) {
