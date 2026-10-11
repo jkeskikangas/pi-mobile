@@ -52,13 +52,13 @@ APNs requires HTTP/2, and Worker code can't choose the protocol. On deployed Wor
 
 The Workers Free plan allows 100,000 requests/day, 10 ms CPU per request (time spent waiting on `fetch` doesn't count) and 50 subrequests per request [F1]. Each send uses one subrequest, plus one for the OAuth token on FCM's first send per isolate. The Workers rate limiting binding is available on Free, with 10 s or 60 s windows and counters that are per location and eventually consistent [F2]. That's good enough for abuse damping, not for exact quotas. Running out of the daily quota returns Cloudflare error 1027, which hubs treat as a failed send.
 
-## Hub and app integration (next, not in this change)
+## Hub and app integration
 
-1. **App:** the App Store build sends its native token over the sealed RPC, flagged `via: relay`. Self-builds keep the current direct-APNs registration.
-2. **Hub:**
-   - `src/relay.ts` calls `register` once per token and stores the cap in place of the raw token (in `src/store.ts`).
-   - On attention, it posts `send`. A `410` deletes the cap, and a `429` backs off.
-   - The relay URL defaults to the project's deployment and can be overridden in config.
+1. **App (to do):** the App Store build calls the relay's `POST /v1/register {platform:"apns", token, sandbox}` itself. It then sends `push {relay: {url, cap}}` over the sealed RPC to every paired hub, and re-registers when a hub reports `relayOn: false`. Self-builds keep `push {apns: {token, sandbox}}`.
+2. **Hub (done, `src/relay.ts`):**
+   - It stores `{url, cap}` per device. The URL must be https; there is no default, the URL always comes from the phone.
+   - On attention it posts `{cap, sealed, urgent}` with a 10 s timeout.
+   - A `410` drops the cap, a `429` pauses that relay until `Retry-After`, and revoking a device drops its cap.
 3. **Docs and privacy:** `PRIVACY.md` and the App Store notes name the relay, what it sees, and that it's open source and self-hostable.
 
 ## Options considered
