@@ -75,6 +75,8 @@ targets:
         NSCameraUsageDescription: Scan the pairing code shown by /remote on your computer.
         NSLocalNetworkUsageDescription: Reach pi on your computer.
         NSSupportsLiveActivities: true
+        # The voice orb animates at 120 Hz on ProMotion iPhones.
+        CADisableMinimumFrameDurationOnPhone: true
         ITSAppUsesNonExemptEncryption: false
         # Hubs are reached over the LAN or Tailscale on plain HTTP. Every payload is end-to-end
         # encrypted (secretbox), so the transport never sees plaintext. See README → ATS.
