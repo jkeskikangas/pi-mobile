@@ -40,6 +40,21 @@ final class AppModel {
         PushCenter.shared.machinesChanged()
     }
 
+    /// A Keychain write failed: nothing changed, and the page (which re-sends its list) can retry.
+    struct SaveFailed: LocalizedError {
+        var errorDescription: String? { "This iPhone couldn't save your computers. Try again." }
+    }
+
+    /// Serve the web UI from another computer (the primary one is unreachable). Stored before shown.
+    func makePrimary(_ m: Machine) throws {
+        var next = machines
+        guard next.contains(where: { $0.id == m.id }) else { return }
+        for i in next.indices { next[i].primary = next[i].id == m.id }
+        do { try store.save(next) } catch { throw SaveFailed() }
+        machines = next
+        PushCenter.shared.machinesChanged()
+    }
+
     /// One sealed client per machine; rebuilt when a computer is re-paired.
     func client(for m: Machine) -> HubClient? {
         if let c = clients[m.id], c.machine == m { return c }
@@ -51,8 +66,8 @@ final class AppModel {
     // MARK: The page's list (BRIDGE.md `machines`, `unpaired`)
 
     /// New or changed entries are stored; a missing one goes only if its computer no longer accepts this phone,
-    /// or the user confirms.
-    func webMachines(_ list: [Machine]) async {
+    /// or the user confirms. Stored before published: on a failed write nothing changes and this throws.
+    func webMachines(_ list: [Machine]) async throws {
         var next = machines
         for m in list {
             if let i = next.firstIndex(where: { $0.id == m.id }) { next[i] = m } else { next.append(m) }
@@ -63,24 +78,27 @@ final class AppModel {
             for i in next.indices where p != nil { next[i].primary = next[i].id == p }
         }
         let missing = machines.filter { m in !list.contains { $0.id == m.id } }
+        do { try store.save(next) } catch { throw SaveFailed() }
         machines = next
-        try? store.save(machines) // the page re-sends its list on every change; the next save retries
         PushCenter.shared.machinesChanged()
-        await reconcile(missing)
+        try await reconcile(missing)
     }
 
-    func webUnpaired() async {
-        await reconcile(machines)
+    func webUnpaired() async throws {
+        try await reconcile(machines)
     }
 
-    private func reconcile(_ candidates: [Machine]) async {
+    /// Throws if a removal could not be written (the entry then stays, and the next message retries).
+    private func reconcile(_ candidates: [Machine]) async throws {
+        var failed = false
         for m in candidates {
             let gone = await revoked(m)
             // The check crossed an await: act only if the stored entry is still the credential we checked
             // (not re-paired or changed meanwhile).
             guard let now = machines.first(where: { $0.id == m.id }), now.origin == m.origin, now.d == m.d, now.k == m.k else { continue }
-            if gone { remove(now) } else if !forgetQueue.contains(where: { $0.id == now.id }) { forgetQueue.append(now) }
+            if gone { if !remove(now) { failed = true } } else if !forgetQueue.contains(where: { $0.id == now.id }) { forgetQueue.append(now) }
         }
+        if failed { throw SaveFailed() }
     }
 
     private func revoked(_ m: Machine) async -> Bool {
@@ -92,18 +110,23 @@ final class AppModel {
         forgetQueue.removeAll { $0.id == m.id }
         // Only the credential the user was asked about.
         guard let now = machines.first(where: { $0.id == m.id }), now.d == m.d, now.k == m.k, now.origin == m.origin else { return }
-        remove(now)
+        _ = remove(now) // on a failed write the computer stays; the page's next list asks again
     }
 
     func keep(_ m: Machine) {
         forgetQueue.removeAll { $0.id == m.id }
     }
 
-    private func remove(_ m: Machine) {
-        machines.removeAll { $0.id == m.id }
+    /// Stored first, then published; false (and nothing changed) when the Keychain refuses the write.
+    @discardableResult
+    private func remove(_ m: Machine) -> Bool {
+        var next = machines
+        next.removeAll { $0.id == m.id }
+        if !next.isEmpty, !next.contains(where: \.primary) { next[0].primary = true }
+        guard (try? store.save(next)) != nil else { return false }
+        machines = next
         clients[m.id] = nil
-        if !machines.isEmpty, !machines.contains(where: \.primary) { machines[0].primary = true }
-        try? store.save(machines)
+        return true
     }
 
     func forgetAll() {

@@ -105,7 +105,7 @@ final class VoiceActivityController {
 
     // MARK: which session (pickAgent() in web/app.js)
 
-    /// The session waiting on you first, else the one voice used last, else the first reachable one.
+    /// The session waiting on you first, else the one last on screen (web UI `focus`, or voice), else the first reachable one.
     func pickSession() async -> Target? {
         guard let model else { return nil }
         var all: [(Target, Int)] = []

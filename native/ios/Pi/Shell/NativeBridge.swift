@@ -1,12 +1,13 @@
 import Foundation
 
 /// The page → native half of `native/ios/BRIDGE.md`, free of WebKit so it can be unit tested.
-/// Voice and dictation are stubs until plan Steps 5 and 8.
+/// Prefs, machines, unpairing, focus, voice, dictation and push are all handled here.
 @MainActor
 struct NativeBridge {
     let model: AppModel
     let primaryOrigin: String
     var dictation: Dictation = .shared
+    var focusDefaults: UserDefaults = .standard
 
     enum Reply: Equatable {
         case value(JSON)
@@ -21,10 +22,16 @@ struct NativeBridge {
             return .value(.null)
         case "machines":
             let list = (body["machines"]?.array ?? []).compactMap { Machine(web: $0, primaryOrigin: primaryOrigin) }
-            await model.webMachines(list)
+            do { try await model.webMachines(list) } catch { return .error(error.localizedDescription) }
             return .value(.null)
         case "unpaired":
-            await model.webUnpaired()
+            do { try await model.webUnpaired() } catch { return .error(error.localizedDescription) }
+            return .value(.null)
+        case "focus":
+            // The session on screen in the web UI: "Start voice" (Siri, Control Center) picks it next.
+            guard let agent = body["agent"]?.string, !agent.isEmpty else { return .value(.null) }
+            let machine = body["machine"]?.string.flatMap { $0.isEmpty ? nil : $0 } ?? model.primary?.id ?? ""
+            focusDefaults.set(["agent": agent, "machine": machine, "name": body["name"]?.string ?? ""], forKey: VoiceActivityController.lastKey)
             return .value(.null)
         case "voice.start":
             guard let agent = body["agent"]?.string, !agent.isEmpty else { return .error("Open a session first.") }
@@ -74,11 +81,9 @@ struct NativeBridge {
         """
     }
 
-    /// Native feel: no pinch zoom, no long-press callouts on links and images, no tap flash.
+    /// Native feel: no long-press callouts on links and images, no tap flash. Pinch zoom stays (accessibility).
     static let feelScript = """
     (function () {
-      var m = document.querySelector('meta[name=viewport]');
-      if (m && !/maximum-scale/.test(m.content)) m.content += ', maximum-scale=1, user-scalable=no';
       var st = document.createElement('style');
       st.textContent = 'a, img { -webkit-touch-callout: none; } * { -webkit-tap-highlight-color: transparent; }';
       document.head.appendChild(st);

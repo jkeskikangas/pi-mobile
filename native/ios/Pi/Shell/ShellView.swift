@@ -7,6 +7,18 @@ struct ShellView: View {
     @State private var phase: ShellPhase = .loading
     @State private var reload = 0
     @State private var showSpinner = false
+    /// Automatic retries since the last successful load (backoff), and the seconds until the next one.
+    @State private var attempt = 0
+    @State private var retryIn: Int?
+    /// Other paired computers that answered while this one is unreachable.
+    @State private var reachable: [Machine] = []
+    @State private var switchError: String?
+    @State private var network = NetworkWatch()
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var isOffline: Bool { if case .offline = phase { true } else { false } }
+    private func retryNow() { retryIn = nil; reload += 1 }
+    static let backoff = [2, 4, 8, 15, 30]
 
     var body: some View {
         ZStack {
@@ -25,19 +37,75 @@ struct ShellView: View {
                         showSpinner = true
                     }
             case .offline(let message):
-                OfflineView(name: machine.name, message: message) { reload += 1 }
+                OfflineView(name: machine.name, message: message, retryIn: retryIn, others: reachable, error: switchError,
+                            retry: retryNow, use: use, talk: talk)
                     .transition(.opacity)
+                    .task(id: attempt) { await autoRetry() }
+                    .task { await probeOthers() }
             case .ready:
                 EmptyView()
             }
         }
         .animation(.easeOut(duration: 0.2), value: phase)
+        .onChange(of: phase) { _, p in
+            if p == .ready { attempt = 0; retryIn = nil; reachable = [] }
+        }
+        // Back in the app, or the network came back: try at once instead of waiting out the backoff.
+        .onChange(of: scenePhase) { _, p in if p == .active && isOffline { retryNow() } }
+        .onChange(of: network.changes) { if isOffline && network.online { retryNow() } }
         .voiceScreen(model.voice)
         .alert(forgetTitle, isPresented: forgetShown, presenting: model.forgetQueue.first) { m in
             Button("Forget", role: .destructive) { model.forget(m) }
             Button("Keep", role: .cancel) { model.keep(m) }
         } message: { _ in
             Text("It still accepts this iPhone. Forgetting removes its key from this iPhone.")
+        }
+    }
+
+    /// Counts down to the next automatic retry (2, 4, 8, 15, then every 30 s) while offline and in front.
+    private func autoRetry() async {
+        let delay = Self.backoff[min(attempt, Self.backoff.count - 1)]
+        for left in stride(from: delay, to: 0, by: -1) {
+            retryIn = left
+            try? await Task.sleep(for: .seconds(1))
+            if Task.isCancelled { return }
+        }
+        guard scenePhase == .active, isOffline else { return }
+        attempt += 1
+        retryNow()
+    }
+
+    /// The web UI can't load from this computer, but another one may serve it (each computer serves the app).
+    private func probeOthers() async {
+        let others = model.machines.filter { $0.id != machine.id }
+        guard !others.isEmpty else { return }
+        var ok: [Machine] = []
+        await withTaskGroup(of: Machine?.self) { g in
+            for m in others {
+                guard let c = model.client(for: m) else { continue }
+                g.addTask {
+                    // A short budget: this only decides which buttons to offer.
+                    let probe = Task { try await c.hub() }
+                    let timer = Task { try await Task.sleep(for: .seconds(5)); probe.cancel() }
+                    defer { timer.cancel() }
+                    return (try? await probe.value) != nil ? m : nil
+                }
+            }
+            for await m in g { if let m { ok.append(m) } }
+        }
+        reachable = others.filter { m in ok.contains { $0.id == m.id } }
+    }
+
+    private func use(_ m: Machine) {
+        do { try model.makePrimary(m) } catch { switchError = error.localizedDescription }
+    }
+
+    /// Voice mode needs no web view: start it on the session that needs you (or the last one), like Siri does.
+    private func talk() {
+        Task {
+            let c = VoiceActivityController.shared
+            guard let t = await c.pickSession() else { switchError = "No session is reachable right now."; return }
+            do { try await c.startEngine(for: t) } catch { switchError = error.localizedDescription }
         }
     }
 
@@ -77,33 +145,96 @@ struct LoadingView: View {
 struct OfflineView: View {
     let name: String
     let message: String
+    /// Seconds until the next automatic try; nil while a try is under way.
+    let retryIn: Int?
+    /// Other computers that answered: the app can open from one of them.
+    let others: [Machine]
+    let error: String?
     let retry: () -> Void
-    @State private var retrying = false
+    let use: (Machine) -> Void
+    let talk: () -> Void
+    @State private var taps = 0
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 52, weight: .regular))
-                .foregroundStyle(.secondary)
-                .symbolRenderingMode(.hierarchical)
-                .padding(.bottom, 20)
-                .accessibilityHidden(true)
-            Text(name.isEmpty ? "Can't reach your computer" : "Can't reach \(name)")
-                .font(.title2.bold())
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 8)
-            Text("\(message.hasPrefix("Can't reach") ? "" : message + " ")Check that pi is running with /remote on, and that this iPhone is on the same Wi-Fi or tailnet.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Spacer()
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 32)
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 52, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .symbolRenderingMode(.hierarchical)
+                        .padding(.bottom, 20)
+                        .accessibilityHidden(true)
+                    Text(name.isEmpty ? "Can't reach your computer" : "Can't reach \(name)")
+                        .font(.title2.bold())
+                        .multilineTextAlignment(.center)
+                        .padding(.bottom, 8)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("\(message.hasPrefix("Can't reach") ? "" : message + " ")Check that pi is running with /remote on, and that this iPhone is on the same Wi-Fi or tailnet.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.bottom, 14)
+                    status
+                    if let error {
+                        Notice(symbol: "exclamationmark.triangle.fill", tint: .red, text: error)
+                            .padding(.top, 16)
+                    }
+                    Spacer(minLength: 32)
+                }
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .safeAreaInset(edge: .bottom) { actions }
+        .padding(.horizontal, 28)
+        .frame(maxWidth: 520)
+    }
+
+    @ViewBuilder private var status: some View {
+        HStack(spacing: 8) {
+            if let retryIn {
+                Text("Trying again in \(retryIn) s")
+                    .contentTransition(.numericText(countsDown: true))
+            } else {
+                ProgressView().controlSize(.small)
+                Text("Trying again…")
+            }
+        }
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .animation(.default, value: retryIn)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var actions: some View {
+        VStack(spacing: 10) {
+            if !others.isEmpty {
+                ForEach(others) { m in
+                    Button { use(m) } label: {
+                        Label("Open \(m.name.isEmpty ? "your other computer" : m.name)", systemImage: "desktopcomputer")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: 34)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.large)
+                }
+                Button(action: talk) {
+                    Label("Talk to pi", systemImage: "waveform")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
+            }
             Button {
-                retrying = true
+                taps += 1
                 retry()
-                Task { try? await Task.sleep(for: .seconds(1)); retrying = false }
             } label: {
-                Label("Try again", systemImage: "arrow.clockwise")
+                Label("Try again now", systemImage: "arrow.clockwise")
                     .font(.headline)
                     .foregroundStyle(Color.accentText)
                     .frame(maxWidth: .infinity, minHeight: 34)
@@ -111,12 +242,12 @@ struct OfflineView: View {
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.capsule)
             .controlSize(.large)
-            .disabled(retrying)
-            .sensoryFeedback(.impact(weight: .light), trigger: retrying) { _, new in new }
+            .disabled(retryIn == nil)
+            .sensoryFeedback(.impact(weight: .light), trigger: taps)
         }
-        .padding(.horizontal, 28)
+        .padding(.top, 12)
         .padding(.bottom, 24)
-        .frame(maxWidth: 520)
+        .background(Color.piBackground)
     }
 }
 

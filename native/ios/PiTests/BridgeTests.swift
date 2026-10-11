@@ -92,11 +92,48 @@ final class BridgeTests: XCTestCase {
             DispatchQueue.main.sync { MainActor.assumeIsolated { try? model.added(repaired) } }
             return .init(status: 401)
         }
-        await model.webUnpaired()
+        try await model.webUnpaired()
         XCTAssertEqual(model.primary?.d, "d-new")
         XCTAssertEqual(store.load().map(\.d), ["d-new"])
         model.forget(old) // a stale confirmation must not delete the new key either
         XCTAssertEqual(store.load().map(\.d), ["d-new"])
+    }
+
+    func testFailedKeychainWritesAreReportedAndChangeNothing() async {
+        let broken = MachineStore(keychain: Keychain(service: "pi-mobile-tests-broken", accessGroup: "nope.invalid", fallback: false))
+        let model = AppModel(store: broken, prefs: VoicePrefs(defaults: defaults))
+        let bridge = NativeBridge(model: model, primaryOrigin: "http://127.0.0.1:9")
+        let r = await bridge.handle(["type": "machines", "machines": [machine("a", primary: true).webEntry]])
+        XCTAssertEqual(r, .error("This iPhone couldn't save your computers. Try again."))
+        XCTAssertEqual(model.machines, [], "nothing published that isn't stored")
+    }
+
+    func testFocusIsRememberedForStartVoice() async {
+        let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
+        var bridge = NativeBridge(model: model, primaryOrigin: "http://127.0.0.1:9")
+        bridge.focusDefaults = defaults
+        let r = await bridge.handle(["type": "focus", "agent": "ag1", "machine": "m2", "name": "infra"])
+        XCTAssertEqual(r, .value(.null))
+        let saved = defaults.dictionary(forKey: VoiceActivityController.lastKey) as? [String: String]
+        XCTAssertEqual(saved, ["agent": "ag1", "machine": "m2", "name": "infra"])
+        // The intent's pick uses it when nothing needs you.
+        let a = VoiceActivityController.Target(agent: "ag0", machine: "m1", name: "x", machineName: nil)
+        let b = VoiceActivityController.Target(agent: "ag1", machine: "m2", name: "infra", machineName: nil)
+        XCTAssertEqual(VoiceActivityController.pick([(a, 1), (b, 2)], saved: saved), b)
+    }
+
+    func testMakePrimaryStoresFirst() throws {
+        let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
+        try model.added(machine("a", primary: true))
+        try model.added(machine("b", origin: "http://box:1"))
+        try model.makePrimary(model.machines[1])
+        XCTAssertEqual(model.primary?.id, "b")
+        XCTAssertEqual(store.load().first(where: \.primary)?.id, "b")
+    }
+
+    func testFeelScriptKeepsPinchZoom() {
+        XCTAssertFalse(NativeBridge.feelScript.contains("user-scalable"))
+        XCTAssertFalse(NativeBridge.feelScript.contains("maximum-scale"))
     }
 
     func testHTTPErrorPagesBecomeNativeMessages() {

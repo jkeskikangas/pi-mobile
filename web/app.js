@@ -313,6 +313,8 @@
 		}
 		showEmpty("");
 		store.set(AGENT_KEY, agent);
+		// Inside the app: "Start voice" from Siri or Control Center opens this session next.
+		toNative({ type: "focus", agent, machine: fleet.machineOf(agent) || "", name: S.agents.get(agent)?.name || "" });
 		const view = newView(agent);
 		S.view = view;
 		try {
