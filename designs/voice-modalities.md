@@ -96,7 +96,7 @@ New pieces:
 
 Model: the same realtime API and ChatGPT sign-in as pi-mobile's voice mode (`gpt-realtime-2`, `realtime.ts`): `ask_pi` and a `park` tool, pi's events injected as context, soft barge-in handled client-side. The GPT-Live events in the table are the equivalent if it is ever adopted; nothing in the rules needs it. GPT-Live would add true full duplex (backchannels while listening) but needs an OpenAI API key and is billed per second.
 
-Transport: the ChatGPT sign-in endpoint (`chatgpt.com/backend-api/codex/realtime/calls`) takes a WebRTC offer, which Node has no built-in support for. Options: a pure-TypeScript WebRTC stack (`werift`, no native build), or a WebSocket path if that endpoint offers one.
+Transport: WebRTC from Node with `werift` (pure TypeScript, no native build; ~8 MB, ~28 packages installed). Spike 2026-10-11 with the ChatGPT sign-in: `gpt-realtime-2` over `chatgpt.com/backend-api/codex/realtime/calls` connected from Node, the data channel opened, and the model spoke (429 audio packets, the full event stream). WebSocket on `chatgpt.com` (`/codex/realtime`, `/codex/live`) is refused by Cloudflare (HTTP 403 page); Codex itself uses WebSocket only with an API key.
 
 ## Alternatives considered
 
@@ -116,7 +116,7 @@ Transport: the ChatGPT sign-in endpoint (`chatgpt.com/backend-api/codex/realtime
 
 ## Open questions
 
-1. Transport from the terminal: does the ChatGPT sign-in realtime endpoint accept a WebSocket connection, or do we need WebRTC in Node (`werift`)? Also worth one test: does that endpoint accept `gpt-live-1-codex`, which Codex uses, giving full duplex without an API key?
+1. GPT-Live with the ChatGPT sign-in: the endpoint accepts the call (`?intent=quicksilver&architecture=avas`, `OpenAI-Alpha: quicksilver=v2`, `model: gpt-live-1-codex`, `delegation: {type: "client"}`) and connects, then closes with "Voice session access denied." Likely gated to Codex's own clients or by plan; not pursued further. GPT-Live therefore needs an API key.
 2. Can an extension show a marked spoken segment *inside* pi's editor, or only beside it (a widget above the editor)? Decides how rule 2 looks.
 3. Remote sessions: how does a remote pi's editor show a parked request, given the voice runs on the laptop? Through the machine link's editor commands, or the laptop keeps the parked text and pastes on Enter.
 4. Typing-pause length and the parking word list are starting values to tune.
