@@ -1,18 +1,31 @@
 # Web ↔ native bridge (iOS app)
 
-The contract between the web UI (`web/app.js`, `web/voice.js`) running in the app's `WKWebView` and the Swift shell. Plan: `plans/native-apps.md` Steps 3–4. The web side is active **only when `window.PiNative` exists**; in a browser nothing here runs.
+The contract between the web UI (`web/app.js`, `web/voice.js`, `web/fleet.js`) running in the app's `WKWebView` and the Swift shell. Plan: `plans/native-apps.md` Steps 3–4. The web side is active **only when `window.PiNative` exists**; in a browser nothing here runs.
+
+## Trust
+
+- Native handles a message **only if** `message.frameInfo.isMainFrame` is true **and** `message.frameInfo.securityOrigin` (scheme, host, port) equals the paired primary origin the web view loaded. Anything else: reply error `not allowed` and do nothing.
+- The page is never trusted to delete credentials by itself. `unpaired` and removals in `machines` are **requests**: native deletes a Keychain entry only after confirming it (rules under each message). Additions are accepted as is (the page already holds those keys).
 
 ## Setup (native, before any page script)
 
-A `WKUserScript` at `.atDocumentStart`, main frame only:
+A `WKUserScript` at `.atDocumentStart`, `forMainFrameOnly: true`. The Keychain is the source of truth for machines; the page's `localStorage` copy is overwritten on every load:
 
 ```js
-localStorage["pi-mobile-device"] = JSON.stringify({ d, k, role, host }); // from the Keychain
-localStorage["pi-mobile-voice-persona"] = "…";                          // each voice pref the app holds (see prefs)
+localStorage["pi-mobile-machines"] = JSON.stringify(machines);           // authoritative list from the Keychain, may be [] only if the Keychain is empty
+localStorage["pi-mobile-device"] = JSON.stringify({ d, k, role: "control", host }); // the primary entry's d, k, name
+localStorage["pi-mobile-voice-persona"] = "…";                         // each voice pref the app holds (see prefs)
 window.PiNative = { version: 1 };
 ```
 
-The web adds its functions to this same object (below) when `web/voice.js` loads, so native must **not** replace `window.PiNative` after load.
+Machine entry (`web/fleet.js`): `{ id, machine, name, origin, d, k, primary, added, lastSeen }`.
+- `id`: this phone's own stable handle for the entry (string; the web generates it, native keeps it).
+- `machine`: the computer's id from its hub (may be `""` until learned).
+- `origin`: `""` for the primary (it is reached at the page's own origin, i.e. the origin native loads); full origin for the others.
+- `primary`: exactly one entry is `true` — the computer that serves the web UI.
+- `d`, `k`: device id and key (base64url, 32 bytes). `added`, `lastSeen`: ms timestamps (informational).
+
+The web adds its functions to the same `window.PiNative` object when `web/voice.js` loads, so native must **not** replace `window.PiNative` after load.
 
 ## JS → native: `webkit.messageHandlers.piNative.postMessage(msg)`
 
@@ -20,12 +33,13 @@ Handler name `piNative`, registered with `WKScriptMessageHandlerWithReply` (`add
 
 | `type` | Other fields | When | Reply |
 |---|---|---|---|
-| `voice.start` | `agent: string` (the focused session id, `machine/agent` form when several machines) | Header voice button tapped and a session is open | `null` once the native voice screen is presented. Error text is shown as a toast. |
-| `dictation.start` | — | Composer mic pressed (hold or tap) | `null` once recording has started. Error text is shown as `Microphone: <text>` and no recording UI appears. |
+| `voice.start` | `agent: string` (the session id as the hub reports it), `machine: string` (the `id` of the machines-list entry that hosts it) | Header voice button tapped and a session is open | `null` once the native voice screen is presented. Error text is shown as a toast. **Idempotent:** if voice mode is already open, native just focuses it (switching to `agent` if different). **Cancels dictation:** native stops and discards any dictation recording first (the web has already dropped its recording UI and will not send `dictation.cancel`). The web sends at most one `voice.start` at a time (waits for the reply). |
+| `dictation.start` | — | Composer mic pressed (hold or tap) | `null` once recording has started. Error text is shown as `Microphone: <text>`. |
 | `dictation.stop` | — | User finished (release, ✓, mic tap, 5-minute cap) | `{ audio: string, mime: string }`: `audio` is base64 (standard, no data-URL prefix) of the whole recording, `mime` e.g. `"audio/mp4"` (AAC in MP4/M4A, mono, 16–24 kHz is plenty). The web then calls `transcribe` itself. An empty/very short take (< 600 ms or < ~1.5 KB) is treated as "too short". Error text is shown as `Voice input failed: <text>`. |
-| `dictation.cancel` | — | User cancelled (✕) | `null`; discard the audio. Errors are ignored. |
+| `dictation.cancel` | — | User cancelled (✕), also while a `dictation.stop` is still pending, or when a `dictation.start` resolved after the web had given the take up | `null`; stop if recording and discard the audio. **Must be idempotent** (no recording → still `null`). If a `dictation.stop` is pending, native may still reply to it; the web ignores that reply. Errors are ignored. |
 | `prefs` | `key: string`, `value: string` | A voice preference changed in the web UI | `null` (ignored). Store in `UserDefaults`; write it back into `localStorage` at next document start. |
-| `unpaired` | — | The user unpaired, revoked this device, removed the last computer, or every computer answered 401 | `null` (ignored). Clear the Keychain device(s); the page already cleared its `localStorage` and shows "Connect to pi". Native should then show its pairing screen. Not sent on the silent startup path where the page simply finds no device. |
+| `machines` | `machines: Entry[]` (the full list, shape above) | Every time the web saves its list: computer added (offer accepted, scan/paste), removed, renamed, re-paired, or learned its id | `null` (ignored). Native diffs against the Keychain by `id`: **new or changed entries are stored** (changed `d`/`k` = re-paired). **A missing entry is removed** only if that computer answers HTTP 401 to a sealed `hub` RPC with the stored `d`/`k`, or the user confirms a native alert ("Forget ‹name› on this iPhone?"); otherwise keep it (it is injected again next load). |
+| `unpaired` | — | The user unpaired, revoked this device, removed the last computer, or every computer answered 401 | `null` (ignored). Same rule as removals: for each Keychain entry, delete it if its computer answers 401 (the web revokes before unpairing) or the user confirms a native alert; then, if nothing is left, show the pairing screen. Not sent on the silent startup path where the page simply finds no device. A `machines` message with `[]` usually precedes it. |
 
 `prefs` keys (all strings):
 
@@ -37,9 +51,13 @@ Handler name `piNative`, registered with `WKScriptMessageHandlerWithReply` (`add
 | `pi-mobile-voice-uses` | integer as string (hint fading) |
 | `pi-mobile-voice-intro` | `"1"` once the first-time intro was spoken |
 
-In practice only `persona` is changed in the web inside the app (the voice picker in the menu); the other keys are written by the web voice mode, which the app replaces, so native voice mode should update its own copy and re-inject it at next document start.
+In practice only `persona` is changed in the web inside the app (the voice picker in the menu); the other keys are written by the web voice mode, which the app replaces, so native voice mode updates its own copy and re-injects it at next document start.
 
-Ordering: the web never sends `dictation.stop`/`cancel` without a resolved `dictation.start`, and never sends a second `dictation.start` while one is recording or the start is pending.
+### Dictation ordering (what the web guarantees)
+
+- At most one take at a time: no `dictation.start` while a start is pending, a take is recording, or a `dictation.stop` is pending.
+- `dictation.stop` is sent only after the matching `dictation.start` resolved. If the user lets go (or taps ✕) before it resolves, the web sends `dictation.stop` (or `dictation.cancel`) right after it resolves.
+- If `dictationEnded()` arrives while a start is pending, the web sends `dictation.cancel` when that start resolves.
 
 ## Native → JS: functions on `window.PiNative`
 
@@ -48,15 +66,15 @@ Call with `webView.evaluateJavaScript("window.PiNative.<fn>(…)")` on the main 
 | Function | Argument | When | Effect |
 |---|---|---|---|
 | `level(x)` | `number` 0–1, linear RMS amplitude (e.g. `pow(10, averagePower/20)` from `AVAudioRecorder`, metering on) | While dictating, ~20–60 times a second | Drives the recorder strip's waveform (the last value is sampled every animation frame). |
-| `dictationEnded(message?)` | optional `string` | Recording stopped on the native side without the web asking (interruption, route loss, error) | Drops the take and the recording UI; shows `message` as an error if given. Native discards the audio; the web will not send `dictation.stop`. |
+| `dictationEnded(message?)` | optional `string` | Recording stopped on the native side without the web asking (interruption, route loss, error) | Drops the take and the recording UI (also a pending start); shows `message` as an error if given. Native discards the audio. |
 | `voiceClosed()` | — | The native voice screen was dismissed and the web view is visible again | Reloads the focused session (`loadCurrent()`) so the transcript catches up. |
 
 ## What the web changes when `window.PiNative` exists
 
-- Header voice button → `voice.start` instead of the web voice screen; no HTTPS check.
+- Header voice button → `voice.start` instead of the web voice screen; no HTTPS check; any dictation in progress is dropped first.
 - Composer dictation records natively (above); transcription, raw/undo chips and `learn` are unchanged.
 - The menu has no Notifications section (no Web Push in `WKWebView`) until push lands (plan Step 9).
-- Voice preference writes also post `prefs`.
+- Voice preference writes also post `prefs`; machine-list saves post `machines`.
 - Unpairing posts `unpaired`.
 
 Version: `window.PiNative.version` is set by native (currently `1`); bump it if this contract changes incompatibly, and gate new web behaviour on it.
