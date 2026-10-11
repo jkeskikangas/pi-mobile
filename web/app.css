@@ -202,6 +202,13 @@ header#top.bare .chev, header#top.bare .dot { display: none; }
 .icon-btn:active { background: var(--panel-2); }
 .icon-btn.small { width: 36px; height: 36px; }
 @media (max-width: 360px) { .model-btn { max-width: 26vw; padding: 0 10px; } }
+/* Very narrow (the iOS app's largest text sizes narrow the viewport to ~244 px): the session name
+   keeps the room; the model moves into the menu ("Model" row, shown only at this width). */
+@media (max-width: 300px) {
+	header#top { gap: 0; padding-right: 2px; padding-left: 2px; }
+	.session-btn { gap: 8px; padding: 4px 6px; }
+	#modelBtn { display: none; }
+}
 
 .banner { align-self: center; margin-top: 8px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--panel-2); color: var(--text-2); font-size: 13px; font-weight: 550; }
 .banner.err { color: var(--err); }
@@ -388,7 +395,7 @@ footer#composer > * { max-width: var(--measure); margin-inline: auto; }
 .compose-box { display: flex; align-items: flex-end; gap: 2px; padding: 4px; border-radius: var(--r-xl); background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-1); transition: border-color .15s, box-shadow .15s; }
 .compose-box:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 textarea#input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent; font-size: 16px; line-height: 1.4; padding: 10px 4px; max-height: 40dvh; min-height: 44px; color: var(--text); }
-textarea#input::placeholder { color: var(--muted); }
+textarea#input::placeholder { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .compose-box .icon-btn { width: 40px; height: 40px; border-radius: 50%; }
 .attach { cursor: pointer; }
 .send { width: 40px; height: 40px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--fill-2); color: var(--muted); transition: background .15s, color .15s, transform .1s; }
@@ -442,7 +449,8 @@ textarea#input::placeholder { color: var(--muted); }
 .row.current .sub, .row.current .last { color: var(--text-2); }
 .row.danger, .row.danger > .i { color: var(--err); }
 .badge { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--warn-dot); color: #1b1203; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex: none; }
-.chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 300px) { .chips { grid-template-columns: repeat(2, minmax(0, 1fr)); } .chips button { padding: 0 8px; } }
 .chips button { height: 40px; padding: 0 14px; border-radius: 999px; background: var(--panel-2); font-size: 14px; font-weight: 600; color: var(--text-2); }
 .chips button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
 .note { font-size: 13px; color: var(--muted); margin: 10px 4px 0; line-height: 1.45; }

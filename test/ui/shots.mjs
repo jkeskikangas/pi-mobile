@@ -94,6 +94,16 @@ async function session(theme, width, flow) {
 			return r.violations.map((v) => `${v.id} (${v.impact}): ${v.nodes.length}× ${v.nodes.slice(0, 2).map((n) => n.target.join(" ")).join(" | ")}`);
 		}, AXE);
 		if (found.length) report.axe[`${tag}-${name}`] = found;
+		// Nothing may scroll sideways: the page, or a sheet, card, composer, header or voice screen.
+		const wide = await page.evaluate(() => {
+			const out = [];
+			if (document.documentElement.scrollWidth > innerWidth + 1) out.push(`page ${document.documentElement.scrollWidth}px > ${innerWidth}px`);
+			for (const e of document.querySelectorAll("header#top, .sheet-panel, .prompt, #composer, #voice, .attention, .dict-bar"))
+				if (e.offsetParent !== null || getComputedStyle(e).position === "fixed")
+					if (e.scrollWidth > e.clientWidth + 1) out.push(`${e.id ? `#${e.id}` : e.className} ${e.scrollWidth}px > ${e.clientWidth}px`);
+			return out;
+		});
+		if (wide.length) report.errors.push(`${tag}-${name} overflows sideways: ${wide.join("; ")}`);
 	};
 	// Real taps, as a finger would: a scripted click() counts as keyboard use and shows focus rings.
 	const tap = async (sel, text) => {
@@ -163,7 +173,12 @@ async function session(theme, width, flow) {
 				await closeSheet();
 			});
 			await step("models", async () => {
-				await tap("#modelBtn");
+				// Below 300 px the header has no model chip; the menu's Model row opens the same sheet.
+				if (width <= 300) {
+					await tap("#menuBtn");
+					await shot("11-menu-model");
+					await tap(".sheet-panel .row", "Model");
+				} else await tap("#modelBtn");
 				await sleep(300);
 				await shot("11-models");
 				await closeSheet();

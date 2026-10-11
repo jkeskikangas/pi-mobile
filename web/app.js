@@ -1622,6 +1622,9 @@
 			const info = S.agents.get(S.current);
 			section(body, info ? `Session · ${info.name}` : "Session");
 			g = group(body);
+			// Narrow screens hide the header's model chip (app.css), so the menu offers it.
+			if (info?.model && getComputedStyle($("modelBtn")).display === "none")
+				add("Model", modelSheet, "", "chip", `${shortModel(info.model.name || info.model.id)}${info.thinking ? ` · thinking ${info.thinking}` : ""}`);
 			if (S.current) {
 				add("Compact context", async () => {
 					closeSheet();

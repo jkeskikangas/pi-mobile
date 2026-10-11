@@ -45,7 +45,7 @@ Weights are 500/550/600/650/700. Titles get `letter-spacing: -.01em`. Numbers th
   | Full-width buttons | 50 |
   | Voice-mode buttons | 68–72 |
 
-  Never shrink a target to fit a narrow screen; drop a label instead. For example, `.stop-btn` loses its text at 360 px.
+  Never shrink a target to fit a narrow screen; drop a label instead. For example, `.stop-btn` loses its text at 360 px. Below 300 px (the iOS app narrows the viewport to ~244 px at the largest text sizes) the header drops the model chip and the menu shows a **Model** row instead, so the session name keeps the room; nothing may scroll sideways (`shots` fails on it). Check narrow work with `npm run shots -- --width 244,275,320`.
 - Every fixed edge adds `--safe-t` / `--safe-b`.
 
 ### 2.3 Colour
