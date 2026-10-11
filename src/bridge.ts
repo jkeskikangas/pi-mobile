@@ -21,8 +21,8 @@ import {
 } from "./protocol.ts";
 import type { Config } from "./store.ts";
 import { inHerdr, spawnPi } from "./herdr.ts";
-import type { VoiceHost } from "./voice/host.ts";
-import { countWord, describeActivity, firstSentences, speakable } from "./voice/speech.ts";
+import type { VoiceHost } from "pi-speech/host";
+import { countWord, describeActivity, firstSentences, speakable } from "pi-speech/speech";
 
 const AGENT_KEY = Symbol.for("pi-mobile.agent");
 const COUNTER_KEY = Symbol.for("pi-mobile.counter");

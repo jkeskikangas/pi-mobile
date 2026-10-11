@@ -36,34 +36,8 @@ export interface Config {
 	tailscale?: boolean;
 	/** HTTPS addresses of your other machines that aren't on Tailscale (`*.ts.net` is always allowed). */
 	machineOrigins?: string[];
-	voice?: VoiceConfig;
 	/** iPhone push through Apple (APNs) with your own `.p8` key; set with /remote settings. */
 	apns?: ApnsConfig;
-}
-
-export interface VoiceConfig {
-	/** Speech recognition on this computer: Apple on-device (macOS 26+), OpenAI (OPENAI_API_KEY), or the first that works. */
-	stt?: "auto" | "apple" | "openai";
-	/** `provider/id` of the model that distils dictation and writes spoken briefs (default: a fast model you have). */
-	model?: string;
-	/** Recognition language, e.g. "en-US", "fi-FI" (default: the system language). */
-	locale?: string;
-	/** Voice mode on the phone: realtime speech model via your ChatGPT/Codex sign-in or OPENAI_API_KEY, or the cascaded pipeline. */
-	realtime?: "auto" | "off";
-	/** Realtime model and voice. */
-	realtimeModel?: string;
-	realtimeVoice?: string;
-	/** Realtime end-of-turn detection: "semantic" (default, waits for the end of a thought) or "server" (fixed silence). */
-	turnDetection?: "semantic" | "server";
-	/** Basic voice mode's speech from the computer: any OpenAI-compatible /v1 base URL (e.g. Voicebox or Kokoro on this machine). */
-	ttsUrl?: string;
-	ttsKey?: string;
-	ttsModel?: string;
-	ttsVoice?: string;
-	/** "off" keeps OPENAI_API_KEY from being used for speech; the phone then speaks with its own voice. */
-	tts?: "auto" | "off";
-	/** Terminal voice input: put the distilled text in the editor ("review", default) or send it ("send"). */
-	afterDictation?: "review" | "send";
 }
 
 export interface Device {

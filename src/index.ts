@@ -24,10 +24,11 @@ import { closeProcessHub, type LinkState } from "./link.ts";
 import type { AgentInfo } from "./protocol.ts";
 import { qrLines } from "./qr.ts";
 import { type Config, configPath, linkSecret, loadConfig, saveConfig, stateDir } from "./store.ts";
-import { registerDictation } from "./voice/dictation.ts";
-import { VoiceHost } from "./voice/host.ts";
-import { registryComplete } from "./voice/model.ts";
-import { agentVoiceNote } from "./voice/speech.ts";
+import { loadVoiceConfig, speechDir } from "pi-speech/config";
+import { registerDictation } from "pi-speech/dictation";
+import { VoiceHost } from "pi-speech/host";
+import { registryComplete } from "pi-speech/model";
+import { agentVoiceNote } from "pi-speech/speech";
 import { httpsUrl } from "../bin/https-url.mjs";
 
 /** Set by `/remote off` → "Only this session"; lives on globalThis so it survives /new and /reload. */
@@ -83,9 +84,9 @@ export default function piMobile(pi: ExtensionAPI): void {
 	pi.registerFlag("remote", { type: "boolean", description: "Share this session with your phone (pi-mobile)" });
 	registerHerdrBlocked(pi);
 
-	// Voice: dictation in this terminal (alt+m, /voice), and the host side of the phone's voice mode.
-	const complete = registryComplete(() => ctx!, () => loadConfig().voice?.model);
-	const voice = new VoiceHost({ ctx: () => ctx!, config: () => loadConfig().voice, stateDir, complete });
+	// Voice (pi-speech): dictation in this terminal (alt+m, /dictate), and the host side of the phone's voice mode.
+	const complete = registryComplete(() => ctx!, () => loadVoiceConfig().model);
+	const voice = new VoiceHost({ ctx: () => ctx!, config: () => loadVoiceConfig(), stateDir: speechDir, complete });
 	registerDictation(pi, complete);
 	pi.on("before_agent_start", async (e) => {
 		const mode = voice.listeningMode();

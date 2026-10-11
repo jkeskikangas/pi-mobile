@@ -1,21 +1,23 @@
 // Voice input in the terminal: speak instead of typing, review the distilled prompt in the editor.
 //
-//   alt+m or /voice      start listening; again (or Enter) to finish; Esc cancels
-//   /voice raw           put the verbatim transcript of the last dictation in the editor
-//   /voice undo          restore the editor to what it was before the last dictation
-//   /voice send|review   after dictation, send right away or leave it in the editor (default)
-//   /voice status        recogniser, model and microphone in use
+//   alt+m or /dictate      start listening; again (or Enter) to finish; Esc cancels
+//   /dictate raw           put the verbatim transcript of the last dictation in the editor
+//   /dictate undo          restore the editor to what it was before the last dictation
+//   /dictate send|review   after dictation, send right away or leave it in the editor (default)
+//   /dictate status        recogniser, model and microphone in use
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadConfig, saveConfig, stateDir, writePrivate } from "../store.ts";
+import { loadVoiceConfig, saveVoiceConfig, speechDir, writePrivate } from "./config.ts";
 import { Dictionary } from "./dictionary.ts";
 import { distill, editorText } from "./distill.ts";
-import { level, MIC_RATE, type Mic, startMic } from "./mic.ts";
+import { level, MIC_RATE, type Mic, micDevice, startMic } from "./mic.ts";
 import { type Complete, registryComplete } from "./model.ts";
 import { chooseStt, type LiveTranscription, prewarmApple } from "./stt.ts";
 import { gatherVocabulary, recognizerHints } from "./vocab.ts";
 
-const WIDGET = "pi-mobile-voice";
+const WIDGET = "pi-speech-dictation";
+// pi-mobile registers dictation itself and also bundles pi-speech: whichever loads first owns it.
+const CLAIM = Symbol.for("pi-speech.dictation");
 const MAX_MS = 5 * 60_000;
 const SILENCE_STOP_MS = 30_000;
 const BARS = " ▁▂▃▄▅▆▇█";
@@ -28,20 +30,26 @@ interface Last {
 }
 
 export function registerDictation(pi: ExtensionAPI, complete?: Complete): void {
+	const g = globalThis as Record<symbol, unknown>;
+	if (g[CLAIM]) return;
+	const claim = {};
+	g[CLAIM] = claim;
 	let ctx: ExtensionContext | undefined;
 	let rec: Recording | undefined;
 	let last: Last | undefined;
 	let clearTimer: NodeJS.Timeout | undefined;
-	const done = complete ?? registryComplete(() => ctx!, () => loadConfig().voice?.model);
+	const done = complete ?? registryComplete(() => ctx!, () => loadVoiceConfig().model);
 
 	pi.on("session_start", async (_e, c) => {
 		ctx = c;
 		// Only in a real interactive terminal (not tests, print or RPC modes).
-		const cfg = loadConfig().voice;
-		if (c.mode === "tui" && process.stdout.isTTY && (cfg?.stt ?? "auto") !== "openai") prewarmApple(stateDir(), cfg?.locale);
+		const cfg = loadVoiceConfig();
+		if (c.mode === "tui" && process.stdout.isTTY && (cfg.stt ?? "auto") !== "openai") prewarmApple(speechDir(), cfg.locale);
 	});
 	pi.on("session_shutdown", async () => {
 		rec?.cancel("");
+		// A reload loads both extensions again; let the next runtime claim dictation.
+		if (g[CLAIM] === claim) delete g[CLAIM];
 	});
 	pi.on("input", async (e: any) => {
 		if (!rec && ctx?.hasUI) ctx.ui.setWidget(WIDGET, undefined);
@@ -49,7 +57,7 @@ export function registerDictation(pi: ExtensionAPI, complete?: Complete): void {
 		if (last && !last.learned && typeof e?.text === "string" && e.source !== "extension") {
 			last.learned = true;
 			try {
-				new Dictionary(stateDir(), writePrivate).learn(last.distilled, e.text);
+				new Dictionary(speechDir(), writePrivate).learn(last.distilled, e.text);
 			} catch {}
 		}
 		return { action: "continue" as const };
@@ -77,7 +85,7 @@ export function registerDictation(pi: ExtensionAPI, complete?: Complete): void {
 
 	pi.registerShortcut("alt+m", { description: "Voice input: start or finish dictation", handler: toggle });
 
-	pi.registerCommand("voice", {
+	pi.registerCommand("dictate", {
 		description: "Voice input: dictate, get a clean prompt to review (alt+m). raw | undo | send | review | status",
 		getArgumentCompletions: (prefix) =>
 			["raw", "undo", "send", "review", "status"].filter((s) => s.startsWith(prefix.trim())).map((s) => ({ value: s, label: s })),
@@ -91,25 +99,23 @@ export function registerDictation(pi: ExtensionAPI, complete?: Complete): void {
 				return;
 			}
 			if (sub === "send" || sub === "review") {
-				const cfg = loadConfig();
-				cfg.voice = { ...cfg.voice, afterDictation: sub };
-				saveConfig(cfg);
+				saveVoiceConfig({ ...loadVoiceConfig(), afterDictation: sub });
 				return c.ui.notify(sub === "send" ? "Dictation is sent as soon as it is distilled." : "Dictation goes to the editor for review.", "info");
 			}
 			if (sub === "status") {
-				const cfg = loadConfig().voice;
+				const cfg = loadVoiceConfig();
 				let stt = "";
 				try {
-					stt = chooseStt(cfg, stateDir()).name;
+					stt = chooseStt(cfg, speechDir()).name;
 				} catch (e: any) {
 					stt = `unavailable (${e.message})`;
 				}
 				return c.ui.notify(
-					`Voice input: recogniser ${stt}${cfg?.locale ? ` (${cfg.locale})` : ""} · model ${cfg?.model ?? "auto (fast model you have)"} · after dictation: ${cfg?.afterDictation ?? "review"} · mic ${process.env.PI_MOBILE_MIC ?? "default"}`,
+					`Voice input: recogniser ${stt}${cfg?.locale ? ` (${cfg.locale})` : ""} · model ${cfg?.model ?? "auto (fast model you have)"} · after dictation: ${cfg?.afterDictation ?? "review"} · mic ${micDevice() ?? "default"}`,
 					"info",
 				);
 			}
-			c.ui.notify("Usage: /voice [raw|undo|send|review|status]  (alt+m starts and finishes dictation)", "info");
+			c.ui.notify("Usage: /dictate [raw|undo|send|review|status]  (alt+m starts and finishes dictation)", "info");
 		},
 	});
 }
@@ -156,9 +162,9 @@ class Recording {
 			return { consume: true };
 		});
 		try {
-			const cfg = loadConfig().voice;
-			const stt = chooseStt(cfg, stateDir());
-			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[], new Dictionary(stateDir(), writePrivate).top());
+			const cfg = loadVoiceConfig();
+			const stt = chooseStt(cfg, speechDir());
+			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[], new Dictionary(speechDir(), writePrivate).top());
 			this.live = stt.live!(MIC_RATE, recognizerHints(vocab));
 			this.live.onPartial = (t) => {
 				this.partial = t;
@@ -198,7 +204,7 @@ class Recording {
 			if (!raw) return this.cancel("Didn't catch anything. Check the microphone, or speak a little closer.", "warning");
 			this.partial = raw;
 			this.render();
-			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[], new Dictionary(stateDir(), writePrivate).top());
+			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[], new Dictionary(speechDir(), writePrivate).top());
 			const d = await distill(raw, vocab, this.c.sessionManager.getBranch() as any[], this.complete, {
 				draft: this.before,
 				signal: this.abort.signal,
@@ -207,7 +213,7 @@ class Recording {
 			const text = d.by === "model" ? editorText(d) : this.before ? `${this.before} ${editorText(d)}` : editorText(d);
 			this.state = "done";
 			this.cleanup();
-			const send = loadConfig().voice?.afterDictation === "send" && !d.unclear.length;
+			const send = loadVoiceConfig().afterDictation === "send" && !d.unclear.length;
 			const words = raw.split(/\s+/).length;
 			const secs = Math.round((Date.now() - this.startedAt) / 1000);
 			const t2 = this.c.ui.theme;
@@ -218,7 +224,7 @@ class Recording {
 			} else this.c.ui.setEditorText(text);
 			const how = d.by === "model" ? "distilled" : `cleaned up locally${d.error ? ` (model unavailable: ${d.error.slice(0, 80)})` : ""}`;
 			this.c.ui.setWidget(WIDGET, [
-				t2.fg("dim", `Dictated ${secs}s, ${words} words → ${how}${send ? " and sent" : ""}${d.unclear.length ? ` · ${d.unclear.length} unclear point${d.unclear.length > 1 ? "s" : ""} noted` : ""} · /voice raw for the transcript · /voice undo restores`),
+				t2.fg("dim", `Dictated ${secs}s, ${words} words → ${how}${send ? " and sent" : ""}${d.unclear.length ? ` · ${d.unclear.length} unclear point${d.unclear.length > 1 ? "s" : ""} noted` : ""} · /dictate raw for the transcript · /dictate undo restores`),
 			]);
 		} catch (e: any) {
 			if (this.state === "thinking") this.cancel(`Voice input: ${e?.message ?? e}`, "error");

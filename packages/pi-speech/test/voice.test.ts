@@ -2,13 +2,13 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DISTILL_SYSTEM, distill, distillPrompt, editorText, heuristicDistill, parseDistilled } from "../src/voice/distill.ts";
-import { VoiceHost } from "../src/voice/host.ts";
-import { pickVoiceModel } from "../src/voice/model.ts";
-import { chatgptAccountId, createCall, realtimeSession, VOICE_TOOLS, voiceInstructions } from "../src/voice/realtime.ts";
-import { agentVoiceNote, BRIEF_SYSTEM, brief, changedAreas, describeActivity, digestText, heuristicBrief, parseBrief, runDigest, speakable } from "../src/voice/speech.ts";
-import { pcmToWav } from "../src/voice/stt.ts";
-import { extractNames, matchNames, recentNames, recognizerHints, sayName, spokenWords, type Vocabulary } from "../src/voice/vocab.ts";
+import { DISTILL_SYSTEM, distill, distillPrompt, editorText, heuristicDistill, parseDistilled } from "../src/distill.ts";
+import { VoiceHost } from "../src/host.ts";
+import { pickVoiceModel } from "../src/model.ts";
+import { chatgptAccountId, createCall, realtimeSession, VOICE_TOOLS, voiceInstructions } from "../src/realtime.ts";
+import { agentVoiceNote, BRIEF_SYSTEM, brief, changedAreas, describeActivity, digestText, heuristicBrief, parseBrief, runDigest, speakable } from "../src/speech.ts";
+import { pcmToWav } from "../src/stt.ts";
+import { extractNames, matchNames, recentNames, recognizerHints, sayName, spokenWords, type Vocabulary } from "../src/vocab.ts";
 
 const vocab: Vocabulary = {
 	project: "pi-mobile",
@@ -47,7 +47,7 @@ test("name matching stays fast on a large repo", () => {
 });
 
 test("declared code symbols, compound names first", async () => {
-	const { parseSymbols } = await import("../src/voice/vocab.ts");
+	const { parseSymbols } = await import("../src/vocab.ts");
 	const out = "const text\nconst text\nconst text\nfunction getUserById\nclass Hub\ndef parse_config\nlet x\nconst default\nfn validateToken";
 	// Compound names outrank a local used three times; names under four letters and keywords are dropped.
 	assert.deepEqual(parseSymbols(out), ["getUserById", "parse_config", "validateToken", "text"]);
@@ -97,7 +97,7 @@ test("distill uses the model and falls back to local cleanup", async () => {
 });
 
 test("recogniser loops are collapsed before distillation", async () => {
-	const { collapseRepeats } = await import("../src/voice/distill.ts");
+	const { collapseRepeats } = await import("../src/distill.ts");
 	assert.equal(collapseRepeats("fix the hub. Thank you. Thank you. Thank you. Thank you. Thank you."), "fix the hub. Thank you.");
 	assert.equal(collapseRepeats("URL URL URL URL URL"), "URL");
 	assert.equal(collapseRepeats("no, no, no, that's wrong"), "no, no, no, that's wrong", "three times is still speech");
@@ -300,7 +300,7 @@ test("voice host: realtime needs credentials and is explained when missing", asy
 });
 
 test("OpenAI transcription: vocabulary as a prompt, and a leaked prompt is not speech", async () => {
-	const { openaiProvider } = await import("../src/voice/stt.ts");
+	const { openaiProvider } = await import("../src/stt.ts");
 	let sent: FormData | undefined;
 	const reply = (text: string) =>
 		(async (_u: string, init: any) => {
@@ -316,7 +316,7 @@ test("OpenAI transcription: vocabulary as a prompt, and a leaked prompt is not s
 });
 
 test("speech from the computer: a local OpenAI-compatible server, OpenAI, or the phone's own voice", async () => {
-	const { synthesize, ttsTarget } = await import("../src/voice/tts.ts");
+	const { synthesize, ttsTarget } = await import("../src/tts.ts");
 	assert.equal(ttsTarget({}, {}), undefined);
 	assert.equal(ttsTarget({ tts: "off" }, { OPENAI_API_KEY: "sk" }), undefined);
 	assert.equal(ttsTarget({}, { OPENAI_API_KEY: "sk" })?.model, "gpt-4o-mini-tts");
@@ -336,7 +336,7 @@ test("speech from the computer: a local OpenAI-compatible server, OpenAI, or the
 });
 
 test("a personal dictionary is learned from corrections to dictations", async () => {
-	const { corrections, Dictionary } = await import("../src/voice/dictionary.ts");
+	const { corrections, Dictionary } = await import("../src/dictionary.ts");
 	assert.deepEqual(corrections("Make the get user function return undefined.", "Make the `fetchUser` function return undefined."), [{ from: "get user", to: "`fetchUser`" }]);
 	assert.deepEqual(corrections("Please fix the bug.", "Please fix the nasty bug quickly."), [], "ordinary rewording is not learned");
 	assert.deepEqual(corrections("Deploy to the cube cluster.", "Deploy to the kube-prod cluster."), [{ from: "cube", to: "kube-prod" }]);
@@ -360,8 +360,8 @@ test("PCM is wrapped as WAV", () => {
 });
 
 test("voice personas change how pi sounds, matched across realtime, the computer's speech and the phone", async () => {
-	const { chooseVoice, PERSONAS, personaList } = await import("../src/voice/personas.ts");
-	const { ttsTarget } = await import("../src/voice/tts.ts");
+	const { chooseVoice, PERSONAS, personaList } = await import("../src/personas.ts");
+	const { ttsTarget } = await import("../src/tts.ts");
 	assert.equal(new Set(PERSONAS.map((p) => p.id)).size, PERSONAS.length);
 	assert.equal(chooseVoice(undefined, undefined).realtime, "marin", "default");
 	assert.equal(chooseVoice({ realtimeVoice: "verse" }, undefined).realtime, "verse", "the config applies until the phone picks");

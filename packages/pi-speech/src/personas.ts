@@ -3,7 +3,7 @@
 // voice, its delivery and pace, matched across the realtime model, the computer's speech and, as
 // far as the phone allows, the phone's own voice.
 
-import type { VoiceConfig } from "../store.ts";
+import type { VoiceConfig } from "./config.ts";
 
 export interface Persona {
 	id: string;

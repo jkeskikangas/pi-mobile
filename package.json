@@ -38,8 +38,11 @@
       "./src/index.ts"
     ]
   },
+  "workspaces": [
+    "packages/pi-speech"
+  ],
   "scripts": {
-    "test": "PI_MOBILE_TAILSCALE=off node --experimental-strip-types --test test/*.test.ts",
+    "test": "PI_MOBILE_TAILSCALE=off node --experimental-strip-types --test test/*.test.ts packages/pi-speech/test/*.test.ts",
     "test:relay": "node --experimental-strip-types --no-warnings --test relay/test/*.test.ts",
     "typecheck": "tsc --noEmit -p .",
     "ui": "node --experimental-strip-types --no-warnings test/ui/fixture.ts",
@@ -47,9 +50,13 @@
     "vectors": "node --experimental-strip-types --no-warnings test/vectors.ts"
   },
   "dependencies": {
+    "pi-speech": "^0.1.0",
     "qrcode": "^1.5.4",
     "tweetnacl": "^1.0.3"
   },
+  "bundleDependencies": [
+    "pi-speech"
+  ],
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*"

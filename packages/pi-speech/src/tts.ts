@@ -3,7 +3,7 @@
 // (`voice.ttsUrl`), or OpenAI's gpt-4o-mini-tts with OPENAI_API_KEY. Without either, the phone
 // uses its own speech synthesis.
 
-import type { VoiceConfig } from "../store.ts";
+import type { VoiceConfig } from "./config.ts";
 import { chooseVoice } from "./personas.ts";
 
 export const TTS_INSTRUCTIONS =

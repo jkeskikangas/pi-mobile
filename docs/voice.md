@@ -66,23 +66,25 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 
 ### Modules
 
+The computer side lives in the `pi-speech` package (`packages/pi-speech/`, an npm workspace): its own pi extension for terminal dictation, and the library pi-mobile's bridge uses for the phone. pi-mobile depends on it and bundles it. Settings and the learned dictionary are in `~/.pi/agent/pi-speech/`, copied once from pi-mobile's `"voice"` settings. The phone side (`web/voice*.js`) stays in pi-mobile.
+
 | File | Responsibility |
 |---|---|
-| `src/voice/vocab.ts` | Workspace vocabulary: tracked files, branch words, declared code symbols (`git grep`), names in recent session messages; spoken forms; trigram-indexed fuzzy matching of what was heard to real names. |
-| `src/voice/distill.ts` | The intent-distillation prompt and its output parsing; heuristic fallback (fillers, "scratch that", near-exact names, flags mid-sentence corrections) when no model is reachable. |
-| `src/voice/speech.ts` | Writing for the ear: run digest by area and significant action, the spoken-brief prompt, `speakable()`, activity descriptions, significance rules, the agent's voice note. |
-| `src/voice/host.ts` | The bridge's voice requests: transcribe, distill, brief, details, realtime call setup, listening state. |
-| `src/voice/stt.ts` | STT providers: Apple SpeechAnalyzer helper (compiled once into the state dir), OpenAI transcription; selection. |
-| `src/voice/apple-stt.swift` | On-device recogniser: file or streaming stdin PCM, contextual strings, JSON-lines partials. |
-| `src/voice/mic.ts` | Microphone capture via ffmpeg (avfoundation / pulse / dshow, or a file) as 16 kHz PCM with a level meter. |
-| `src/voice/model.ts` | Fast-model candidates the user has credentials for; one completion, skipping models that fail. |
-| `src/voice/realtime.ts` | Realtime session config (voice-layer instructions and tools) and the SDP relay to OpenAI. |
-| `src/voice/dictation.ts` | Terminal voice input: `/voice`, alt+m, live widget, review flow. |
+| `packages/pi-speech/src/vocab.ts` | Workspace vocabulary: tracked files, branch words, declared code symbols (`git grep`), names in recent session messages; spoken forms; trigram-indexed fuzzy matching of what was heard to real names. |
+| `packages/pi-speech/src/distill.ts` | The intent-distillation prompt and its output parsing; heuristic fallback (fillers, "scratch that", near-exact names, flags mid-sentence corrections) when no model is reachable. |
+| `packages/pi-speech/src/speech.ts` | Writing for the ear: run digest by area and significant action, the spoken-brief prompt, `speakable()`, activity descriptions, significance rules, the agent's voice note. |
+| `packages/pi-speech/src/host.ts` | The bridge's voice requests: transcribe, distill, brief, details, realtime call setup, listening state. |
+| `packages/pi-speech/src/stt.ts` | STT providers: Apple SpeechAnalyzer helper (compiled once into the state dir), OpenAI transcription; selection. |
+| `packages/pi-speech/src/apple-stt.swift` | On-device recogniser: file or streaming stdin PCM, contextual strings, JSON-lines partials. |
+| `packages/pi-speech/src/mic.ts` | Microphone capture via ffmpeg (avfoundation / pulse / dshow, or a file) as 16 kHz PCM with a level meter. |
+| `packages/pi-speech/src/model.ts` | Fast-model candidates the user has credentials for; one completion, skipping models that fail. |
+| `packages/pi-speech/src/realtime.ts` | Realtime session config (voice-layer instructions and tools) and the SDP relay to OpenAI. |
+| `packages/pi-speech/src/dictation.ts` | Terminal voice input: `/dictate`, alt+m, live widget, review flow. Registered once even when pi-mobile and pi-speech both load. |
 | `web/voice.js` | Composer dictation and phone voice mode: realtime client, basic-voice cascade, earcons, wake lock, media session, dialogs by voice. |
 | `web/voice-core.js` | Pure logic shared with tests: voice commands and help, dialog answers, the undo-window rule, backchannels and echo, significance, VAD, speech chunking, earcon specs. |
-| `src/voice/dictionary.ts` | The personal dictionary: corrections learned from edits to distilled dictations. |
-| `src/voice/personas.ts` | Voice personas: voice names per engine, delivery and pace; the phone's pick versus the config's voices. |
-| `src/voice/tts.ts` | Optional speech from the computer for basic voice (any OpenAI-compatible `/v1/audio/speech`). |
+| `packages/pi-speech/src/dictionary.ts` | The personal dictionary: corrections learned from edits to distilled dictations. |
+| `packages/pi-speech/src/personas.ts` | Voice personas: voice names per engine, delivery and pace; the phone's pick versus the config's voices. |
+| `packages/pi-speech/src/tts.ts` | Optional speech from the computer for basic voice (any OpenAI-compatible `/v1/audio/speech`). |
 
 ### Bridge requests added
 
@@ -134,7 +136,7 @@ URL=$(PI_CODING_AGENT_DIR=/tmp/piagent node --experimental-strip-types test/e2e/
 node test/e2e/browser.mjs dictate "$URL" speech.wav     # composer dictation
 node test/e2e/browser.mjs voice "$URL" question.wav 60  # voice mode
 # terminal dictation without a live mic:
-PI_MOBILE_MIC=file:speech.wav pi -e ./src/index.ts      # then alt+m … Enter
+PI_SPEECH_MIC=file:speech.wav pi -e ./src/index.ts      # then alt+m … Enter
 ```
 
 Observed:

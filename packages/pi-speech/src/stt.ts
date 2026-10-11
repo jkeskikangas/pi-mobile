@@ -4,15 +4,14 @@
 //   openai — gpt-4o-transcribe with OPENAI_API_KEY (any OS), vocabulary passed as a prompt.
 
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { randomId } from "../crypto.ts";
-import type { VoiceConfig } from "../store.ts";
+import type { VoiceConfig } from "./config.ts";
 
 const run = promisify(execFile);
 const SWIFT_SOURCE = fileURLToPath(new URL("./apple-stt.swift", import.meta.url));
@@ -53,7 +52,7 @@ export function extFor(mime: string): string {
 let ffmpegPath: string | null | undefined;
 export async function findFfmpeg(): Promise<string | null> {
 	if (ffmpegPath !== undefined) return ffmpegPath;
-	for (const p of [process.env.PI_MOBILE_FFMPEG, "ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]) {
+	for (const p of [process.env.PI_SPEECH_FFMPEG, process.env.PI_MOBILE_FFMPEG, "ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]) {
 		if (!p) continue;
 		try {
 			await run(p, ["-version"], { timeout: 4000 });
@@ -65,7 +64,7 @@ export async function findFfmpeg(): Promise<string | null> {
 
 /** Writes `audio` to a temp file, converted to 16 kHz mono WAV when ffmpeg is available. */
 async function toWavFile(audio: Buffer, mime: string): Promise<{ path: string; cleanup: () => void }> {
-	const dir = join(tmpdir(), `pi-mobile-${randomId(6)}`);
+	const dir = join(tmpdir(), `pi-speech-${randomBytes(6).toString("hex")}`);
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const cleanup = () => rmSync(dir, { recursive: true, force: true });
 	const src = join(dir, `in.${extFor(mime)}`);

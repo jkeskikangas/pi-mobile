@@ -1,0 +1,46 @@
+{
+  "name": "pi-speech",
+  "version": "0.1.0",
+  "description": "Voice for pi: dictation that turns speech into the prompt you meant, and the speech side of hands-free voice mode.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "voice",
+    "dictation",
+    "speech-to-text"
+  ],
+  "license": "MIT",
+  "author": "Jarno Keskikangas",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jkeskikangas/pi-mobile.git",
+    "directory": "packages/pi-speech"
+  },
+  "homepage": "https://github.com/jkeskikangas/pi-mobile/tree/main/packages/pi-speech#readme",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "index.ts",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./index.ts",
+    "./*": "./src/*.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

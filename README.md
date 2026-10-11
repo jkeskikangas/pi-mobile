@@ -82,13 +82,14 @@ Design notes, research and verification: [docs/voice.md](docs/voice.md).
 
 ### Dictation: speak instead of typing
 
-In the terminal press **alt+m** (or `/voice`), talk, then press **Enter**. On the phone, **hold the mic** in the composer and let go, or tap to start and tap ✓.
+In the terminal press **alt+m** (or `/dictate`), talk, then press **Enter**. On the phone, **hold the mic** in the composer and let go, or tap to start and tap ✓.
 
 What lands in the editor is the message you meant, not a transcript: corrections applied ("null, no wait, undefined" → `undefined`), fillers gone, several asks turned into a list, and spoken names matched to real ones ("get user by ID in off dot ts" → `getUserById` in `src/auth.ts`). Anything ambiguous is listed as *Unclear* instead of guessed. You review it and send.
 
 - **Edit by voice.** With text in the editor, "make that a list" or "drop the second point" edits it. Names you correct are remembered.
 - **On-device recognition on a Mac.** On macOS 26 it uses Apple's SpeechAnalyzer: free, private, with live text while you talk (a small Swift helper compiles on first use; needs the Xcode command-line tools). Elsewhere, set `OPENAI_API_KEY` for `gpt-4o-transcribe`.
-- `/voice raw` (verbatim), `/voice undo`, `/voice send` (send right after), `/voice status`.
+- `/dictate raw` (verbatim), `/dictate undo`, `/dictate send` (send right after), `/dictate status`.
+- Terminal dictation without the phone: install just [pi-speech](packages/pi-speech/README.md) (`pi install npm:pi-speech`). pi-mobile includes it.
 
 ### Voice mode: a conversation when you can't look
 
@@ -104,7 +105,7 @@ Tap the **bars icon** in the phone's header. Talk; pi answers out loud. On the c
 
 It uses a realtime speech model (`gpt-realtime-2`) over WebRTC straight from the phone, opened by pi with your ChatGPT sign-in or `OPENAI_API_KEY`; no token or audio passes through your computer. Without realtime it falls back to basic voice: recognition on your computer, a spoken brief, and the phone's speech (or any OpenAI-compatible speech endpoint via `voice.ttsUrl`, such as a local Kokoro).
 
-Limits in the browser: on the phone, voice needs the HTTPS address. On iPhone the microphone stops when the screen locks, so voice mode keeps the screen awake. The [iPhone app](#iphone-app) lifts both. Web apps can't use CarPlay; audio plays through the car as usual. Settings are in `~/.pi/agent/pi-mobile/config.json` under `"voice"`: `stt` (`auto`/`apple`/`openai`), `locale` (e.g. `"fi-FI"`), `model` (`provider/id` for dictation and spoken briefs), `realtime` (`auto`/`off`), `realtimeModel`, `realtimeVoice` (used until a phone picks a voice), `turnDetection` (`semantic`/`server`), `tts` (`auto`/`off`), `ttsUrl`, `ttsModel`, `ttsVoice` (likewise; kept for local servers other than Kokoro), `ttsKey`, `afterDictation` (`review`/`send`). `PI_MOBILE_MIC` picks the terminal's microphone.
+Limits in the browser: on the phone, voice needs the HTTPS address. On iPhone the microphone stops when the screen locks, so voice mode keeps the screen awake. The [iPhone app](#iphone-app) lifts both. Web apps can't use CarPlay; audio plays through the car as usual. Settings are in `~/.pi/agent/pi-speech/config.json` (copied once from the older `"voice"` section of pi-mobile's `config.json`): `stt` (`auto`/`apple`/`openai`), `locale` (e.g. `"fi-FI"`), `model` (`provider/id` for dictation and spoken briefs), `realtime` (`auto`/`off`), `realtimeModel`, `realtimeVoice` (used until a phone picks a voice), `turnDetection` (`semantic`/`server`), `tts` (`auto`/`off`), `ttsUrl`, `ttsModel`, `ttsVoice` (likewise; kept for local servers other than Kokoro), `ttsKey`, `afterDictation` (`review`/`send`). `PI_SPEECH_MIC` picks the terminal's microphone.
 
 ## herdr (optional)
 

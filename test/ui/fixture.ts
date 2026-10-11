@@ -16,7 +16,7 @@ import { Hub } from "../../src/hub.ts";
 import { HubLink } from "../../src/link.ts";
 import type { AgentInfo, Item } from "../../src/protocol.ts";
 import { DeviceStore, OfferStore, PushStore } from "../../src/store.ts";
-import { personaList } from "../../src/voice/personas.ts";
+import { personaList } from "pi-speech/personas";
 
 const port = Number(process.argv[2] ?? 7979);
 const dir = mkdtempSync(join(tmpdir(), "pi-mobile-ui-"));

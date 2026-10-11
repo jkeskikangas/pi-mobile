@@ -1,4 +1,4 @@
-// On-device speech recognition for pi-mobile with Apple's SpeechAnalyzer (macOS 26+).
+// On-device speech recognition for pi-speech with Apple's SpeechAnalyzer (macOS 26+).
 // No account, no network after the one-time model download, contextual strings for code names.
 //
 //   apple-stt file <audio-file> [--words a,b,c] [--locale en-US]

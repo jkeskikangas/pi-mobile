@@ -3,7 +3,7 @@
 // note that tells the agent its user is listening rather than reading.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type VoiceConfig, writePrivate } from "../store.ts";
+import { type VoiceConfig, writePrivate } from "./config.ts";
 import { Dictionary } from "./dictionary.ts";
 import { distill, editorText } from "./distill.ts";
 import type { Complete } from "./model.ts";

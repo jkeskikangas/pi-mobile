@@ -22,12 +22,12 @@ The practices the voice features are built on, where each lives in the code, why
 ## 2. Voice input (dictation)
 
 ### 2.1 Distil intent, don't transcribe
-**What:** a model rewrites the dictation into the message you meant: final intent after self-corrections ("null, no wait, undefined" → `undefined`), fillers and restarts gone, several asks turned into a goal plus a short list, every concrete detail kept, nothing added. `src/voice/distill.ts` (`DISTILL_SYSTEM`).
+**What:** a model rewrites the dictation into the message you meant: final intent after self-corrections ("null, no wait, undefined" → `undefined`), fillers and restarts gone, several asks turned into a goal plus a short list, every concrete detail kept, nothing added. `packages/pi-speech/src/distill.ts` (`DISTILL_SYSTEM`).
 **Why:** speech has more bandwidth than typing but is redundant and self-correcting; a verbatim transcript is a worse prompt than what you would have typed.
 **Evidence:** *Source*: Wispr Flow backtrack and smart formatting ([docs](https://docs.wisprflow.ai/articles/5373093536-how-do-i-use-smart-formatting-and-backtrack)); Superwhisper post-processing "modes" (voice-research.md §3). *Measured*: "So in off.ts, make get user by ID return null instead of throwing. No wait, return undefined…" → "In `src/auth.ts`, make `getUserById` return `undefined` instead of throwing…" in 2.5–3.5 s.
 
 ### 2.2 Ground names in the workspace, before and after recognition
-**What:** tracked files, declared symbols (`git grep` of declarations, compound names first), names from the recent conversation and branch words become (a) recogniser hints and (b) a candidate list in the distillation prompt, with trigram-indexed fuzzy matches ("orthodotts" → `auth.ts`). A name the dictation uses that does not exist is treated as misheard. `src/voice/vocab.ts`, `distill.ts`.
+**What:** tracked files, declared symbols (`git grep` of declarations, compound names first), names from the recent conversation and branch words become (a) recogniser hints and (b) a candidate list in the distillation prompt, with trigram-indexed fuzzy matches ("orthodotts" → `auth.ts`). A name the dictation uses that does not exist is treated as misheard. `packages/pi-speech/src/vocab.ts`, `distill.ts`.
 **Why:** recognisers mangle code names; matching by sound against what actually exists fixes most of it, and biasing the recogniser prevents some of it.
 **Evidence:** *Source*: Claude Code key terms from project name, branch and recent files ([voice system notes](https://claude-wiki.com/voice-system.html)); Wispr Flow variable recognition ([docs](https://docs.wisprflow.ai/articles/8554805225-variable-recognition)); Apple SpeechAnalyzer contextual strings. *Measured*: "off.ts" (no such file) → `src/auth.ts`; "validate token check" → `validateToken`. Matching a 5,000-file repo takes ~0.2 s (unit test).
 
@@ -37,7 +37,7 @@ The practices the voice features are built on, where each lives in the code, why
 **Evidence:** *Source*: OpenAI GPT-Live prompting guide recommends targeted clarification of just the unclear part ([guide](https://developers.openai.com/api/docs/guides/live-prompting)). *Measured*: a dictation cut off mid-sentence produced "Unclear: What change should be made to `validateToken`?" instead of an invented requirement.
 
 ### 2.4 You stay the editor
-**What:** the result goes to the editor, never straight to the model (opt-in `/voice send`); raw transcript and undo are one step away (`/voice raw|undo`, phone chips). `src/voice/dictation.ts`, `web/voice.js`.
+**What:** the result goes to the editor, never straight to the model (opt-in `/dictate send`); raw transcript and undo are one step away (`/dictate raw|undo`, phone chips). `packages/pi-speech/src/dictation.ts`, `web/voice.js`.
 **Why:** distillation can be wrong; review costs a glance at a desk.
 **Evidence:** *Source*: Codex CLI `/voice` shows a live transcript you review before running ([report](https://www.chatgptaihub.com/codex-cli-0-155-experimental-voice-live-transcripts-microphone-workspace-files-review/)); Claude Code auto-submits only with 3+ words and optionally ([docs](https://code.claude.com/docs/en/voice-dictation)).
 
@@ -56,11 +56,11 @@ The practices the voice features are built on, where each lives in the code, why
 **Evidence:** *Source*: Wispr Flow Command Mode ([docs](https://docs.wisprflow.ai/articles/4816967992-how-to-use-command-mode)); Typeless and Shaberu inline commands (voice-research-2.md §6).
 
 ### 2.8 Learn from corrections
-**What:** names you replace in a distilled dictation before sending ("get user" → `fetchUser`) go into a personal dictionary (`voice-dictionary.json`) that feeds recogniser hints and the prompt. `src/voice/dictionary.ts`.
+**What:** names you replace in a distilled dictation before sending ("get user" → `fetchUser`) go into a personal dictionary (`voice-dictionary.json`) that feeds recogniser hints and the prompt. `packages/pi-speech/src/dictionary.ts`.
 **Evidence:** *Source*: Wispr Flow adds corrected spellings to the personal dictionary automatically ([features](https://wisprflow.ai/features)).
 
 ### 2.9 Private and free by default; prewarm
-**What:** on macOS 26 recognition is Apple's on-device SpeechAnalyzer through a small Swift helper, compiled and its model installed in the background at startup; `OPENAI_API_KEY` switches to `gpt-4o-transcribe`. Distillation uses a fast model you already have, skipping models your account can't use. `src/voice/stt.ts`, `apple-stt.swift`, `model.ts`.
+**What:** on macOS 26 recognition is Apple's on-device SpeechAnalyzer through a small Swift helper, compiled and its model installed in the background at startup; `OPENAI_API_KEY` switches to `gpt-4o-transcribe`. Distillation uses a fast model you already have, skipping models your account can't use. `packages/pi-speech/src/stt.ts`, `apple-stt.swift`, `model.ts`.
 **Evidence:** *Source*: SpeechAnalyzer ~1.98% WER on LibriSpeech clean at ~130 ms ([benchmark](https://huggingface.co/datasets/researchaudio/apple-speechanalyzer-vs-whisper-cpp-mac), [comparison](https://get-inscribe.com/blog/parakeet-moss-apple-speech-benchmark.html)). *Observed*: the first-ever use compiles the helper (~6 s); prewarming removes that wait.
 
 ### 2.10 Distrust recogniser artefacts
@@ -72,7 +72,7 @@ The practices the voice features are built on, where each lives in the code, why
 ## 3. Voice mode: architecture
 
 ### 3.1 A voice layer in front of the agent, relaying your own words
-**What:** a realtime speech model talks with you and delegates with `ask_pi(request)` in your words, cleaned of fillers but not rephrased; pi does the work. Messages from pi arrive as `[PI] …` context, never as instructions. `src/voice/realtime.ts`.
+**What:** a realtime speech model talks with you and delegates with `ask_pi(request)` in your words, cleaned of fillers but not rephrased; pi does the work. Messages from pi arrive as `[PI] …` context, never as instructions. `packages/pi-speech/src/realtime.ts`.
 **Evidence:** *Source*: Codex's realtime voice uses exactly this split: `background_agent` ("Do not rephrase the user's ask… pass along the user's own words") and `remain_silent`, with backend messages injected as `[BACKEND]` (openai/codex `codex-api/src/endpoint/realtime_websocket/methods_v2.rs`, voice-research.md §1); OpenAI GPT-Live client delegation ([guide](https://developers.openai.com/api/docs/guides/live-delegation.md)).
 
 ### 3.2 Credentials stay on the computer; audio goes phone ↔ model
@@ -80,11 +80,11 @@ The practices the voice features are built on, where each lives in the code, why
 **Evidence:** *Source*: Codex call creation `POST /backend-api/codex/realtime/calls` with `{sdp, session}` (`codex-api/src/endpoint/realtime_call.rs`); public API `/v1/realtime/calls` ([docs](https://developers.openai.com/api/docs/guides/realtime-conversations)). *Measured*: calls created for `gpt-realtime-2`, `gpt-realtime-1.5` and transcription sessions with a ChatGPT sign-in. *Unverified*: the ChatGPT endpoint is undocumented and may change.
 
 ### 3.3 Always have a fallback
-**What:** without realtime, "basic voice": phone VAD → recognition on the computer → distil → pi → spoken brief → speech from the computer (any OpenAI-compatible `/v1/audio/speech`, e.g. Voicebox or Kokoro) or the phone's own synthesis. `web/voice.js` cascade, `src/voice/tts.ts`.
+**What:** without realtime, "basic voice": phone VAD → recognition on the computer → distil → pi → spoken brief → speech from the computer (any OpenAI-compatible `/v1/audio/speech`, e.g. Voicebox or Kokoro) or the phone's own synthesis. `web/voice.js` cascade, `packages/pi-speech/src/tts.ts`.
 **Evidence:** *Measured*: same question answered in ~5 s through the cascade, with and without server speech.
 
 ### 3.4 Tell the agent its user is listening
-**What:** while voice mode is on, pi's system prompt gets a voice note: outcome first, one clear question, behaviour not identifiers, nothing to review on screen, confirm irreversible actions by name. Expires after 150 s without a heartbeat. `agentVoiceNote` in `src/voice/speech.ts`.
+**What:** while voice mode is on, pi's system prompt gets a voice note: outcome first, one clear question, behaviour not identifiers, nothing to review on screen, confirm irreversible actions by name. Expires after 150 s without a heartbeat. `agentVoiceNote` in `packages/pi-speech/src/speech.ts`.
 **Evidence:** *Source*: Codex switches the agent's expectations at the start and end of a voice session (`prompts/templates/realtime/realtime_start.md`, `realtime_end.md`).
 
 ---
@@ -92,7 +92,7 @@ The practices the voice features are built on, where each lives in the code, why
 ## 4. Voice mode: what is said
 
 ### 4.1 Two output channels
-**What:** pi writes as usual (the transcript keeps everything); what you *hear* is a separate spoken brief written for the ear. `BRIEF_SYSTEM`, `runDigest` in `src/voice/speech.ts`.
+**What:** pi writes as usual (the transcript keeps everything); what you *hear* is a separate spoken brief written for the ear. `BRIEF_SYSTEM`, `runDigest` in `packages/pi-speech/src/speech.ts`.
 **Why:** written answers contain structure, code and lists that do not survive being read aloud.
 **Evidence:** *Source*: Codex's voice prompt: don't read code, diffs or tables; give the takeaway (voice-research.md §1); Amazon cognitive-load guidance (above).
 
@@ -125,7 +125,7 @@ The practices the voice features are built on, where each lives in the code, why
 **Evidence:** *Source*: Codex's voice prompt keeps stated preferences for the task; automatic hints help first use while regular users prefer help on request ([CUI 2020 study](https://www.porcheron.uk/assets/pubs/2020/kirschthaler2020what.pdf)).
 
 ### 4.9 The voice is a persona; the conversation is not
-**What:** four personas (Marin, Coral, Cedar, Ash) set the voice, its delivery and its pace, matched across the realtime model, the computer's speech (OpenAI or Kokoro voice names) and, by name and pitch, the phone's own voice. What is said, and how much, is the same for every persona: the rules in this section apply unchanged. Picked per phone, with a sample; in a realtime call the voice is fixed once it has spoken, so a change redials. `src/voice/personas.ts`, `voiceSheet` in `web/voice.js`.
+**What:** four personas (Marin, Coral, Cedar, Ash) set the voice, its delivery and its pace, matched across the realtime model, the computer's speech (OpenAI or Kokoro voice names) and, by name and pitch, the phone's own voice. What is said, and how much, is the same for every persona: the rules in this section apply unchanged. Picked per phone, with a sample; in a realtime call the voice is fixed once it has spoken, so a change redials. `packages/pi-speech/src/personas.ts`, `voiceSheet` in `web/voice.js`.
 **Evidence:** *Pattern*: ChatGPT and Gemini offer a handful of named voices rather than separate gender or style settings. *Product decision*: conversation style follows this document and the minimum-sufficient-output policy; only how it sounds is tunable.
 
 ---
