@@ -15,13 +15,16 @@ enum VoiceHost {
     static func start(model: AppModel, agent: String, machine: String, dictation: DictationControl? = nil, consent: AIConsent = .shared) async throws {
         await dictationToDrain(dictation).cancelIfActive()
         let e = model.voice
+        if !e.isOpen {
+            guard model.machines.contains(where: { $0.id == machine }) else { throw HubError.network("That computer isn't paired with this iPhone.") }
+        }
+        // Every entry point (bridge, Siri/Action button, Answer by voice) and every switch passes here:
+        // no audio leaves before the current OK.
+        try await consent.ensure(.voice)
         if e.isOpen {
             await e.start(agent: agent, machine: machine)
             return
         }
-        guard model.machines.contains(where: { $0.id == machine }) else { throw HubError.network("That computer isn't paired with this iPhone.") }
-        // Every entry point (bridge, Siri/Action button, Answer by voice) passes here: no audio leaves before the OK.
-        try await consent.ensure(.voice)
         guard await AVAudioApplication.requestRecordPermission() else {
             throw HubError.network("Microphone access is off. Turn it on in Settings.")
         }

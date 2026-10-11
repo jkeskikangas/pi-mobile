@@ -65,6 +65,8 @@ struct NativeBridge {
             return .value(["granted": .bool(consent.granted)])
         case "consent.revoke":
             consent.revoke()
+            dictation.consentRevoked()
+            if model.voice.isOpen { model.voice.stop() }
             return .value(["granted": false])
         case "dictation.cancel":
             dictation.cancel()

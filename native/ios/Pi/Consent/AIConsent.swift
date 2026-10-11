@@ -15,7 +15,8 @@ enum PiLinks {
 final class AIConsent {
     static let shared = AIConsent()
     /// 1: voice → OpenAI (realtime) + your computer; dictation → your computer → its transcription provider.
-    static let version = 1
+    /// 2: also session context to the realtime model, basic voice's speech services, dictation's AI tidy-up.
+    static let version = 2
     static let key = "pi-ai-consent"
 
     enum Purpose: Sendable { case voice, dictation }

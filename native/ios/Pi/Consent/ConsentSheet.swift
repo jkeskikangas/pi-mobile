@@ -27,20 +27,25 @@ struct ConsentSheet: View {
                     Recipient(
                         symbol: "bubble.left.and.text.bubble.right.fill",
                         title: "Voice mode",
-                        text: "Your voice streams straight to **OpenAI** for realtime speech, using your computer's ChatGPT sign-in or API key. Your computer also gets what you say and pi's replies."
+                        text: "Your voice streams straight to **OpenAI**'s realtime model, using your computer's ChatGPT sign-in or API key. OpenAI also gets the session's recent messages and tool results as context. Your computer gets what you say and pi's replies."
+                    )
+                    Recipient(
+                        symbol: "waveform",
+                        title: "Basic voice",
+                        text: "When realtime voice isn't available, **your computer** turns your speech into text and may speak replies, using the speech services it is set up with (OpenAI or another provider)."
                     )
                     Recipient(
                         symbol: "mic.fill",
                         title: "Dictation",
-                        text: "The recording goes to **your computer**, which turns it into text with the speech provider it is set up with. That may be OpenAI."
+                        text: "The recording goes to **your computer**, which transcribes it with its speech service and tidies the text with its AI model. Either may be OpenAI or another provider."
                     )
                     Recipient(
                         symbol: "lock.fill",
-                        title: "Nobody else",
+                        title: "Not the developer",
                         text: "The developer of pi never receives your audio or text. Traffic between this iPhone and your computer is end-to-end encrypted."
                     )
                 }
-                Text("OpenAI handles audio under its own privacy policy. You can turn this off any time in voice settings or the menu.")
+                Text("Each provider handles what it gets under its own privacy policy. You can turn this off any time in voice settings or the menu.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 4) {

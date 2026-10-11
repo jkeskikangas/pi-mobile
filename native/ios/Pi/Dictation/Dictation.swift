@@ -57,7 +57,10 @@ final class Dictation: DictationControl {
 
     func start() async throws {
         guard state == .idle else { throw DictationError(message: "already recording.") }
+        // A cancel (or revocation) while the consent sheet is up gives this take up.
+        let asked = take
         try await consent()
+        guard take == asked else { throw DictationError(message: "cancelled.") }
         guard state == .idle else { throw DictationError(message: "already recording.") }
         state = .starting
         let mine = take
@@ -111,6 +114,13 @@ final class Dictation: DictationControl {
         let pending = startTask
         if state != .idle { cancel() }
         _ = try? await pending?.value
+    }
+
+    /// Consent was taken back: discard any take (a pending stop then fails) and drop the page's recorder UI.
+    func consentRevoked() {
+        let active = state != .idle
+        cancel()
+        if active { js("window.PiNative.dictationEnded && window.PiNative.dictationEnded(\"Voice sharing is off.\")") }
     }
 
     private func systemEnded(_ message: String) {

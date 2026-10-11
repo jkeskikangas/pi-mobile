@@ -68,6 +68,54 @@ final class ConsentTests: XCTestCase {
         XCTAssertEqual(d.state, .idle)
     }
 
+    func testCancelWhileTheSheetIsUpGivesTheTakeUp() async {
+        let f = FakeRecorder()
+        let d = Dictation(recorder: f)
+        d.haptic = {}
+        var release: CheckedContinuation<Void, Never>?
+        d.consent = { await withCheckedContinuation { release = $0 } }
+        let start = Task { try await d.start() }
+        for _ in 0..<1000 where release == nil { await Task.yield() }
+        XCTAssertNotNil(release, "the sheet was not shown")
+        d.cancel()
+        release?.resume()
+        do { try await start.value; XCTFail("started after cancel") } catch {}
+        XCTAssertEqual(d.state, .idle)
+    }
+
+    func testRevokingDiscardsTheTakeAndEndsVoice() async throws {
+        let f = FakeRecorder()
+        let d = Dictation(recorder: f)
+        d.haptic = {}
+        d.consent = {}
+        var calls: [String] = []
+        d.js = { calls.append($0) }
+        let c = consent(answer: true)
+        c.grant()
+        let model = AppModel(store: MachineStore(keychain: Keychain(service: "pi-consent-tests-3", accessGroup: nil)), prefs: VoicePrefs(defaults: defaults))
+        var b = NativeBridge(model: model, primaryOrigin: "http://127.0.0.1:9", dictation: d)
+        b.consent = c
+        try await d.start()
+        _ = await b.handle(["type": "consent.revoke"])
+        XCTAssertEqual(d.state, .idle)
+        XCTAssertEqual(f.cancels, 1)
+        XCTAssertTrue(calls.contains { $0.contains("dictationEnded") })
+        let stop = await b.handle(["type": "dictation.stop"])
+        guard case .error = stop else { return XCTFail("audio delivered after revocation") }
+    }
+
+    func testOpenVoiceStillNeedsCurrentConsent() async throws {
+        let store = MachineStore(keychain: Keychain(service: "pi-consent-tests-4", accessGroup: nil))
+        store.clear()
+        defer { store.clear() }
+        try store.save([Machine(id: "a", name: "Mac", origin: "http://127.0.0.1:9", d: "d", k: Base64URL.encode(Data(repeating: 3, count: 32)), primary: true)])
+        let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
+        do {
+            try await VoiceHost.start(model: model, agent: "ag", machine: "a", dictation: FakeDrain(), consent: consent(answer: false))
+            XCTFail()
+        } catch { XCTAssertTrue(error is AIConsent.Declined, "consent is checked before the mic or the engine") }
+    }
+
     func testBridgeReportsAndRevokesConsent() async {
         let c = consent(answer: true)
         c.grant()

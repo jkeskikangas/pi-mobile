@@ -207,6 +207,7 @@ struct VoiceSettingsSheet: View {
                     .confirmationDialog("Stop sharing your voice?", isPresented: $confirmRevoke, titleVisibility: .visible) {
                         Button("Stop sharing and end voice mode", role: .destructive) {
                             AIConsent.shared.revoke()
+                            Dictation.shared.consentRevoked()
                             dismiss()
                             engine.stop()
                         }
