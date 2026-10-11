@@ -134,7 +134,9 @@ final class FakeHub: VoiceFleet {
     init(_ machines: [FleetMachine]) { self.machines = machines }
 
     func rpc(machine: String, _ m: String, _ p: JSON) async throws -> JSON {
-        if m == "hub" { return ["agents": .array(agents[machine] ?? [])] }
+        if m == "hub" {
+            return ["agents": .array(agents[machine] ?? []), "protocol": 1, "features": .array((features[machine] ?? VoiceEngine.neededFeatures).map { .string($0) })]
+        }
         let c = Call(machine: machine, agent: nil, m: m, p: p)
         calls.append(c)
         return try reply(c)
@@ -149,6 +151,13 @@ final class FakeHub: VoiceFleet {
     func focus(machine: String, agent: String) async {}
     func updates() -> AsyncStream<FleetUpdate> { AsyncStream { self.cont = $0 } }
     func reconnect() {}
+    /// Per-machine hub features (default: everything voice needs).
+    var features: [String: [String]] = [:]
+    func setMachines(_ list: [Machine]) -> Set<String> {
+        let before = Set(machines.map(\.id))
+        machines = list.map { FleetMachine(id: $0.id, name: $0.name) }
+        return Set(list.map(\.id)).subtracting(before)
+    }
 
     func emit(_ u: FleetUpdate) { cont?.yield(u) }
     func event(_ machine: String, _ raw: JSON) { emit(.event(machine: machine, HubEvent(raw: raw))) }

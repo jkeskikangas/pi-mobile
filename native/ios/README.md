@@ -122,6 +122,7 @@ None of these have run on a real iPhone yet: everything above is checked in the 
 - Push needs a paid Apple developer team; a free team builds without it.
 - Starting voice while locked may still need the app to open (plan §3); the intent then asks to continue in the app.
 - AirPods mute without CallKit is unverified (plan §6).
+- Voice mode takes the hub's `voice-core.js` (which decides destructive confirmations) only from an HTTPS or loopback origin; on a plain-HTTP LAN hub it uses the copy bundled in the app, which can lag the hub's.
 - The ChatGPT-sign-in realtime endpoint is undocumented and may change; voice then uses basic voice, which the app supports.
 - `NSAllowsArbitraryLoads` is on; App Review may ask about it (the answer: end-to-end encryption to the user's own computer).
 - No TestFlight or App Store build yet; no CarPlay UI (the Live Activity shows on CarPlay by itself); Android is a later plan.

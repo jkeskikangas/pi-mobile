@@ -29,6 +29,8 @@ protocol VoiceFleet: AnyObject {
     func updates() -> AsyncStream<FleetUpdate>
     /// Network path changed (NWPathMonitor): reopen event streams.
     func reconnect()
+    /// The app's machine list changed (added, removed, re-paired); returns the ids that are new or re-paired.
+    @discardableResult func setMachines(_ list: [Machine]) -> Set<String>
 }
 
 /// The OpenAI realtime call (WebRTC + `oai-events` data channel). `RealtimeClient` in the app.

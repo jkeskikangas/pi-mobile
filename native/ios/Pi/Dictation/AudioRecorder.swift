@@ -7,6 +7,8 @@ final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate 
     var onLevel: ((Double) -> Void)?
     private var recorder: AVAudioRecorder?
     private var meter: Timer?
+    /// Shared-session ownership (AudioOwner): release only if voice mode didn't take it since.
+    private var audioToken: Int?
     private var observers: [NSObjectProtocol] = []
     private var stopping: CheckedContinuation<Data, Error>?
 
@@ -20,6 +22,7 @@ final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate 
         do {
             try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try s.setActive(true)
+            audioToken = AudioOwner.shared.claim()
             let r = try AVAudioRecorder(url: url, settings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 16_000,
@@ -122,6 +125,7 @@ final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate 
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         recorder = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if AudioOwner.shared.owns(audioToken) { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+        audioToken = nil
     }
 }

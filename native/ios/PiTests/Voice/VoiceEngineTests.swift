@@ -297,6 +297,52 @@ final class VoiceEngineTests: XCTestCase {
 
     // MARK: review regressions
 
+    func testHubTooOldForVoiceIsRefusedClearly() async {
+        hub.features["m1"] = ["voice", "speak"]
+        await open()
+        XCTAssertNil(engine.engineKind)
+        XCTAssertTrue(engine.note.contains("newer pi-mobile on laptop"))
+        XCTAssertTrue(hub.calls("voiceSession").isEmpty)
+        XCTAssertEqual(earcons.played.last, "failed")
+    }
+
+    func machine(_ id: String, _ name: String) -> Machine { Machine(id: id, name: name, origin: "http://\(name)", d: "d", k: "k") }
+
+    func testMachineListChangesReachTheRunningVoiceMode() async {
+        await open()
+        XCTAssertEqual(Set(engine.sessions.map(\.machine)), ["m1", "m2"])
+        // Removed: its sessions vanish.
+        engine.machinesChanged([machine("m1", "laptop")])
+        XCTAssertEqual(engine.sessions.map(\.machine), ["m1"])
+        // Added: loaded while voice runs.
+        hub.agents["m3"] = [Self.info("c1", "docs")]
+        engine.machinesChanged([machine("m1", "laptop"), machine("m3", "studio")])
+        await settle()
+        XCTAssertTrue(engine.sessions.contains { $0.machine == "m3" && $0.name == "docs" })
+        XCTAssertTrue(engine.isOpen)
+        // The followed session's machine removed: voice mode ends.
+        engine.machinesChanged([machine("m3", "studio")])
+        XCTAssertFalse(engine.isOpen)
+    }
+
+    func testLateReleaseNeverCutsDictationsSession() async {
+        await open()
+        engine.stop()
+        _ = AudioOwner.shared.claim() // dictation starts within the release delay
+        clock.advance(0.4)
+        XCTAssertEqual(session.deactivations, 0)
+        XCTAssertEqual(earcons.stopped, 1)
+    }
+
+    func testEveryEntryPointDrainsDictationAndCoreLoadsOnlyOverTrustedTransport() {
+        XCTAssertTrue(VoiceHost.dictationToDrain(nil) === Dictation.shared)
+        XCTAssertEqual(VoiceHost.trustedCoreOrigin("https://box.tail1234.ts.net"), "https://box.tail1234.ts.net")
+        XCTAssertEqual(VoiceHost.trustedCoreOrigin("http://127.0.0.1:7989"), "http://127.0.0.1:7989")
+        XCTAssertNil(VoiceHost.trustedCoreOrigin("http://192.168.1.20:7777"))
+        XCTAssertNil(VoiceHost.trustedCoreOrigin("http://100.101.1.2:7777"))
+        XCTAssertNil(VoiceHost.trustedCoreOrigin(nil))
+    }
+
     func testEndDuringPersonaRedialStartsNothing() async {
         await open()
         // The redial's voiceSession hangs, then fails after End.

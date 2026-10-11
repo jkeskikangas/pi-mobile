@@ -204,6 +204,13 @@ final class VoiceEngine {
         let g = gen
         await loadWorld()
         if closed || g != gen { return }
+        // A hub too old for native voice: say so on screen, don't half-work.
+        if incompatible.contains(machineId) {
+            let name = machineNameOf(machineId).isEmpty ? "that computer" : machineNameOf(machineId)
+            setNote("Voice mode needs a newer pi-mobile on \(name). Update it there, then try again.")
+            earcon("failed")
+            return setState(.paused)
+        }
         loadPersonas()
         await open()
     }
@@ -240,7 +247,9 @@ final class VoiceEngine {
             _ = deps.scheduler.after(0.35) { [weak self] in
                 guard let self, self.gen == g else { return }
                 deps.earcons.stop()
-                deps.audioSession?.deactivate()
+                // Dictation may have taken the session in the meantime: then it isn't ours to release.
+                if AudioOwner.shared.owns(self.audioToken) { deps.audioSession?.deactivate() }
+                self.audioToken = nil
             }
         }
         onClose?()
@@ -461,6 +470,10 @@ final class VoiceEngine {
     @ObservationIgnored var statusOf: [String: String] = [:]
     @ObservationIgnored var machineStates: [String: HubClient.ConnectionState] = [:]
     @ObservationIgnored var wasOffline: Set<String> = []
+    /// Machines whose hub lacks what native voice needs.
+    @ObservationIgnored var incompatible: Set<String> = []
+    /// Audio-session ownership taken when voice mode activated it.
+    @ObservationIgnored var audioToken: Int?
     /// Where speech runs (`voiceSession`, `speak`, `voices`, `transcribe`, `distill`); kept across switches.
     @ObservationIgnored var speechMachine: String?
     // Conversation
@@ -525,16 +538,62 @@ final class VoiceEngine {
         guard let fleet = deps?.fleet else { return }
         // All machines at once; a machine that doesn't answer counts as offline.
         let pending = fleet.machines.map { m in (m.id, Task { try? await fleet.rpc(machine: m.id, "hub", [:]) }) }
-        for (id, task) in pending {
-            guard let agents = await task.value?["agents"]?.array else { machineStates[id] = .offline; continue }
-            for a in agents {
-                guard let ag = a["agent"]?.string else { continue }
-                infos[key(id, ag)] = a
-                statusOf[key(id, ag)] = a["status"]?.string
-            }
-        }
+        for (id, task) in pending { took(id, await task.value) }
         await loadPrompts(cur)
         await fleet.focus(machine: machineId, agent: agent)
+    }
+
+    /// What native voice needs from a hub (`hub` rpc `protocol` and `features`, plan Step 1).
+    static let protocolVersion = 1
+    static let neededFeatures = ["voice", "voiceSession", "speak", "voices"]
+    static func compatible(_ hub: JSON) -> Bool {
+        let features = Set(hub["features"]?.array?.compactMap(\.string) ?? [])
+        return hub["protocol"]?.int == protocolVersion && neededFeatures.allSatisfy(features.contains)
+    }
+
+    /// One machine's `hub` reply: its sessions, and whether it can do voice at all.
+    func took(_ id: String, _ hub: JSON?) {
+        guard let hub, let agents = hub["agents"]?.array else { machineStates[id] = .offline; return }
+        if Self.compatible(hub) { incompatible.remove(id) } else { incompatible.insert(id) }
+        for a in agents {
+            guard let ag = a["agent"]?.string else { continue }
+            infos[key(id, ag)] = a
+            statusOf[key(id, ag)] = a["status"]?.string
+        }
+    }
+
+    /// The app's machine list changed while voice mode runs: new and re-paired machines are loaded,
+    /// removed ones vanish with their sessions; losing the followed session's machine ends voice mode.
+    func machinesChanged(_ list: [Machine]) {
+        guard isOpen, !closed, let fleet = deps?.fleet else { return }
+        let before = Set(fleet.machines.map(\.id))
+        let changed = fleet.setMachines(list)
+        let now = Set(list.map(\.id))
+        for id in before.subtracting(now) {
+            for k in Array(infos.keys) where split(k).machine == id {
+                infos[k] = nil
+                prompts[k] = nil
+                statusOf[k] = nil
+            }
+            machineStates[id] = nil
+            wasOffline.remove(id)
+            incompatible.remove(id)
+            if speechMachine == id { speechMachine = nil }
+        }
+        render()
+        if !now.contains(machineId) {
+            setNote("That computer was removed from this iPhone.")
+            return stop()
+        }
+        let g = gen
+        for id in changed {
+            Task { [weak self] in
+                let hub = try? await fleet.rpc(machine: id, "hub", [:])
+                guard let self, self.gen == g, !self.closed else { return }
+                self.took(id, hub)
+                self.render()
+            }
+        }
     }
 
     func loadPrompts(_ k: String) async {
@@ -616,7 +675,7 @@ final class VoiceEngine {
         var tries: [(String, String)] = []
         if home == machineId { tries.append((machineId, agent)) } else if let a = agentOn(home) { tries.append((home, a)) }
         if home != machineId, reachable(cur) { tries.append((machineId, agent)) }
-        for mm in fleet.machines where mm.id != home && mm.id != machineId && machineStates[mm.id] != .offline {
+        for mm in fleet.machines where mm.id != home && mm.id != machineId && machineStates[mm.id] != .offline && !incompatible.contains(mm.id) {
             if let a = agentOn(mm.id) { tries.append((mm.id, a)) }
         }
         var last: Error = HubError.remote("no computer can do speech")
@@ -672,6 +731,7 @@ final class VoiceEngine {
                 return setState(.paused)
             }
             route = s.route
+            audioToken = AudioOwner.shared.claim()
             // The system input mute persists (AirPods, Control Center): start in sync with it.
             if s.isInputMuted { muted = true }
         }
@@ -748,7 +808,7 @@ final class VoiceEngine {
 
     func resumeAfterInterruption() {
         if let s = deps?.audioSession {
-            do { try s.activate() } catch {
+            do { try s.activate(); audioToken = AudioOwner.shared.claim() } catch {
                 // Still interrupted (e.g. a call is on): stay paused; the next tap tries again.
                 setNote("The microphone is busy. Tap to resume.")
                 return setState(.paused)
