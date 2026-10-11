@@ -38,10 +38,12 @@ test("recogniser mistakes map back to real names", () => {
 
 test("name matching stays fast on a large repo", () => {
 	const files = Array.from({ length: 5000 }, (_, i) => `src/module${i}/someComponentName${i}.tsx`);
-	const t0 = performance.now();
+	// CPU time of this process, not wall clock: a loaded machine delays the test but does not add work.
+	const t0 = process.cpuUsage();
 	matchNames("so I want you to look at the user profile component and the settings page and then run all the tests again please".repeat(2), { ...vocab, files });
-	const ms = performance.now() - t0;
-	assert.ok(ms < 1500, `took ${ms} ms`);
+	const { user, system } = process.cpuUsage(t0);
+	const ms = (user + system) / 1000;
+	assert.ok(ms < 1500, `took ${ms} ms of CPU`);
 });
 
 test("declared code symbols, compound names first", async () => {
