@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { loadVoiceConfig, saveVoiceConfig, speechDir, writePrivate } from "./config.ts";
 import { Dictionary } from "./dictionary.ts";
 import { distill, editorText } from "./distill.ts";
-import { level, MIC_RATE, type Mic, micDevice, startMic } from "./mic.ts";
+import { inputDeviceName, level, MIC_RATE, type Mic, SILENT_PEAK, silenceAdvice, startMic } from "./mic.ts";
 import { type Complete, registryComplete } from "./model.ts";
 import { chooseStt, type LiveTranscription, prewarmApple } from "./stt.ts";
 import { gatherVocabulary, recognizerHints } from "./vocab.ts";
@@ -110,8 +110,9 @@ export function registerDictation(pi: ExtensionAPI, complete?: Complete): void {
 				} catch (e: any) {
 					stt = `unavailable (${e.message})`;
 				}
+				const mic = await inputDeviceName();
 				return c.ui.notify(
-					`Voice input: recogniser ${stt}${cfg?.locale ? ` (${cfg.locale})` : ""} · model ${cfg?.model ?? "auto (fast model you have)"} · after dictation: ${cfg?.afterDictation ?? "review"} · mic ${micDevice() ?? "default"}`,
+					`Voice input: recogniser ${stt}${cfg?.locale ? ` (${cfg.locale})` : ""} · model ${cfg?.model ?? "auto (fast model you have)"} · after dictation: ${cfg?.afterDictation ?? "review"} · mic ${mic ? `${mic}${process.env.PI_SPEECH_MIC || process.env.PI_MOBILE_MIC ? "" : " (system default)"}` : "system default"}`,
 					"info",
 				);
 			}
@@ -128,6 +129,7 @@ class Recording {
 	private live?: LiveTranscription;
 	private partial = "";
 	private levels: number[] = [];
+	private peak = 0;
 	private lastVoice = Date.now();
 	private startedAt = Date.now();
 	private timer?: NodeJS.Timeout;
@@ -173,6 +175,7 @@ class Recording {
 				(pcm) => {
 					this.live?.write(pcm);
 					const l = level(pcm);
+					if (l > this.peak) this.peak = l;
 					this.levels.push(l);
 					if (this.levels.length > 24) this.levels.shift();
 					if (l > 0.04) this.lastVoice = Date.now();
@@ -201,7 +204,10 @@ class Recording {
 		try {
 			const t = await this.live!.end();
 			const raw = t.text.trim();
-			if (!raw) return this.cancel("Didn't catch anything. Check the microphone, or speak a little closer.", "warning");
+			if (!raw) {
+				if (this.peak < SILENT_PEAK) return this.cancel(silenceAdvice(await inputDeviceName()), "warning");
+				return this.cancel("Heard sound but no words. Speak a little closer, or check /dictate status for the microphone and recogniser.", "warning");
+			}
 			this.partial = raw;
 			this.render();
 			const vocab = await gatherVocabulary(this.c.cwd, this.c.sessionManager.getBranch() as any[], new Dictionary(speechDir(), writePrivate).top());

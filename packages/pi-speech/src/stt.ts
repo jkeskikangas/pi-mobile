@@ -82,6 +82,28 @@ async function toWavFile(audio: Buffer, mime: string): Promise<{ path: string; c
 	}
 }
 
+/** Peak level (0..1) of a recording in any format ffmpeg reads; undefined when it can't be decoded. */
+export async function audioPeak(audio: Buffer, mime: string): Promise<number | undefined> {
+	const ff = await findFfmpeg();
+	if (!ff) return undefined;
+	const file = await toWavFile(audio, mime).catch(() => undefined);
+	if (!file) return undefined;
+	try {
+		const pcm = await new Promise<Buffer>((resolve, reject) =>
+			execFile(ff, ["-loglevel", "error", "-i", file.path, "-ac", "1", "-f", "s16le", "-"], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, timeout: 30_000 }, (e, out) =>
+				e ? reject(e) : resolve(out as Buffer),
+			),
+		);
+		let peak = 0;
+		for (let i = 0; i + 1 < pcm.length; i += 2) peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)));
+		return peak / 32768;
+	} catch {
+		return undefined;
+	} finally {
+		file.cleanup();
+	}
+}
+
 /** Wraps raw s16le mono PCM in a WAV header. */
 export function pcmToWav(pcm: Buffer, rate: number): Buffer {
 	const h = Buffer.alloc(44);

@@ -252,7 +252,14 @@
 		showDictMessage("Understanding what you meant…", "busy");
 		try {
 			const r = await app().speechCall("transcribe", { audio: typeof audio === "string" ? audio : await blobToBase64(audio), mime, draft: before });
-			if (!r.raw?.trim()) return showDictMessage("Didn't catch anything. Try again a little closer to the mic.");
+			if (!r.raw?.trim())
+				return showDictMessage(
+					r.silent
+						? window.PiNative
+							? "The microphone recorded only silence. Check Settings → pi-mobile → Microphone, and that it isn't muted."
+							: "The microphone recorded only silence. Check that this browser may use the microphone and that it isn't muted."
+						: "Heard sound but no words. Try again a little closer to the mic.",
+				);
 			input.value = r.editor || r.text;
 			app().autosize();
 			input.focus({ preventScroll: true });

@@ -405,3 +405,18 @@ test("a caveat that changes what the developer does next is never cut for length
 		assert.match(voiceInstructions(mode, "p"), /Never drop a caveat that changes what they should do next/);
 	}
 });
+
+test("dictation names the likely cause when the microphone delivers only silence (#3)", async () => {
+	const { silenceAdvice, SILENT_PEAK } = await import("../src/mic.ts");
+	const { audioPeak, findFfmpeg } = await import("../src/stt.ts");
+	const mac = silenceAdvice("MacBook Pro Microphone", "darwin", { TERM_PROGRAM: "ghostty" } as any);
+	assert.match(mac, /only silence from MacBook Pro Microphone/);
+	assert.match(mac, /Privacy & Security → Microphone, turn on ghostty/);
+	assert.match(silenceAdvice(undefined, "linux", {} as any), /isn't muted/);
+	if (!(await findFfmpeg())) return;
+	const silent = pcmToWav(Buffer.alloc(32000), 16000);
+	const tone = Buffer.alloc(32000);
+	for (let i = 0; i < 16000; i++) tone.writeInt16LE(Math.round(Math.sin(i / 5) * 8000), i * 2);
+	assert.ok((await audioPeak(silent, "audio/wav"))! < SILENT_PEAK);
+	assert.ok((await audioPeak(pcmToWav(tone, 16000), "audio/wav"))! > 0.2);
+});

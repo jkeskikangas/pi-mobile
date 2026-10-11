@@ -9,7 +9,8 @@ import { distill, editorText } from "./distill.ts";
 import type { Complete } from "./model.ts";
 import { createCall, chatgptAccountId, DEFAULT_REALTIME_MODEL, type RealtimeCredentials, realtimeSession } from "./realtime.ts";
 import { type Attention, brief, countWord, digestText, runDigest, speakable } from "./speech.ts";
-import { chooseStt, type SttProvider } from "./stt.ts";
+import { SILENT_PEAK } from "./mic.ts";
+import { audioPeak, chooseStt, type SttProvider } from "./stt.ts";
 import { chooseVoice, personaList } from "./personas.ts";
 import { synthesize, ttsTarget } from "./tts.ts";
 import { gatherVocabulary, recognizerHints, sayName } from "./vocab.ts";
@@ -71,7 +72,13 @@ export class VoiceHost {
 		const audio = Buffer.from(p.audio, "base64");
 		if (audio.length > MAX_AUDIO) throw new Error("recording too long");
 		const v = await this.vocabulary();
-		const t = await this.stt().transcribe(audio, String(p.mime ?? "audio/webm"), recognizerHints(v));
+		const mime = String(p.mime ?? "audio/webm");
+		const t = await this.stt().transcribe(audio, mime, recognizerHints(v));
+		// No words: say whether the phone's microphone delivered only silence (blocked, muted or wrong input).
+		if (!t.text.trim()) {
+			const peak = await audioPeak(audio, mime);
+			return { raw: "", text: "", unclear: [], provider: t.provider, by: "none", silent: peak !== undefined && peak < SILENT_PEAK };
+		}
 		if (p.distill === false) return { raw: t.text, text: t.text, unclear: [], provider: t.provider, by: "none" };
 		const d = await distill(t.text, v, this.branch(), this.deps.complete, { draft: typeof p.draft === "string" ? p.draft : "" });
 		return { raw: t.text, text: d.text, editor: editorText(d), unclear: d.unclear, provider: t.provider, by: d.by, error: d.error };

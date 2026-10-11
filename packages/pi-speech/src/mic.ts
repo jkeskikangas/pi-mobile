@@ -18,6 +18,33 @@ export function micInputArgs(platform = process.platform, device = micDevice()):
 	return ["-f", "pulse", "-i", device ?? "default"];
 }
 
+/** Below this peak (about -60 dBFS) a recording is the silence of a blocked, muted or virtual input, not a quiet room. */
+export const SILENT_PEAK = 0.001;
+
+/** What to tell the user when the microphone delivered only silence for the whole dictation. */
+export function silenceAdvice(device?: string, platform = process.platform, env = process.env): string {
+	const app = env.TERM_PROGRAM ? env.TERM_PROGRAM.replace(/\.app$/, "") : "your terminal";
+	const from = device ? ` from ${device}` : "";
+	if (platform === "darwin")
+		return `The microphone sent only silence${from}. Most likely ${app} isn't allowed to use it: System Settings → Privacy & Security → Microphone, turn on ${app}, then restart it. Otherwise pick a real input in System Settings → Sound → Input (virtual devices like "Microsoft Teams Audio" stay silent), or set PI_SPEECH_MIC.`;
+	return `The microphone sent only silence${from}. Check that it isn't muted and that the right input is the default, or set PI_SPEECH_MIC.`;
+}
+
+/** The name of the input device dictation records from, when it can be found (macOS default input). */
+export async function inputDeviceName(platform = process.platform, device = micDevice()): Promise<string | undefined> {
+	if (device) return device;
+	if (platform !== "darwin") return undefined;
+	try {
+		const { execFile } = await import("node:child_process");
+		const out = await new Promise<string>((resolve, reject) =>
+			execFile("system_profiler", ["SPAudioDataType", "-json"], { timeout: 5000 }, (e, stdout) => (e ? reject(e) : resolve(stdout))),
+		);
+		for (const group of JSON.parse(out).SPAudioDataType ?? [])
+			for (const item of group._items ?? []) if (item.coreaudio_default_audio_input_device === "spaudio_yes") return item._name;
+	} catch {}
+	return undefined;
+}
+
 /** Peak level of an s16le chunk, 0..1. */
 export function level(pcm: Buffer): number {
 	let peak = 0;
