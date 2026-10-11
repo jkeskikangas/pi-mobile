@@ -27,7 +27,7 @@ Then work through **README → Device checklist**. It is the gate: no TestFlight
 - [ ] My Apps → + New App: platform iOS, name (e.g. "pi mobile", which must be unique on the Store), primary language, bundle ID `<prefix>.app`, SKU (any, e.g. `pi-mobile-ios`), full access.
 - [ ] Category: **Developer Tools** (primary), **Productivity** (secondary).
 - [ ] Price: free. Availability: all regions you want. (France needs no extra step for the encryption below, but read the export question.)
-- [ ] Privacy policy URL: `https://github.com/jkeskikangas/pi-mobile/blob/main/PRIVACY.md`. Support URL: `https://github.com/jkeskikangas/pi-mobile/issues`.
+- [ ] Privacy policy URL: `https://pi-mobile.dev/privacy` (built from `PRIVACY.md`; `site/`). Support URL: `https://github.com/jkeskikangas/pi-mobile/issues`.
 
 ## 3. App Privacy ("nutrition label")
 

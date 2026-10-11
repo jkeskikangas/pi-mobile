@@ -1,0 +1,9 @@
+# pi-mobile.dev: static pages (the privacy policy App Store Connect links to). `npm run deploy` builds public/ first.
+name = "pi-mobile-site"
+compatibility_date = "2026-10-01"
+routes = [{ pattern = "pi-mobile.dev", custom_domain = true }]
+workers_dev = false
+
+[assets]
+directory = "public"
+not_found_handling = "404-page"
