@@ -2203,19 +2203,38 @@
 						if (alive) show(e?.name === "NotAllowedError" || e?.name === "SecurityError" ? "denied" : e?.name === "NotFoundError" || e?.name === "OverconstrainedError" ? "none" : "failed");
 						return;
 					}
+					// Cancelled, closed or backgrounded while the camera was starting: turn it straight off.
 					if (!alive) return stopStream(stream);
+					// The camera can't help after all: turn it off and say so.
+					const fail = () => {
+						clearTimeout(timer);
+						stopStream(stream);
+						video.srcObject = null;
+						if (alive) show("failed");
+					};
 					video.srcObject = stream;
 					try {
 						await video.play();
-					} catch {}
+					} catch {
+						return fail();
+					}
 					const read = await qrReader().catch(() => null);
 					if (!alive) return;
-					if (!read) return show("failed");
+					if (!read) return fail();
 					show("live");
 					let last = "";
+					let errors = 0;
 					const tick = async () => {
 						if (!alive) return;
-						const text = video.readyState >= 2 ? await read(video).catch(() => null) : null;
+						let text = null;
+						if (video.readyState >= 2)
+							try {
+								text = await read(video);
+								errors = 0;
+							} catch {
+								// A decoder that keeps failing (about 5 s) won't recover.
+								if (++errors >= 25) return fail();
+							}
 						if (!alive) return;
 						if (text && PiFleet.pairingLink(text)) {
 							return addComputerSheet(text.trim());
@@ -2232,10 +2251,14 @@
 			},
 			{ title: "Scan the code" },
 		);
+		// Leaving the app ends the scan: the camera never runs in the background.
+		const hidden = () => document.visibilityState === "hidden" && addComputerSheet();
+		document.addEventListener("visibilitychange", hidden);
 		sheetGone = () => {
 			alive = false;
 			clearTimeout(timer);
 			stopStream(stream);
+			document.removeEventListener("visibilitychange", hidden);
 		};
 	}
 	function stopStream(s) {

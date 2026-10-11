@@ -346,15 +346,19 @@ async function session(theme, width, flow) {
 				await tap(".sheet-panel .btn", "New session");
 				await tap(".sheet-panel .seg button", "hetzner-box");
 				await shot("m9-new-session-box");
-				report.checks[`${tag} new session on the box offers its folders`] = await page.evaluate(() => ({
+				const offered = await page.evaluate(() => ({
 					picked: document.querySelector('.sheet-panel .seg button[aria-pressed="true"]')?.textContent,
 					folder: document.querySelector(".sheet-panel input").value,
 					folders: [...document.querySelectorAll("#folders option")].map((o) => o.value),
 				}));
+				report.checks[`${tag} new session on the box offers its folders`] = offered;
+				if (JSON.stringify(offered) !== JSON.stringify({ picked: "hetzner-box", folder: "/home/you/api", folders: ["/home/you/api"] })) throw new Error(`box folders: ${JSON.stringify(offered)}`);
 				const before = buf.length;
 				await tap(".sheet-panel .btn.primary", "Start pi");
 				await page.waitForFunction(() => document.querySelector("#sessionSub")?.textContent.startsWith("hetzner-box") && document.querySelector("#sessionName")?.textContent === "api", { timeout: 10000 });
-				report.checks[`${tag} new session started on the box`] = buf.slice(before).match(/spawn .*/)?.[0];
+				const spawned = buf.slice(before).match(/spawn .*/g) ?? [];
+				report.checks[`${tag} new session started on the box`] = spawned;
+				if (spawned.length !== 1 || spawned[0] !== "spawn hetzner-box /home/you/api") throw new Error(`spawn log: ${JSON.stringify(spawned)}`);
 				await shot("m10-started-on-box");
 			});
 		}
@@ -367,6 +371,25 @@ async function session(theme, width, flow) {
 				await tap(".sheet-panel .btn", "Scan QR code");
 			};
 			const wrongCode = () => page.waitForFunction(() => document.querySelector(".scan-hint")?.textContent.includes("isn't from pi"), { timeout: 10000 });
+			// Keep every camera stream the app opens (optionally late), so the checks can see it was stopped.
+			const trackStreams = (delay = 0) =>
+				page.evaluate((ms) => {
+					const md = navigator.mediaDevices;
+					md.realGUM ??= md.getUserMedia.bind(md);
+					window.scanStreams = [];
+					md.getUserMedia = async (c) => {
+						const s = await md.realGUM(c);
+						window.scanStreams.push(s);
+						await new Promise((r) => setTimeout(r, ms));
+						return s;
+					};
+				}, delay);
+			const cameraOff = async (when) => {
+				await sleep(300);
+				const s = await page.evaluate(() => window.scanStreams.map((x) => x.getTracks().map((t) => t.readyState)));
+				report.checks[`${tag} camera off after ${when}`] = s;
+				if (!s.length || s.flat().some((r) => r !== "ended")) throw new Error(`camera still on after ${when}: ${JSON.stringify(s)}`);
+			};
 			await step("add sheet", async () => {
 				await tap("#menuBtn");
 				await tap(".sheet-panel .row", "Add a computer");
@@ -374,19 +397,46 @@ async function session(theme, width, flow) {
 				await closeSheet();
 			});
 			await step("live camera", async () => {
+				await trackStreams();
 				await openScan();
 				await wrongCode();
 				await shot("s2-scan-not-pi");
 				report.checks[`${tag} scan reads a code (${await page.evaluate(() => ("BarcodeDetector" in window ? "BarcodeDetector" : "jsQR"))})`] = true;
 				await tap(".sheet-panel .btn", "Cancel");
-				report.checks[`${tag} cancel turns the camera off and goes back`] = await page.evaluate(() => document.querySelector("#sheetTitle")?.textContent === "Add a computer" && !document.querySelector(".scan-view"));
+				if (!(await page.evaluate(() => document.querySelector("#sheetTitle")?.textContent === "Add a computer" && !document.querySelector(".scan-view")))) throw new Error("Cancel didn't go back to Add a computer");
+				await cameraOff("Cancel");
 				await closeSheet();
 			});
 			await step("vendored decoder", async () => {
 				await page.evaluate(() => delete window.BarcodeDetector);
+				await trackStreams();
 				await openScan();
 				await wrongCode();
-				report.checks[`${tag} jsQR reads the camera`] = await page.evaluate(() => typeof window.jsQR === "function");
+				if (!(await page.evaluate(() => typeof window.jsQR === "function"))) throw new Error("jsQR not loaded");
+				await closeSheet();
+				await cameraOff("closing the sheet");
+			});
+			await step("backgrounded", async () => {
+				await trackStreams();
+				await openScan();
+				await wrongCode();
+				const setHidden = (h) =>
+					page.evaluate((hide) => {
+						if (hide) Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+						else delete document.visibilityState;
+						document.dispatchEvent(new Event("visibilitychange"));
+					}, h);
+				await setHidden(true);
+				await cameraOff("leaving the app");
+				await setHidden(false);
+				await closeSheet();
+			});
+			await step("camera arrives after cancel", async () => {
+				await trackStreams(1500);
+				await openScan();
+				await tap(".sheet-panel .btn", "Cancel");
+				await sleep(1800);
+				await cameraOff("a late camera start");
 				await closeSheet();
 			});
 			const failCamera = (name) => page.evaluate((n) => (navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("no", n))), name);
