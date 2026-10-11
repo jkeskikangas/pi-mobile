@@ -312,6 +312,18 @@
 		return `m${[...b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
 	}
 
-	const api = { createFleet, Unauthorized };
+	/** The pairing code in a link from `/remote` or `/remote pair` (`https://host/#p=<id>.<key>`), or null. */
+	function pairingLink(text) {
+		let url;
+		try {
+			url = new URL(String(text).trim());
+		} catch {
+			return null;
+		}
+		const m = /[#&]p=([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)/.exec(url.hash);
+		return m ? { url, id: m[1], key: m[2] } : null;
+	}
+
+	const api = { createFleet, Unauthorized, pairingLink };
 	globalThis.PiFleet = api;
 })();
