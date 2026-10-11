@@ -18,7 +18,7 @@ No server to install, no account, no third-party relay, no app store. It all run
 - **Dictate prompts, get what you meant.** Speak in the terminal or on the phone; what lands in the editor is a clean prompt, with your self-corrections applied and spoken names matched to real ones in the repository.
 - **Steer without breaking flow.** Follow streaming output and tool steps live, steer pi mid-run or queue a follow-up, stop it, switch model or thinking level, compact, attach a photo.
 - **Quiet while you're at the desk.** If you've typed in any pi terminal on that machine in the last two minutes, the phone stays silent.
-- **Nothing to run, nothing to trust.** No relay, server or account. A paired phone talks to pi directly over your Wi-Fi, Tailscale or your own HTTPS address, and every request and event is encrypted for that phone alone.
+- **Nothing to run, nothing to trust.** No relay, server or account. A paired phone talks to pi directly over HTTPS on your Tailscale network (or your own HTTPS address), and every request and event is encrypted for that phone alone.
 
 ## Install
 
@@ -42,7 +42,7 @@ That's the setup. The first time it shows a QR code: scan it, the panel closes b
 /remote pair          pair another device
 /remote off           stop sharing this session, or every session on the machine
 /remote devices       paired devices; pick one to revoke
-/remote settings      how phones reach this computer, HTTPS address (automatic with Tailscale), port
+/remote settings      HTTPS address (automatic with Tailscale), port
 ```
 
 `pi --remote` shares a single session without sharing the whole machine.
@@ -55,11 +55,11 @@ On the phone:
 - Only the session on screen streams its output, so ten busy sessions cost little battery or data.
 - What you send from the phone is echoed in the terminal as `From <device>: …`.
 
-### Lock-screen notifications and HTTPS
+### HTTPS and lock-screen notifications
 
-Browsers only allow notifications and the microphone on HTTPS pages. Install [Tailscale](https://tailscale.com) on the computer and the phone, and `/remote` does the rest: it puts pi-mobile behind `tailscale serve` (private to your tailnet, with a real certificate) and puts that address first in the QR code. It reuses a serve you already have for the port, never changes other serve settings, and skips port 443 when another program holds it (then the address ends in `:8443`). If your tailnet hasn't enabled HTTPS yet, `/remote` shows Tailscale's one-click link and finishes by itself once you click it. A phone already paired over Wi-Fi gets a **Switch to the secure address** button (in voice mode and under **⋯**) that moves it there, pairing included.
+Phones reach pi-mobile only over HTTPS: the hub listens on this computer's loopback address alone, never on Wi-Fi or a tailnet IP, and the QR code never carries a plain-HTTP address. Install [Tailscale](https://tailscale.com) on the computer and the phone, and `/remote` does the rest: it puts pi-mobile behind `tailscale serve` (private to your tailnet, with a real certificate) and puts that address in the QR code. It reuses a serve you already have for the port, never changes other serve settings, and skips port 443 when another program holds it (then the address ends in `:8443`). If your tailnet hasn't enabled HTTPS yet, `/remote` shows Tailscale's one-click link instead of a QR code and finishes by itself once you click it; without Tailscale it says to install it.
 
-The app offers to turn notifications on (also under **⋯**). On iPhone, add the page to the Home Screen first (iOS 16.4+). To use your own HTTPS address instead, set it in `/remote settings`; `"tailscale": false` in `config.json` turns the automatic setup off. The "cloudflared" option in `/remote settings` gives HTTPS too, but its address changes when pi-mobile restarts.
+The app offers to turn notifications on (also under **⋯**). On iPhone, add the page to the Home Screen first (iOS 16.4+). To use your own HTTPS address instead (a reverse proxy, or a public one such as Tailscale Funnel), set it in `/remote settings` (`publicUrl` in `config.json`; it must start with `https://`); `"tailscale": false` turns the automatic setup off.
 
 ### iPhone app
 
@@ -122,17 +122,17 @@ Every session on every computer, in one list on the phone, each labelled with it
 
 No computer you already use can reach the new one? Run `/remote pair` on it, then on the phone **⋯ → Computers → Add a computer** and scan its QR code or paste its link.
 
-`add` sets pi-mobile up on the box over SSH and needs Tailscale there, with HTTPS turned on for your tailnet (it tells you the exact fix if not). Your phone needs Tailscale too. Machine names appear in public certificate logs as `box.<tailnet>.ts.net`, so name machines accordingly. Run pi on the box inside herdr or tmux so it survives your SSH disconnects. pi-mobile only listens on loopback, private LAN and Tailscale addresses, never on a public IP. Design: [designs/multi-machine.md](designs/multi-machine.md).
+`add` sets pi-mobile up on the box over SSH and needs Tailscale there, with HTTPS turned on for your tailnet (it tells you the exact fix if not). Your phone needs Tailscale too. Machine names appear in public certificate logs as `box.<tailnet>.ts.net`, so name machines accordingly. Run pi on the box inside herdr or tmux so it survives your SSH disconnects. pi-mobile only listens on loopback; phones reach it through Tailscale HTTPS. Design: [designs/multi-machine.md](designs/multi-machine.md).
 
 ## Security
 
 - **Pairing.** `/remote` creates a single-use key valid for 10 minutes, carried in the QR URL's `#fragment`, which browsers never send to a server. The phone uses it to receive its own long-lived device key.
-- **Transport.** Every request and event is sealed with the device's key (NaCl secretbox). Requests carry a timestamp and nonce, and replays are rejected. There are no bearer tokens or cookies to steal; Wi-Fi, Tailscale or a tunnel sees only ciphertext.
+- **Transport.** Every request and event is sealed with the device's key (NaCl secretbox). Requests carry a timestamp and nonce, and replays are rejected. There are no bearer tokens or cookies to steal; Tailscale or a proxy sees only ciphertext.
 - **Devices.** Every paired device has full control, so pair only your own. Each can be revoked on its own (`/remote devices`, or from the phone).
 - **Several computers.** Your phone talks to each computer directly, with its own key on each; no computer relays another's sessions or can drive them. A new computer joins only when a computer you already use adds it over SSH and you tap Add on the phone (in the app, or on the notification on Android). Keys travel over SSH and the existing encrypted channel, never on a command line. All your computers sign notifications with one key, which changes whenever you remove one.
 - **Notifications.** Encrypted to your browser (RFC 8291), so the push service can't read them.
 - **Local link.** pi processes join over loopback with a secret in `~/.pi/agent/pi-mobile/` (mode 0600).
-- **Caveat.** On plain HTTP the web app itself isn't integrity-protected: an *active* attacker on your network could serve a modified app. On untrusted networks use the HTTPS address. A paired full-control device can do anything pi can, so revoke lost phones.
+- **Caveat.** A paired full-control device can do anything pi can, so revoke lost phones.
 
 ## How it works
 

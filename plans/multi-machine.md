@@ -159,4 +159,4 @@ Then update:
 
 - `[verify on device]` iOS offline launch of the cached shell after a week unused (D5).
 - `[verify]` Chrome Local Network Access with `*.ts.net` origins on Android.
-- `[ASSUMPTION]` Machines after the first are reached over Tailscale HTTPS. If the owner wants a LAN-only second machine, it needs its own HTTPS address.
+- `[ASSUMPTION]` Machines after the first are reached over Tailscale HTTPS. The hub is HTTPS-only, so a machine off Tailscale needs its own HTTPS `publicUrl`.

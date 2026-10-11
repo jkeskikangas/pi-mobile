@@ -74,7 +74,7 @@ Voice mode exists for eyes-busy use. The screen is glanced at or hit blindly; so
 
 ## 6. Copy
 
-- Plain, short, concrete, second person. Say what happened and what to do: "Voice needs a secure address" plus the exact command, not "NotAllowedError".
+- Plain, short, concrete, second person. Say what happened and what to do: "Turn on HTTPS for your tailnet" plus the one-click link, not "NotAllowedError".
 - Use the user's words ("session", "phone", "computer"), never internals ("bridge", "hub", "agent id").
 - Buttons are verbs or the answer itself ("Yes, do it", "Cancel", "Pair another device").
 - Spoken and voice-screen copy follows `voice.md`: outcome first, no identifiers or tool chatter.

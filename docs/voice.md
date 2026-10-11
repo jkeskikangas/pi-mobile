@@ -100,7 +100,7 @@ Everything the phone and pi exchange stays end-to-end encrypted through the hub.
 
 ## Platform limits (verified against WebKit/Chromium sources, see research notes)
 
-- Browsers give `getUserMedia` only to secure contexts: phone voice needs the HTTPS address, which `/remote` sets up with Tailscale Serve (or `http://127.0.0.1` on the computer).
+- Browsers give `getUserMedia` only to secure contexts: phones only ever load the HTTPS address, which `/remote` sets up with Tailscale Serve (on the computer, `http://127.0.0.1` is a secure context too).
 - iOS stops capturing the mic when a Home Screen PWA goes to the background or locks; a Safari tab with an active capture keeps it longer. Voice mode keeps the screen awake (Wake Lock) and tells you when iOS took the mic away. Android Chrome exempts audible pages from freezing; verify on the device before relying on it.
 - CarPlay has no path for web apps; the phone's audio plays through the car as usual.
 - **The iPhone app** (`native/ios`, plan `plans/native-apps.md`) keeps the web UI in a web view and runs voice mode natively, through the same `voice-core.js` decisions, pairing and bridge requests. What it changes, all checked in the simulator only and **not yet verified on a device** (`native/ios/README.md` → Device checklist):
@@ -128,7 +128,7 @@ End to end, against the real services (October 2026, macOS 26, ChatGPT sign-in, 
 # isolated agent dir with your auth, a demo repo, pi with the extension
 mkdir -p /tmp/voice-demo && git -C /tmp/voice-demo init   # add a small source file to talk about
 mkdir -p /tmp/piagent/pi-mobile && cp ~/.pi/agent/auth.json /tmp/piagent/
-echo '{"port":7999,"expose":"local","enabled":true}' > /tmp/piagent/pi-mobile/config.json
+echo '{"port":7999,"enabled":true}' > /tmp/piagent/pi-mobile/config.json
 tmux new -d -s pivoice -c /tmp/voice-demo "PI_CODING_AGENT_DIR=/tmp/piagent pi -e $PWD/src/index.ts"
 URL=$(PI_CODING_AGENT_DIR=/tmp/piagent node --experimental-strip-types test/e2e/pair.ts)
 node test/e2e/browser.mjs dictate "$URL" speech.wav     # composer dictation
