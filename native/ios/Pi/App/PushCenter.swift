@@ -81,7 +81,7 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
         if let o = pendingOpen { pendingOpen = nil; Task { await opened(action: o.action, agent: o.agent, machine: o.machine, entry: o.entry) } }
         Task {
             // A token can change (restore, reinstall): ask for it on every launch; every computer hears again.
-            if enabled, await permission() == "granted" { registered = []; UIApplication.shared.registerForRemoteNotifications() }
+            if Self.available, enabled, await permission() == "granted" { registered = []; UIApplication.shared.registerForRemoteNotifications() }
             await reconcile()
         }
     }
@@ -126,7 +126,8 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
         for m in model.machines {
             guard let c = model.client(for: m), let hub = try? await c.rpc("hub") else { continue }
             let held = hub["apnsOn"]?.bool ?? false
-            if let p = Self.action(enabled: enabled, token: token, held: held, sent: registered.contains(tag(m))) {
+            // A build without push never enrols, and takes back an enrolment an earlier build left behind.
+            if let p = Self.action(enabled: Self.available && enabled, token: token, held: held, sent: registered.contains(tag(m))) {
                 guard (try? await c.rpc("push", p)) != nil else { continue }
                 if p["apns"]?.isNull == true { registered.remove(tag(m)) } else { registered.insert(tag(m)) }
             }
