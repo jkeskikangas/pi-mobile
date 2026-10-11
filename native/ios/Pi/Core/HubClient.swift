@@ -93,7 +93,7 @@ actor HubClient {
         req.setValue("application/json", forHTTPHeaderField: "content-type")
         req.httpBody = try body.data()
         let data: Data, resp: URLResponse
-        do { (data, resp) = try await session.data(for: req) } catch { throw HubError.from(error) }
+        do { (data, resp) = try await session.data(for: req, delegate: RedirectGuard.shared) } catch { throw HubError.from(error) }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         return (status, (try? JSON.parse(data)) ?? [:])
     }
@@ -155,7 +155,7 @@ actor HubClient {
                 }
             }
             group.addTask {
-                let (bytes, resp) = try await session.bytes(for: req)
+                let (bytes, resp) = try await session.bytes(for: req, delegate: RedirectGuard.shared)
                 let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
                 if status == 401 { throw HubError.unauthorized }
                 guard status == 200 else { throw HubError.network("HTTP \(status)") }

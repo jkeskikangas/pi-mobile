@@ -134,7 +134,8 @@ struct WebShell: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
             guard let url = action.request.url else { return .cancel }
-            if sameOrigin(url) || url.scheme == "about" || url.scheme == "blob" || url.scheme == "data" { return .allow }
+            // HTTPS only (OriginPolicy): a same-origin page is already https or loopback; nothing else loads here.
+            if (sameOrigin(url) && OriginPolicy.problem(url.absoluteString) == nil) || url.scheme == "about" || url.scheme == "blob" || url.scheme == "data" { return .allow }
             // Links out of the app (docs, PRs) open in Safari, never inside the shell.
             if action.navigationType == .linkActivated || action.targetFrame == nil { await UIApplication.shared.open(url) }
             return .cancel

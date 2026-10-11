@@ -16,6 +16,16 @@ final class OriginPolicyTests: XCTestCase {
         XCTAssertNotNil(OriginPolicy.problem("ftp://box"))
     }
 
+    func testRedirectsStayOnTheSameSecureOrigin() {
+        let from = URL(string: "https://box.tail1.ts.net/api/rpc")
+        XCTAssertTrue(RedirectGuard.allows(from: from, to: URL(string: "https://box.tail1.ts.net/api/rpc2")))
+        XCTAssertFalse(RedirectGuard.allows(from: from, to: URL(string: "http://box.tail1.ts.net/api/rpc")))
+        XCTAssertFalse(RedirectGuard.allows(from: from, to: URL(string: "http://mac.local/api/rpc")))
+        XCTAssertFalse(RedirectGuard.allows(from: from, to: URL(string: "http://box/api/rpc")))
+        XCTAssertFalse(RedirectGuard.allows(from: from, to: URL(string: "https://evil.example/api/rpc")))
+        XCTAssertFalse(RedirectGuard.allows(from: from, to: URL(string: "https://box.tail1.ts.net:8443/api/rpc")))
+    }
+
     func testPairingAndClientsRefusePlainHTTP() async throws {
         let link = try XCTUnwrap(PairingLink("http://192.168.1.20:7777/#p=abc." + Base64URL.encode(Data(repeating: 1, count: 32))))
         do { _ = try await HubClient.pair(link: link, name: "iPhone"); XCTFail() } catch {
