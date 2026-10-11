@@ -6,6 +6,7 @@ import Foundation
 struct NativeBridge {
     let model: AppModel
     let primaryOrigin: String
+    var dictation: Dictation = .shared
 
     enum Reply: Equatable {
         case value(JSON)
@@ -27,9 +28,15 @@ struct NativeBridge {
             return .value(.null)
         case "voice.start":
             return .error("Voice mode isn't in this version of the app yet.")
-        case "dictation.start", "dictation.stop":
-            return .error("not in this version of the app yet.")
+        case "dictation.start":
+            do { try await dictation.start(); return .value(.null) } catch { return .error(error.localizedDescription) }
+        case "dictation.stop":
+            do {
+                let audio = try await dictation.stop()
+                return .value(["audio": .string(audio.base64EncodedString()), "mime": "audio/mp4"])
+            } catch { return .error(error.localizedDescription) }
         case "dictation.cancel":
+            dictation.cancel()
             return .value(.null)
         default:
             return .error("unknown message")

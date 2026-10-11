@@ -126,6 +126,7 @@ struct WebShell: UIViewRepresentable {
                 return (nil, "not allowed")
             }
             let bridge = NativeBridge(model: parent.model, primaryOrigin: parent.machine.origin)
+            if let web = message.webView { Dictation.shared.js = { [weak web] s in web?.evaluateJavaScript(s) } }
             switch await bridge.handle(JSON(any: message.body)) {
             case .value(let v): return (v.foundation, nil)
             case .error(let e): return (nil, e)
