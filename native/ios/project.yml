@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     PI_BUNDLE_PREFIX: dev.pimobile
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
@@ -36,7 +36,7 @@ targets:
       - target: PiWidgets
       - target: PiNotifications
     preBuildScripts:
-      # Fallback copy of the shared voice logic (plans/native-apps.md D3); the hub's copy wins at run time.
+      # The shared voice logic (plans/native-apps.md D3). Only this bundled copy runs (App Review 2.5.2).
       - name: Bundle voice-core.js
         script: mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH" && cp "$SRCROOT/../../web/voice-core.js" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/voice-core.js"
         inputFiles: [$(SRCROOT)/../../web/voice-core.js]
@@ -64,7 +64,11 @@ targets:
       path: Pi/App/Info.plist
       properties:
         CFBundleDisplayName: pi
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         PiKeychainGroup: $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
+        # Whether this build signs with aps-environment (PI_PUSH); the web hides push setup when it doesn't.
+        PiPushAvailable: $(PI_PUSH)
         # The APNs environment the entitlements use (PI_APS_ENVIRONMENT); the token's `sandbox` follows it.
         PiAPSEnvironment: $(PI_APS_ENVIRONMENT)
         UILaunchScreen:
@@ -79,12 +83,10 @@ targets:
         NSSupportsLiveActivities: true
         # The voice orb animates at 120 Hz on ProMotion iPhones.
         CADisableMinimumFrameDurationOnPhone: true
-        ITSAppUsesNonExemptEncryption: false
-        # Hubs are reached over the LAN or Tailscale on plain HTTP. Every payload is end-to-end
-        # encrypted (secretbox), so the transport never sees plaintext. See README → ATS.
+        # Plain HTTP only on your own network (LAN, Tailscale 100.x, .local); everything else needs HTTPS.
+        # OriginPolicy refuses other plain-HTTP addresses with a clear message. See README → ATS.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-          NSAllowsArbitraryLoads: true
   PiWidgets:
     type: app-extension
     platform: iOS
@@ -104,6 +106,8 @@ targets:
       path: PiWidgets/Info.plist
       properties:
         CFBundleDisplayName: pi
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
   PiNotifications:
@@ -133,6 +137,8 @@ targets:
       path: PiNotifications/Info.plist
       properties:
         CFBundleDisplayName: pi
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         PiKeychainGroup: $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
