@@ -29,6 +29,7 @@ actor HubClient {
 
     init(machine: Machine, session: URLSession = .shared, clock: @escaping @Sendable () -> Date = Date.init) throws {
         guard let key = machine.key, key.count == Envelope.keyBytes else { throw HubError.network("That computer's key is damaged. Pair it again.") }
+        if let p = OriginPolicy.problem(machine.origin) { throw HubError.remote(p) }
         self.machine = machine
         self.key = key
         self.session = session
@@ -46,6 +47,7 @@ actor HubClient {
 
     /// Pairs with the computer that showed `link` (single use, 10 min). The result is the primary machine.
     static func pair(link: PairingLink, name: String, session: URLSession = .shared, now: Date = Date()) async throws -> Machine {
+        if let p = OriginPolicy.problem(link.origin) { throw HubError.remote(p) }
         let body: JSON = ["p": .string(link.id), "b": .string(try Envelope.seal(key: link.key, value: ["t": .number((now.timeIntervalSince1970 * 1000).rounded()), "name": .string(name)]))]
         let (status, reply) = try await post(session, "\(link.origin)/api/pair", body)
         switch status {
