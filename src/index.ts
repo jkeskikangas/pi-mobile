@@ -19,10 +19,11 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works
 import { apnsKeyProblem } from "./apns.ts";
 import { Bridge } from "./bridge.ts";
 import { registerHerdrBlocked } from "./herdr.ts";
+import { LOOPBACK_LABEL } from "./expose.ts";
 import { closeProcessHub, type LinkState } from "./link.ts";
 import type { AgentInfo } from "./protocol.ts";
 import { qrLines } from "./qr.ts";
-import { type Config, configPath, type Expose, linkSecret, loadConfig, saveConfig, stateDir } from "./store.ts";
+import { type Config, configPath, linkSecret, loadConfig, saveConfig, stateDir } from "./store.ts";
 import { registerDictation } from "./voice/dictation.ts";
 import { VoiceHost } from "./voice/host.ts";
 import { registryComplete } from "./voice/model.ts";
@@ -63,10 +64,8 @@ type PanelLine = string | Fixed;
 
 interface HubStatus {
 	pid: number;
-	expose: Expose;
 	endpoints: { label: string; url: string }[];
 	serveEnable?: string;
-	tunnelError?: string;
 	agents: AgentInfo[];
 	clients: { count: number; names: string[] };
 	devices: { id: string; name: string; role: string; createdAt: number; lastSeenAt?: number }[];
@@ -287,16 +286,18 @@ export default function piMobile(pi: ExtensionAPI): void {
 
 	async function overview(c: ExtensionCommandContext, s: HubStatus): Promise<void> {
 		const t = c.ui.theme;
-		const [primary, ...others] = s.endpoints;
+		const [primary, ...others] = s.endpoints.filter((e) => e.label !== LOOPBACK_LABEL);
 		const sessions = [...s.agents].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 		const phones = s.clients.count ? `${s.clients.count} phone${s.clients.count === 1 ? "" : "s"} connected` : "no phone connected right now";
 		await panel(c, "pi-mobile", "any key closes", [
 			`${t.fg("success", "Sharing")} ${sessions.length} session${sessions.length === 1 ? "" : "s"} ${t.fg("dim", "·")} ${phones}`,
 			"",
-			unwrapped(`${t.fg("dim", "Open")} ${t.fg("accent", primary.url)} ${t.fg("dim", primary.label)}`),
-			...others.filter((o) => o.label !== "this computer").map((o) => unwrapped(`${t.fg("dim", "or  ")} ${o.url} ${t.fg("dim", o.label)}`)),
-			...(s.tunnelError ? ["", t.fg("error", `Tunnel failed: ${s.tunnelError}`)] : []),
-			...serveEnableLines(c, s.serveEnable),
+			...(primary
+				? [
+						unwrapped(`${t.fg("dim", "Open")} ${t.fg("accent", primary.url)} ${t.fg("dim", primary.label)}`),
+						...others.map((o) => unwrapped(`${t.fg("dim", "or  ")} ${o.url} ${t.fg("dim", o.label)}`)),
+					]
+				: httpsFixLines(c, s.serveEnable)),
 			"",
 			...sessions.map((a) => {
 				const [glyph, color] = STATUS_ICON[a.status] ?? STATUS_ICON.idle;
@@ -313,10 +314,16 @@ export default function piMobile(pi: ExtensionAPI): void {
 		const b = await linked(c);
 		if (!b) return;
 		const pairing = await b.hubRequest<{ links: { label: string; url: string }[]; serveEnable?: string }>("pair", {});
-		const [primary, ...others] = pairing.links;
+		// Phones pair only over HTTPS: no secure address yet means the fix, never a plain-HTTP code.
+		const [primary, ...others] = pairing.links.filter((l) => l.label !== LOOPBACK_LABEL);
 		const header = "Scan with your phone to use every pi session on this machine";
+		if (!primary) {
+			if (c.mode !== "tui") return c.ui.notify(httpsFixText(pairing.serveEnable).join("\n"), "warning");
+			await panel(c, "Pair a phone", "any key closes", httpsFixLines(c, pairing.serveEnable).slice(1));
+			return;
+		}
 		if (c.mode !== "tui") {
-			c.ui.notify(`${header}:\n${pairing.links.map((l) => `${l.label}: ${l.url}`).join("\n")}`, "info");
+			c.ui.notify(`${header}:\n${[primary, ...others].map((l) => `${l.label}: ${l.url}`).join("\n")}`, "info");
 			return;
 		}
 		const t = c.ui.theme;
@@ -328,26 +335,29 @@ export default function piMobile(pi: ExtensionAPI): void {
 			...qr.lines.map((fixed) => ({ fixed, width: qr.width, narrow })),
 			"",
 			unwrapped(`${t.fg("accent", primary.url)} ${t.fg("dim", primary.label)}`),
-			...others.filter((o) => o.label !== "this computer").map((o) => unwrapped(`${o.url} ${t.fg("dim", o.label)}`)),
+			...others.map((o) => unwrapped(`${o.url} ${t.fg("dim", o.label)}`)),
 			"",
 			t.fg("dim", "Single-use code, valid 10 min. Traffic is end-to-end encrypted."),
-			...serveEnableLines(c, pairing.serveEnable),
-			...(primary.label.startsWith("lan") && !pairing.serveEnable
-				? [t.fg("dim", "Voice and lock-screen notifications need HTTPS: install Tailscale here and on your phone, then run /remote again.")]
-				: []),
 		]);
 	}
 
-	/** Tailscale runs here but the tailnet has not enabled Serve: one click, and pi finishes by itself. */
-	function serveEnableLines(c: ExtensionCommandContext, link: string | undefined): PanelLine[] {
-		if (!link) return [];
+	/**
+	 * No HTTPS address yet. Either the tailnet has not enabled Serve (one click, and pi finishes by
+	 * itself) or Tailscale is not running here.
+	 */
+	function httpsFixText(link: string | undefined): string[] {
+		return link
+			? ["Your phone connects over HTTPS. Turn on HTTPS for your tailnet (one click):", link, "pi finishes the setup by itself; then run /remote again for the code."]
+			: [
+					"Your phone connects over HTTPS, and this computer has no HTTPS address yet.",
+					"Install Tailscale here and on your phone (same account), then run /remote again.",
+				];
+	}
+
+	function httpsFixLines(c: ExtensionCommandContext, link: string | undefined): PanelLine[] {
 		const t = c.ui.theme;
-		return [
-			"",
-			t.fg("warning", "Voice and lock-screen notifications need HTTPS. Turn on HTTPS for your tailnet (one click):"),
-			unwrapped(t.fg("accent", link)),
-			t.fg("dim", "pi finishes the setup by itself; then run /remote again for the new code."),
-		];
+		const [why, fix, after] = httpsFixText(link);
+		return link ? ["", t.fg("warning", why), unwrapped(t.fg("accent", fix)), t.fg("dim", after)] : ["", t.fg("warning", why), t.fg("dim", fix)];
 	}
 
 	async function off(c: ExtensionCommandContext): Promise<void> {
@@ -385,21 +395,12 @@ export default function piMobile(pi: ExtensionAPI): void {
 
 	async function settings(c: ExtensionCommandContext): Promise<void> {
 		const cfg = loadConfig();
-		const expose = `How phones reach this computer: ${cfg.expose}`;
 		const url = `HTTPS address (voice, lock-screen notifications): ${cfg.publicUrl ?? (cfg.tailscale === false ? "none" : "automatic with Tailscale")}`;
 		const port = `Port: ${cfg.port}`;
 		const apns = `iPhone push (APNs): ${cfg.apns?.keyFile ? `${cfg.apns.topic} · key ${cfg.apns.keyId}${cfg.apns.sandbox ? " · sandbox" : ""}` : "off"}`;
-		const pick = await c.ui.select("pi-mobile settings", [expose, url, port, apns, "Done"]);
+		const pick = await c.ui.select("pi-mobile settings", [url, port, apns, "Done"]);
 		const next: Config = { ...cfg };
-		if (pick === expose) {
-			const e = await c.ui.select("How phones reach this computer", [
-				"network — Wi-Fi and Tailscale (default)",
-				"local — this computer only (SSH forward or your own proxy)",
-				"cloudflared — public HTTPS tunnel (needs cloudflared)",
-			]);
-			if (!e) return;
-			next.expose = e.split(" ")[0] as Expose;
-		} else if (pick === url) {
+		if (pick === url) {
 			const v = await c.ui.input(`HTTPS address that forwards to port ${cfg.port}; empty for automatic (Tailscale Serve)`, cfg.publicUrl ?? "https://");
 			if (v === undefined) return;
 			const trimmed = v.trim().replace(/\/+$/, "");

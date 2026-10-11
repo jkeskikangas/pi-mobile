@@ -81,7 +81,6 @@
 	const MIC = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
 
 	function micError(e) {
-		if (!window.isSecureContext) return "The microphone needs a secure (HTTPS) address. Tap the voice button to switch to it.";
 		if (e?.name === "NotAllowedError") return "Microphone access is blocked for this page. Allow it in the browser's site settings.";
 		if (e?.name === "NotFoundError") return "No microphone found.";
 		return `Microphone: ${e?.message || e}`;
@@ -2058,7 +2057,7 @@
 		if (!app().S.current) return app().toast("No session to talk to yet.", "warning");
 		// The app runs voice mode natively and has the microphone, so no secure-context check.
 		if (native()) return void startNativeVoice();
-		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return secureSheet();
+		if (!navigator.mediaDevices?.getUserMedia) return app().toast("This browser can't use the microphone.", "warning");
 		mode = new VoiceMode();
 		mode.open();
 	}
@@ -2080,11 +2079,6 @@
 		} finally {
 			voiceStarting = false;
 		}
-	}
-
-	/** The microphone needs HTTPS: offer the computer's secure address instead of failing. */
-	function secureSheet() {
-		app().openSheet((body) => app().secureMove(body, "Browsers only let secure (HTTPS) pages use the microphone."), { title: "Voice needs a secure address" });
 	}
 
 	function wire() {

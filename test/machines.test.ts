@@ -37,7 +37,7 @@ async function machineWithPhone(name: string) {
 	const port = await freePort();
 	const pushed: any[] = [];
 	const hub = new Hub({
-		config: { port, expose: "local", enabled: true },
+		config: { port, enabled: true },
 		secret: SECRET,
 		devices: new DeviceStore(dir),
 		push: new PushStore(dir),
@@ -98,7 +98,7 @@ test("add enrols a machine the hub can serve, and the phone gets the offer", asy
 	// The key in the offer opens the box's hub, as the phone's own device there.
 	const port = await freePort();
 	const boxHub = new Hub({
-		config: { port, expose: "local", enabled: true },
+		config: { port, enabled: true },
 		secret: SECRET,
 		devices: new DeviceStore(boxDir),
 		push: boxPush,

@@ -1664,8 +1664,7 @@
 				else add("Turn on notifications", () => setNativePush(true), "", "bell", n?.permission === "denied" ? "Allow them for pi in iPhone Settings first" : "When pi finishes or needs you");
 				if (n?.available !== false && !S.push.apns) body.appendChild(el("p", "note", "Your computer sends them once it has an Apple push key: run /remote settings there."));
 			} else if (!pushSupported()) {
-				if (window.isSecureContext) body.appendChild(el("p", "note", "On iPhone, add this page to your Home Screen (Share → Add to Home Screen) and open pi from there to get lock-screen notifications."));
-				else secureMove(body, "Lock-screen notifications need this page on a secure (HTTPS) address.");
+				body.appendChild(el("p", "note", "On iPhone, add this page to your Home Screen (Share → Add to Home Screen) and open pi from there to get lock-screen notifications."));
 			} else {
 				g = group(body);
 				if (S.push.on) add("Turn off notifications", () => setPush(false), "", "bell", "You get one when pi finishes or asks");
@@ -1719,37 +1718,6 @@
 			note.append(icon("lock"), "End-to-end encrypted");
 			body.appendChild(note);
 		}, { title: "pi mobile", subtitle: several() ? `Connected to ${fleet.machines.length} computers` : `Connected to ${S.device?.host || "your computer"}` });
-	}
-
-	/**
-	 * The microphone and notifications need HTTPS. When the computer has a secure address (Tailscale
-	 * Serve, set up by /remote), one tap moves this phone there, pairing included; otherwise say how
-	 * to get one.
-	 */
-	function secureMove(body, why) {
-		body.appendChild(el("p", "note", why));
-		const slot = el("div", "secure-move");
-		slot.appendChild(el("p", "note", "Checking your computer…"));
-		body.appendChild(slot);
-		rpc("pair", {}).then(
-			(r) => {
-				const secure = r.links.find((l) => l.url.startsWith("https://"));
-				if (!secure) {
-					slot.replaceChildren(
-						el("p", "note", "Install Tailscale on your computer and on this phone (same account), then run /remote in pi. It sets up a secure address by itself."),
-					);
-					return;
-				}
-				const go = el("button", "btn primary");
-				go.append(icon("lock"), "Switch to the secure address");
-				go.onclick = () => location.assign(secure.url);
-				slot.replaceChildren(
-					el("p", "note", "Your computer has one. This phone pairs there by itself; on iPhone, add it to your Home Screen for lock-screen notifications."),
-					go,
-				);
-			},
-			(e) => slot.replaceChildren(el("p", "note", `Couldn't ask your computer: ${e.message}`)),
-		);
 	}
 
 	async function pairSheet() {
@@ -1869,7 +1837,7 @@
 
 	// ── lock-screen notifications ─────────────────────────────────────────────────
 	function pushSupported() {
-		return window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+		return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 	}
 
 	/** The app's notification state; iOS Settings can change it any time (inside the app only). */
@@ -2485,7 +2453,7 @@
 		if (query.get("accept")) S.accepted = query.get("accept");
 		if (location.search) history.replaceState(null, "", location.pathname + location.hash);
 		// The service worker keeps a copy of the app (it opens while this computer sleeps) and shows notifications.
-		if (window.isSecureContext && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+		if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 		if (pushSupported()) {
 			// The key this phone's subscription was made with is the one every machine must sign with.
 			navigator.serviceWorker.ready
@@ -2530,7 +2498,6 @@
 		openAgent,
 		autosize,
 		openSheet,
-		secureMove,
 		sessionsSheet,
 		loadCurrent,
 		statusLine,

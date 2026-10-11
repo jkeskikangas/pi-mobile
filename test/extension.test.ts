@@ -101,7 +101,7 @@ let agent = "";
 
 before(async () => {
 	const port = await freePort();
-	writeFileSync(join(stateDir(), "config.json"), JSON.stringify({ port, expose: "local" }));
+	writeFileSync(join(stateDir(), "config.json"), JSON.stringify({ port }));
 	h = host();
 	await h.fire("session_start", { reason: "startup" });
 	await until(() => !!processHub() && h.statuses.at(-1) === "/remote");

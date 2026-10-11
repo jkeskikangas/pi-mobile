@@ -87,7 +87,7 @@ test("no lock-screen push while someone is typing at a terminal on that machine"
 	const dir = tmp();
 	const sent: string[] = [];
 	const hub = new Hub({
-		config: { port, expose: "local", enabled: false },
+		config: { port, enabled: false },
 		secret: "s".repeat(43),
 		devices: new DeviceStore(dir),
 		push: new PushStore(dir),
@@ -98,7 +98,7 @@ test("no lock-screen push while someone is typing at a terminal on that machine"
 	});
 	await hub.listen();
 	const link = new HubLink({
-		config: () => ({ port, expose: "local", enabled: false }),
+		config: () => ({ port, enabled: false }),
 		secret: "s".repeat(43),
 		info: () => ({ agent: "A", pid: 1, sessionId: "s", name: "proj", cwd: "/p", status: "idle" }),
 		onRequest: () => null,

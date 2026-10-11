@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { ensureServe, tailnetName } from "./tailscale.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-const DEFAULT_CONFIG = { port: 7878, expose: "network", enabled: false };
+const DEFAULT_CONFIG = { port: 7878, enabled: false };
 
 export function stateDir() {
 	const base = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");

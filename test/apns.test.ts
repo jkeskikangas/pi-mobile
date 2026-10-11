@@ -184,10 +184,10 @@ test("attention reaches iPhone tokens with a generic alert and the text sealed t
 	const push = new PushStore(dir);
 	const sent: { token: ApnsToken; msg: ApnsMessage }[] = [];
 	const apns = { send: async (token: ApnsToken, msg: ApnsMessage) => (sent.push({ token, msg }), "gone" as const) } as unknown as ApnsClient;
-	const hub = new Hub({ config: { port, expose: "local", enabled: false }, secret: "s".repeat(43), devices: new DeviceStore(dir), push, apns });
+	const hub = new Hub({ config: { port, enabled: false }, secret: "s".repeat(43), devices: new DeviceStore(dir), push, apns });
 	await hub.listen();
 	const link = new HubLink({
-		config: () => ({ port, expose: "local", enabled: false }),
+		config: () => ({ port, enabled: false }),
 		secret: "s".repeat(43),
 		info: () => ({ agent: "A", pid: 1, sessionId: "sess", name: "session A", cwd: "/tmp", status: "idle" }),
 		onRequest: () => null,

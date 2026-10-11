@@ -37,7 +37,7 @@ async function machine(name: string, agent: string, port?: number, dir = tmp()) 
 	port ??= await freePort();
 	const secret = `${name}`.padEnd(43, "x");
 	const hub = new Hub({
-		config: { port, expose: "local", enabled: true },
+		config: { port, enabled: true },
 		secret,
 		devices: new DeviceStore(dir),
 		push: new PushStore(dir),
@@ -47,7 +47,7 @@ async function machine(name: string, agent: string, port?: number, dir = tmp()) 
 	await hub.listen();
 	const calls: string[] = [];
 	const link = new HubLink({
-		config: () => ({ port: port!, expose: "local", enabled: true }),
+		config: () => ({ port: port!, enabled: true }),
 		secret,
 		info: () => info(agent, `${name} session`),
 		onRequest: (m) => {

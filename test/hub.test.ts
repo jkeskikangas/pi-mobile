@@ -25,11 +25,11 @@ const info = (agent: string): AgentInfo => ({ agent, pid: 1, sessionId: "sess", 
 
 async function setup() {
 	const port = await freePort();
-	const hub = new Hub({ config: { port, expose: "local", enabled: false }, secret: SECRET, devices: new DeviceStore(tmp()) });
+	const hub = new Hub({ config: { port, enabled: false }, secret: SECRET, devices: new DeviceStore(tmp()) });
 	await hub.listen();
 	const calls: any[] = [];
 	const link = new HubLink({
-		config: () => ({ port, expose: "local", enabled: false }),
+		config: () => ({ port, enabled: false }),
 		secret: SECRET,
 		info: () => info("A"),
 		onRequest: (m, p) => {
@@ -121,7 +121,7 @@ test("the agent link requires the local secret", async () => {
 
 test("pi processes elect a hub and fail over when its host goes away", async () => {
 	const port = await freePort();
-	const config = () => ({ port, expose: "local" as const, enabled: false });
+	const config = () => ({ port, enabled: false });
 	const a = new HubLink({ config, secret: SECRET, info: () => info("A"), onRequest: () => "a" });
 	const b = new HubLink({ config, secret: SECRET, info: () => info("B"), onRequest: () => "b" });
 	a.start();
@@ -159,7 +159,7 @@ test("a port held by something else is reported, not hijacked", async () => {
 	await new Promise((r) => other.once("listening", r));
 	const states: string[] = [];
 	const link = new HubLink({
-		config: () => ({ port, expose: "local", enabled: false }),
+		config: () => ({ port, enabled: false }),
 		secret: SECRET,
 		info: () => info("A"),
 		onRequest: () => null,
@@ -180,7 +180,7 @@ test("attention reaches subscribed devices as Web Push; dead and revoked subscri
 	const sent: { endpoint: string; payload: any; urgency: string }[] = [];
 	const push = new PushStore(dir);
 	const hub = new Hub({
-		config: { port, expose: "local", enabled: false },
+		config: { port, enabled: false },
 		secret: SECRET,
 		devices: new DeviceStore(dir),
 		push,
@@ -190,7 +190,7 @@ test("attention reaches subscribed devices as Web Push; dead and revoked subscri
 		},
 	});
 	await hub.listen();
-	const link = new HubLink({ config: () => ({ port, expose: "local", enabled: false }), secret: SECRET, info: () => info("A"), onRequest: () => null });
+	const link = new HubLink({ config: () => ({ port, enabled: false }), secret: SECRET, info: () => info("A"), onRequest: () => null });
 	link.start();
 	try {
 		await until(() => link.linked);
@@ -222,10 +222,10 @@ test("attention reaches subscribed devices as Web Push; dead and revoked subscri
 
 test("ten sessions: one pairing sees all; detailed events flow only for the focused one", async () => {
 	const port = await freePort();
-	const hub = new Hub({ config: { port, expose: "local", enabled: false }, secret: SECRET, devices: new DeviceStore(tmp()) });
+	const hub = new Hub({ config: { port, enabled: false }, secret: SECRET, devices: new DeviceStore(tmp()) });
 	await hub.listen();
 	const links = Array.from({ length: 10 }, (_, i) => {
-		const l = new HubLink({ config: () => ({ port, expose: "local", enabled: false }), secret: SECRET, info: () => info(`S${i}`), onRequest: () => null });
+		const l = new HubLink({ config: () => ({ port, enabled: false }), secret: SECRET, info: () => info(`S${i}`), onRequest: () => null });
 		l.start();
 		return l;
 	});

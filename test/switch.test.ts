@@ -60,7 +60,7 @@ function host(selectAnswer: string) {
 }
 
 test("a running pi joins and leaves when the machine switch flips elsewhere", async () => {
-	writeFileSync(join(stateDir(), "config.json"), JSON.stringify({ port: await freePort(), expose: "local" }));
+	writeFileSync(join(stateDir(), "config.json"), JSON.stringify({ port: await freePort() }));
 	const h = host("Only this session");
 	await h.fire("session_start", { reason: "startup" });
 	await new Promise((r) => setTimeout(r, 300));

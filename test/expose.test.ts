@@ -1,24 +1,69 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type CliResult, ensureServe, isPrivate, privateAddresses, serveUrl } from "../src/expose.ts";
+import { request } from "node:http";
+import { networkInterfaces } from "node:os";
+import { type CliResult, ensureServe, LOOPBACK_LABEL, serveUrl } from "../src/expose.ts";
 import { Hub } from "../src/hub.ts";
+import { loadConfig, saveConfig } from "../src/store.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { freePort } from "./phone.ts";
 
-const v4 = (address: string, internal = false) => ({ address, family: "IPv4", internal }) as any;
+/** Whether something answers HTTP on ip:port. */
+function answers(ip: string, port: number): Promise<boolean> {
+	return new Promise((resolve) => {
+		const r = request({ host: ip, port, path: "/", timeout: 800 }, (res) => {
+			res.resume();
+			resolve(true);
+		});
+		r.on("timeout", () => r.destroy());
+		r.on("error", () => resolve(false));
+		r.end();
+	});
+}
 
-test("a cloud box's public address is never listened on; tailnet comes first", () => {
-	const hetzner = {
-		lo: [v4("127.0.0.1", true)],
-		eth0: [v4("203.0.113.10"), { address: "2a01:4f8::1", family: "IPv6", internal: false } as any],
-		enp7s0: [v4("10.0.0.2")],
-		tailscale0: [v4("100.101.102.103")],
-		docker0: [v4("172.17.0.1")],
-	};
-	assert.deepEqual(privateAddresses(hetzner), [
-		{ ip: "100.101.102.103", label: "tailscale" },
-		{ ip: "10.0.0.2", label: "lan enp7s0" },
-		{ ip: "172.17.0.1", label: "lan docker0" },
-	]);
+test("the hub serves plain HTTP on loopback only, never on a LAN or tailnet address", async () => {
+	const port = await freePort();
+	const hub = new Hub({ config: { port, enabled: false }, secret: "s".repeat(43) });
+	await hub.listen();
+	try {
+		assert.equal(await answers("127.0.0.1", port), true, "loopback");
+		const outside = Object.values(networkInterfaces())
+			.flat()
+			.filter((a) => a && a.family === "IPv4" && !a.internal)
+			.map((a) => a!.address);
+		for (const ip of outside) assert.equal(await answers(ip, port), false, ip);
+		assert.deepEqual(hub.endpoints(), [{ label: LOOPBACK_LABEL, url: `http://127.0.0.1:${port}` }]);
+	} finally {
+		hub.close();
+	}
+});
+
+test("pairing links are HTTPS, plus loopback for this computer only", async () => {
+	const port = await freePort();
+	const hub = new Hub({ config: { port, enabled: false }, secret: "s".repeat(43), serve: async () => ({ url: `https://${HOST}` }) });
+	await hub.listen();
+	try {
+		await hub.syncServe();
+		const { links } = hub.createPairing();
+		assert.ok(links.length > 0);
+		for (const l of links) {
+			const u = new URL(l.url);
+			assert.ok(u.protocol === "https:" || (l.label === LOOPBACK_LABEL && u.hostname === "127.0.0.1"), l.url);
+		}
+		assert.ok(links[0].url.startsWith(`https://${HOST}/#p=`));
+	} finally {
+		hub.close();
+	}
+});
+
+test("a configured plain-HTTP address is ignored", () => {
+	const dir = mkdtempSync(join(tmpdir(), "pim-cfg-"));
+	saveConfig({ port: 7878, enabled: false, publicUrl: "http://pi.example.com" }, dir);
+	assert.equal(loadConfig(dir).publicUrl, undefined);
+	saveConfig({ port: 7878, enabled: false, publicUrl: "https://pi.example.com" }, dir);
+	assert.equal(loadConfig(dir).publicUrl, "https://pi.example.com");
 });
 
 const HOST = "mac.tail1.ts.net";
@@ -75,7 +120,7 @@ test("the hub lists the Tailscale address first, unless an HTTPS address is conf
 	let enabled!: (url: string) => void;
 	const port = await freePort();
 	const hub = new Hub({
-		config: { port, expose: "local", enabled: false },
+		config: { port, enabled: false },
 		secret: "s".repeat(43),
 		serve: async () => ({ enable: "https://login.tailscale.com/f/serve?x", pending: new Promise((r) => (enabled = r)) }),
 	});
@@ -88,13 +133,8 @@ test("the hub lists the Tailscale address first, unless an HTTPS address is conf
 	} finally {
 		hub.close();
 	}
-	const own = new Hub({ config: { port, expose: "local", enabled: false, publicUrl: "https://pi.example.com" }, secret: "s".repeat(43), serve: async () => ({ url: `https://${HOST}` }) });
+	const own = new Hub({ config: { port, enabled: false, publicUrl: "https://pi.example.com" }, secret: "s".repeat(43), serve: async () => ({ url: `https://${HOST}` }) });
 	await own.syncServe();
 	assert.deepEqual(own.endpoints()[0], { label: "https", url: "https://pi.example.com" });
 	own.close();
-});
-
-test("private ranges", () => {
-	for (const ip of ["10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.0.42", "100.64.0.1", "100.127.255.255"]) assert.equal(isPrivate(ip), true, ip);
-	for (const ip of ["203.0.113.10", "172.32.0.1", "100.63.0.1", "100.128.0.1", "8.8.8.8", "169.254.1.1"]) assert.equal(isPrivate(ip), false, ip);
 });

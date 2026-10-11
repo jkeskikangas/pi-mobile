@@ -8,15 +8,15 @@ import { b64u, randomKey } from "./crypto.ts";
 import type { ApnsConfig, ApnsToken } from "./apns.ts";
 import { generateVapid, type PushSubscriptionJSON, type Vapid } from "./webpush.ts";
 
-export type Expose = "network" | "local" | "cloudflared";
 /** Every paired device has full control. (A view-only role existed until 0.1.3.) */
 export type Role = "control";
 
 export interface Config {
-	/** Port of the hub's HTTP server. Also the election lock: whichever pi binds it hosts the hub. */
+	/**
+	 * Loopback port of the hub's HTTP server; phones reach it only through HTTPS in front (Tailscale
+	 * Serve or `publicUrl`). Also the election lock: whichever pi binds it hosts the hub.
+	 */
 	port: number;
-	/** network: all interfaces (LAN + Tailscale); local: loopback only; cloudflared: loopback + quick tunnel. */
-	expose: Expose;
 	/**
 	 * This machine is connected to your phone: every pi session on it is shared (unless hidden with
 	 * /remote off). Running pi processes watch this flag and join or leave within seconds.
@@ -73,7 +73,7 @@ export interface Device {
 	lastSeenAt?: number;
 }
 
-export const DEFAULT_CONFIG: Config = { port: 7878, expose: "network", enabled: false };
+export const DEFAULT_CONFIG: Config = { port: 7878, enabled: false };
 
 export function stateDir(): string {
 	const base = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
@@ -104,7 +104,8 @@ export function configPath(dir = stateDir()): string {
 export function loadConfig(dir = stateDir()): Config {
 	const raw = readJson<Partial<Config>>(configPath(dir), {});
 	const config: Config = { ...DEFAULT_CONFIG, ...raw };
-	if (!["network", "local", "cloudflared"].includes(config.expose)) config.expose = DEFAULT_CONFIG.expose;
+	// HTTPS only: a plain-HTTP address would never be offered to a phone.
+	if (config.publicUrl !== undefined && !/^https:\/\/[^\s/]+/.test(String(config.publicUrl))) config.publicUrl = undefined;
 	if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) config.port = DEFAULT_CONFIG.port;
 	return config;
 }

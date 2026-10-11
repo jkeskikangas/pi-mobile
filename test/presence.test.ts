@@ -19,7 +19,7 @@ after(() => {
 });
 
 test("typing in a pi terminal marks this machine's user as present", async () => {
-	writeFileSync(join(stateDir(), "config.json"), JSON.stringify({ port: await freePort(), expose: "local", enabled: true }));
+	writeFileSync(join(stateDir(), "config.json"), JSON.stringify({ port: await freePort(), enabled: true }));
 	const handlers = new Map<string, any[]>();
 	let onInput: ((data: string) => unknown) | undefined;
 	let unsubscribed = 0;

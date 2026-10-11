@@ -23,7 +23,7 @@ const dir = mkdtempSync(join(tmpdir(), "pi-mobile-ui-"));
 const SECRET = "u".repeat(43);
 const BOX_PORT = port + 1;
 // The page may call the second fixture computer (not on a tailnet, so it is listed explicitly).
-const config = { port, expose: "network" as const, enabled: true, machineOrigins: [`http://127.0.0.1:${BOX_PORT}`] };
+const config = { port, enabled: true, machineOrigins: [`http://127.0.0.1:${BOX_PORT}`] };
 const laptop = { id: "fx-laptop", name: "MacBook Pro" };
 // PI_MOBILE_FIXTURE_HTTPS=https://… pretends Tailscale Serve gave the hub that address (for the secure-address UI).
 const https = process.env.PI_MOBILE_FIXTURE_HTTPS;
@@ -211,7 +211,7 @@ for (const f of fakes) link(f, config, SECRET);
 // ── a second computer ──────────────────────────────────────────────────────────────────────────
 const boxDir = mkdtempSync(join(tmpdir(), "pi-mobile-ui-box-"));
 const BOX_SECRET = "b".repeat(43);
-const boxConfig = { port: BOX_PORT, expose: "local" as const, enabled: true };
+const boxConfig = { port: BOX_PORT, enabled: true };
 const box = { id: "fx-box", name: "hetzner-box" };
 const boxFakes: Fake[] = [
 	{
@@ -293,7 +293,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 	if (cmd === "pair") console.log(hub.createPairing().links.map((l) => l.url).join("\n"));
 });
 
-const lan = hub.createPairing().links;
+const links = hub.createPairing().links;
 console.log(`pi-mobile UI fixture on port ${port}. Pair:`);
-for (const l of lan) console.log(`  ${l.label}: ${l.url}`);
+for (const l of links) console.log(`  ${l.label}: ${l.url}`);
 console.log("stdin: work | ask | pick | done | quiet | pair | box | box again | box off | box on");

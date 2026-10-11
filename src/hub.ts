@@ -14,7 +14,7 @@ import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Channel } from "./channel.ts";
 import { b64u, open, randomId, randomKey, ReplayGuard, seal, unb64u } from "./crypto.ts";
-import { type Address, type Endpoint, privateAddresses, type ServeResult, startCloudflared, type Tunnel } from "./expose.ts";
+import { type Endpoint, LOOPBACK_LABEL, type ServeResult } from "./expose.ts";
 import { type AgentEvent, type AgentInfo, type HubEvent, PROTOCOL } from "./protocol.ts";
 import { type Config, type Device, DeviceStore, type MachineIdentity, machineIdentity, type Offer, OfferStore, PushStore, type Role } from "./store.ts";
 import { type PushSubscriptionJSON, sendPush, type Vapid } from "./webpush.ts";
@@ -88,11 +88,11 @@ export interface HubOptions {
 export class Hub {
 	readonly id = randomId();
 	readonly config: Config;
-	/** Loopback listener: also the election lock and the only one that accepts pi links. */
+	/**
+	 * The only listener, on loopback: also the election lock. Phones arrive through Tailscale Serve
+	 * (or your own HTTPS proxy), which forwards to it; there is no plain-HTTP listener on the network.
+	 */
 	private server: Server;
-	/** `network` mode: one listener per private address, kept in step with the interfaces. */
-	private extra = new Map<string, { server: Server; label: string }>();
-	private ifaceTimer?: NodeJS.Timeout;
 	private readonly handler: (req: IncomingMessage, res: ServerResponse) => void;
 	private agents = new Map<string, AgentConn>();
 	private clients = new Set<StreamClient>();
@@ -108,8 +108,6 @@ export class Hub {
 	private offerTimer?: NodeJS.Timeout;
 	private me?: MachineIdentity;
 	private secret: Buffer;
-	private tunnel?: Tunnel;
-	private tunnelError?: string;
 	/** HTTPS address from Tailscale Serve, used when no `publicUrl` is configured. */
 	private served?: string;
 	/** One-click link that enables Serve on the tailnet, while pi waits for it. */
@@ -150,12 +148,6 @@ export class Hub {
 			});
 		});
 		this.server.unref();
-		if (this.config.expose === "network") {
-			this.syncInterfaces();
-			// Wi-Fi changes, VPNs and `tailscale up` come and go; follow them.
-			this.ifaceTimer = setInterval(() => this.syncInterfaces(), 10_000);
-			this.ifaceTimer.unref();
-		}
 		this.heartbeat = setInterval(() => this.ping(), 15_000);
 		this.heartbeat.unref();
 		// `pi-mobile add` and `remove` run outside the hub; pick their offers up within seconds.
@@ -163,40 +155,6 @@ export class Hub {
 		this.offerTimer.unref();
 		this.armIdle();
 		void this.syncServe();
-		if (this.config.expose === "cloudflared") {
-			startCloudflared(this.config.port).then(
-				(t) => {
-					if (this.closed) return t.stop();
-					this.tunnel = t;
-					this.broadcastToAgents({ t: "endpoints", endpoints: this.endpoints() });
-				},
-				(e) => {
-					this.tunnelError = String(e?.message ?? e);
-					this.broadcastToAgents({ t: "endpoints", endpoints: this.endpoints(), error: this.tunnelError });
-				},
-			);
-		}
-	}
-
-	private syncInterfaces(addresses: Address[] = privateAddresses()): void {
-		if (this.closed) return;
-		const want = new Map(addresses.map((a) => [a.ip, a.label]));
-		for (const [ip, l] of this.extra) {
-			if (!want.has(ip)) {
-				l.server.close();
-				this.extra.delete(ip);
-			}
-		}
-		for (const [ip, label] of want) {
-			if (this.extra.has(ip)) continue;
-			const server = createServer(this.handler);
-			const entry = { server, label };
-			this.extra.set(ip, entry);
-			server.on("error", () => {
-				if (this.extra.get(ip) === entry) this.extra.delete(ip);
-			});
-			server.listen(this.port, ip, () => server.unref());
-		}
 	}
 
 	/**
@@ -243,33 +201,23 @@ export class Hub {
 		return typeof a === "object" && a ? a.port : this.config.port;
 	}
 
+	/** HTTPS first (configured address, else Tailscale Serve), then loopback for this computer only. */
 	endpoints(): Endpoint[] {
-		const local = { label: "this computer", url: `http://127.0.0.1:${this.port}` };
+		const local = { label: LOOPBACK_LABEL, url: `http://127.0.0.1:${this.port}` };
 		const pub = this.config.publicUrl
 			? [{ label: "https", url: this.config.publicUrl.replace(/\/+$/, "") }]
 			: this.served
 				? [{ label: "tailscale https", url: this.served }]
 				: [];
-		if (this.config.expose === "cloudflared")
-			return [...pub, ...(this.tunnel ? [{ label: "cloudflared", url: this.tunnel.url }] : []), local];
-		if (this.config.expose === "local") return [...pub, local];
-		const lan = [...this.extra].map(([ip, l]) => ({ label: l.label, url: `http://${ip}:${this.port}` }));
-		return [...pub, ...lan.filter((e) => e.label === "tailscale"), ...lan.filter((e) => e.label !== "tailscale"), local];
+		return [...pub, local];
 	}
 
 	close(): void {
 		if (this.closed) return;
 		this.closed = true;
 		clearInterval(this.heartbeat);
-		clearInterval(this.ifaceTimer);
 		clearInterval(this.offerTimer);
-		for (const l of this.extra.values()) {
-			l.server.close();
-			l.server.closeAllConnections?.();
-		}
-		this.extra.clear();
 		clearTimeout(this.idleTimer);
-		this.tunnel?.stop();
 		this.apns?.close();
 		for (const c of this.clients) c.res.end();
 		this.clients.clear();
@@ -347,10 +295,8 @@ export class Hub {
 				return this.syncServe().then(() => ({
 					hubId: this.id,
 					pid: process.pid,
-					expose: this.config.expose,
 					endpoints: this.endpoints(),
 					serveEnable: this.serveEnable,
-					tunnelError: this.tunnelError,
 					agents: [...this.agents.values()].map((a) => a.info),
 					clients: this.clientSummary(),
 					devices: this.devices.list().map(publicDevice),
