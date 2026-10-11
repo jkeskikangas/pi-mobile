@@ -5,7 +5,7 @@
 // Election: whichever process binds the configured port hosts the hub. When it exits, the other
 // processes' links drop, and one of them binds the port and takes over (see bridge.ts).
 
-import { readFile } from "node:fs/promises";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import { extname, join, normalize } from "node:path";
@@ -25,6 +25,34 @@ import { actionKey } from "./once.ts";
 export const LINK_PROTOCOL = "pi-mobile-link";
 const WEB_DIR = fileURLToPath(new URL("../web/", import.meta.url));
 const NACL_JS = createRequire(import.meta.url).resolve("tweetnacl/nacl-fast.min.js");
+
+/** URL path (`/app.js`) → file contents. */
+export type WebSnapshot = ReadonlyMap<string, Buffer>;
+
+/**
+ * Everything the hub serves, read into memory once. `pi update` overwrites the package's files while
+ * an older pi keeps running the old hub code; serving from disk would hand phones an app that doesn't
+ * match that hub (issue #2; pi-actors design D12). A restarted hub loads the new code and a new snapshot.
+ */
+export function snapshotWeb(dir = WEB_DIR, extra: Record<string, string> = { "/nacl.js": NACL_JS }): WebSnapshot {
+	const files = new Map<string, Buffer>();
+	const walk = (d: string, prefix: string) => {
+		for (const name of readdirSync(d)) {
+			const full = join(d, name);
+			if (statSync(full).isDirectory()) walk(full, `${prefix}${name}/`);
+			else files.set(`${prefix}${name}`, readFileSync(full));
+		}
+	};
+	walk(dir, "/");
+	for (const [path, file] of Object.entries(extra)) files.set(path, readFileSync(file));
+	return files;
+}
+
+/** Taken when this module loads: the app that matches the hub code in this process. */
+let moduleSnapshot: WebSnapshot | undefined;
+try {
+	moduleSnapshot = snapshotWeb();
+} catch {}
 // Shared by all sessions; at ten busy agents this still covers a few minutes of reconnect gap.
 const RING = 20_000;
 /** No lock-screen pushes while someone typed into a pi terminal on this machine this recently. */
@@ -77,6 +105,8 @@ export interface HubOptions {
 	apns?: ApnsClient;
 	/** Replaceable in tests; defaults to a relay client over global fetch. */
 	relay?: RelayClient;
+	/** The files served to phones; defaults to the snapshot taken when this code loaded. */
+	web?: WebSnapshot;
 	offers?: OfferStore;
 	/** This machine (default: `machine.json`). */
 	machine?: MachineIdentity;
@@ -476,28 +506,18 @@ export class Hub {
 		send(res, 404, { error: "not found" });
 	}
 
-	private async serveStatic(path: string, res: ServerResponse): Promise<void> {
-		let file: string;
-		if (path === "/" || path === "/index.html") file = join(WEB_DIR, "index.html");
-		else if (path === "/nacl.js") file = NACL_JS;
-		else {
-			const rel = normalize(path).replace(/^([/\\])+/, "");
-			if (rel.startsWith("..") || rel.includes("\0")) return send(res, 404, { error: "not found" });
-			file = join(WEB_DIR, rel);
-		}
-		try {
-			const body = await readFile(file);
-			res.writeHead(200, {
-				"content-type": MIME[extname(file)] ?? "application/octet-stream",
-				"cache-control": "no-cache",
-				"content-security-policy":
-					// media-src blob: lets voice mode keep a silent media session (headset button) alive.
-					`default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src ${this.connectSources()}; frame-ancestors 'none'`,
-			});
-			res.end(body);
-		} catch {
-			send(res, 404, { error: "not found" });
-		}
+	private serveStatic(path: string, res: ServerResponse): void {
+		const file = path === "/" ? "/index.html" : normalize(path).replace(/\\/g, "/");
+		const body = (this.opts.web ?? moduleSnapshot)?.get(file);
+		if (!body) return send(res, 404, { error: "not found" });
+		res.writeHead(200, {
+			"content-type": MIME[extname(file)] ?? "application/octet-stream",
+			"cache-control": "no-cache",
+			"content-security-policy":
+				// media-src blob: lets voice mode keep a silent media session (headset button) alive.
+				`default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src ${this.connectSources()}; frame-ancestors 'none'`,
+		});
+		res.end(body);
 	}
 
 	/** The app talks to this machine and to your other machines (Tailscale HTTPS, or HTTPS addresses you set). */
