@@ -111,10 +111,7 @@ struct VoiceScreen: View {
                     QuestionCard(question: q,
                                  // Only the question on screen is answered: a late tap on a card that
                                  // was just replaced does nothing.
-                                 answer: { opt in
-                                     guard engine.question?.id == q.id else { return }
-                                     await engine.answer(opt)
-                                 },
+                                 answer: { opt in _ = await engine.answer(opt, questionId: q.id) },
                                  cancelGrace: { engine.cancelGrace() },
                                  doItNow: { await engine.doItNow() })
                         .id(q.id) // a new question is a new card: no busy state or taps carried over
