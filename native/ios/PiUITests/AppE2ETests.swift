@@ -66,6 +66,9 @@ final class AppE2ETests: XCTestCase {
         // The transcription focuses the composer; put the keyboard away so the mic is reachable.
         if app.keyboards.firstMatch.exists { app.toolbars.buttons.allElementsBoundByIndex.last?.tap() }
         if !mic.waitForExistence(timeout: 5) || !mic.isHittable { fail("mic not reachable after the first take") }
+        let composer = web.textViews["Message"]
+        if !(composer.value as? String ?? "").contains("round them to cents") { fail("distilled text not in the composer") }
+        shot("05b-transcribed")
         mic.press(forDuration: 1.6)
         sleepRunLoop(2.5) // the fixture answers transcribe after 1.2 s
         shot("06-hold-done")
