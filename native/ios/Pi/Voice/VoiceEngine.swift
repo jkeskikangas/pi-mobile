@@ -1508,7 +1508,7 @@ final class VoiceEngine {
         do { out = try await tool(name, args) } catch { out = ["error": .string(error.localizedDescription)] }
         guard g == gen, !closed else { return }
         let text = (try? String(data: out.data(), encoding: .utf8)) ?? "{}"
-        rt(["type": "conversation.item.create", "item": ["type": "function_call_output", "call_id": .string(callId), "output": .string(text ?? "{}")]])
+        rt(["type": "conversation.item.create", "item": ["type": "function_call_output", "call_id": .string(callId), "output": .string(text)]])
         if name == "ask_pi" && out["error"] == nil {
             // Delegated: say nothing more unless it was queued; the working tick tells them pi is on it.
             if out["delivered"]?.string != "prompt" { respond() } else { setState(.working) }

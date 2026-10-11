@@ -164,7 +164,25 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Pi.app/Pi
         BUNDLE_LOADER: $(TEST_HOST)
+  PiUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [PiUITests]
+    dependencies:
+      - target: Pi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PI_BUNDLE_PREFIX).pi.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Pi
 schemes:
+  PiE2E:
+    build:
+      targets:
+        Pi: all
+    test:
+      gatherCoverageData: false
+      targets: [PiUITests]
   Pi:
     build:
       targets:

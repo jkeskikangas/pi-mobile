@@ -154,7 +154,9 @@ function link(f: Fake, cfg: typeof config | typeof boxConfig, secret: string): v
 				return { ok: true };
 			}
 			// Voice: dictation is "transcribed" after a beat; realtime is unavailable so voice mode runs basic.
-			if (m === "transcribe")
+			if (m === "transcribe") {
+				// Logged so native end-to-end checks can see the call (native/ios/scripts/e2e.sh).
+				console.log(`transcribe ${f.info.agent} ${String(p?.audio ?? "").length} chars ${p?.mime ?? ""}`);
 				return new Promise((r) =>
 					setTimeout(
 						() =>
@@ -169,6 +171,7 @@ function link(f: Fake, cfg: typeof config | typeof boxConfig, secret: string): v
 						1200,
 					),
 				);
+			}
 			if (m === "voiceSession") throw new Error("realtime voice is not set up");
 			if (m === "speak") throw new Error("tts unavailable");
 			if (m === "voices") return { personas: personaList(), sample: false };

@@ -18,5 +18,5 @@ LINK="$(grep -o "http://127.0.0.1:$PORT/#p=[^ ]*" "$LOG" | head -1)"
 [ -n "$LINK" ] || { echo "fixture printed no 127.0.0.1 link:"; cat "$LOG"; exit 1; }
 (while sleep 4; do echo ask >&3; done) & ASK=$!
 xcodegen -q
-TEST_RUNNER_PI_PAIR_LINK="$LINK" xcodebuild test -scheme Pi -destination "$DEST" -derivedDataPath build \
+TEST_RUNNER_PI_PAIR_LINK="$LINK" xcodebuild test -project Pi.xcodeproj -scheme Pi -destination "$DEST" -derivedDataPath build \
   -only-testing:PiIntegrationTests 2>&1 | grep -E "error:|Test Case|Executed|\*\* TEST" | tail -20

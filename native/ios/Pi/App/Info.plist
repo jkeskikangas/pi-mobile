@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -37,6 +39,8 @@
 	<string>pi listens while voice mode or dictation is on.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>PiAPSEnvironment</key>
+	<string>$(PI_APS_ENVIRONMENT)</string>
 	<key>PiKeychainGroup</key>
 	<string>$(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared</string>
 	<key>UIApplicationSceneManifest</key>
