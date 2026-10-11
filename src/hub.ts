@@ -578,6 +578,8 @@ export class Hub {
 					host: this.machine.name,
 					machine: this.machine,
 					protocol: PROTOCOL,
+					// What this hub can do, so a native app can refuse an incompatible hub with a clear message.
+					features: ["voice", "voiceSession", "speak", "voices", "learn", "machines"],
 					seq: this.seq,
 					agents: [...this.agents.values()].map((a) => a.info),
 					device: publicDevice(device),

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { Hub } from "../src/hub.ts";
 import { HubLink, closeProcessHub, processHub } from "../src/link.ts";
-import type { AgentInfo } from "../src/protocol.ts";
+import { type AgentInfo, PROTOCOL } from "../src/protocol.ts";
 import { DeviceStore, PushStore } from "../src/store.ts";
 import { freePort, Phone, until } from "./phone.ts";
 
@@ -60,6 +60,8 @@ test("pairing, encrypted rpc, routing to the linked pi, and streaming with repla
 
 		const h = await phone.rpc("hub");
 		assert.deepEqual(h.agents.map((a: AgentInfo) => a.agent), ["A"]);
+		assert.equal(h.protocol, PROTOCOL);
+		assert.deepEqual(h.features, ["voice", "voiceSession", "speak", "voices", "learn", "machines"]);
 		assert.deepEqual(await phone.rpc("agent", { agent: "A", m: "snapshot", p: { limit: 5 } }), { echoed: "snapshot" });
 		assert.deepEqual(calls.at(-1).p, { limit: 5, _device: { id: phone.d, name: "test phone" } });
 		await assert.rejects(phone.rpc("agent", { agent: "A", m: "fail" }), /boom/);
