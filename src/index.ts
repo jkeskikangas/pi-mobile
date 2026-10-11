@@ -12,7 +12,9 @@
 //   /remote add <host> add a machine you can ssh to; your phone approves it (also `pi-mobile add`)
 //   /remote remove <m> remove a machine from your phone's list
 
-import { unwatchFile, watchFile } from "node:fs";
+import { createPrivateKey } from "node:crypto";
+import { readFileSync, unwatchFile, watchFile } from "node:fs";
+import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Bridge } from "./bridge.ts";
@@ -35,7 +37,7 @@ const SUBCOMMANDS = [
 	{ value: "pair", label: "pair", description: "Pair another device" },
 	{ value: "off", label: "off", description: "Stop sharing this session or the whole machine" },
 	{ value: "devices", label: "devices", description: "Paired devices; revoke one" },
-	{ value: "settings", label: "settings", description: "Exposure, HTTPS address, port" },
+	{ value: "settings", label: "settings", description: "Exposure, HTTPS address, port, iPhone push" },
 	{ value: "add", label: "add", description: "Add a machine you can ssh to (your phone approves it)" },
 	{ value: "remove", label: "remove", description: "Remove a machine from your phone's list" },
 ];
@@ -386,7 +388,8 @@ export default function piMobile(pi: ExtensionAPI): void {
 		const expose = `How phones reach this computer: ${cfg.expose}`;
 		const url = `HTTPS address (voice, lock-screen notifications): ${cfg.publicUrl ?? (cfg.tailscale === false ? "none" : "automatic with Tailscale")}`;
 		const port = `Port: ${cfg.port}`;
-		const pick = await c.ui.select("pi-mobile settings", [expose, url, port, "Done"]);
+		const apns = `iPhone push (APNs): ${cfg.apns?.keyFile ? `${cfg.apns.topic} · key ${cfg.apns.keyId}${cfg.apns.sandbox ? " · sandbox" : ""}` : "off"}`;
+		const pick = await c.ui.select("pi-mobile settings", [expose, url, port, apns, "Done"]);
 		const next: Config = { ...cfg };
 		if (pick === expose) {
 			const e = await c.ui.select("How phones reach this computer", [
@@ -409,6 +412,28 @@ export default function piMobile(pi: ExtensionAPI): void {
 			const n = Number(v);
 			if (!Number.isInteger(n) || n < 1024 || n > 65535) return c.ui.notify("Port must be 1024–65535.", "warning");
 			next.port = n;
+		} else if (pick === apns) {
+			const a = cfg.apns;
+			const keyFile = await c.ui.input("Path to the AuthKey_….p8 file from developer.apple.com (Keys); empty turns iPhone push off", a?.keyFile ?? "");
+			if (keyFile === undefined) return;
+			if (!keyFile.trim()) next.apns = undefined;
+			else {
+				const file = keyFile.trim().replace(/^~(?=\/)/, homedir());
+				try {
+					createPrivateKey(readFileSync(file, "utf8"));
+				} catch {
+					return c.ui.notify(`Can't read a .p8 key from ${file}.`, "warning");
+				}
+				const keyId = await c.ui.input("Key ID (10 characters, also in the file name)", a?.keyId ?? /AuthKey_(\w{10})/.exec(file)?.[1] ?? "");
+				if (!keyId?.trim()) return;
+				const teamId = await c.ui.input("Team ID (Membership details)", a?.teamId ?? "");
+				if (!teamId?.trim()) return;
+				const topic = await c.ui.input("The app's bundle ID", a?.topic ?? "");
+				if (!topic?.trim()) return;
+				const env = await c.ui.select("Default APNs environment", ["production — TestFlight and App Store builds", "sandbox — builds run from Xcode"]);
+				if (!env) return;
+				next.apns = { keyFile: file, keyId: keyId.trim(), teamId: teamId.trim(), topic: topic.trim(), sandbox: env.startsWith("sandbox") };
+			}
 		} else return;
 		saveConfig(next);
 		// Linked pi processes re-read the config when they reconnect, so restarting the hub applies it everywhere.

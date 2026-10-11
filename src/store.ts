@@ -5,6 +5,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, 
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { b64u, randomKey } from "./crypto.ts";
+import type { ApnsConfig, ApnsToken } from "./apns.ts";
 import { generateVapid, type PushSubscriptionJSON, type Vapid } from "./webpush.ts";
 
 export type Expose = "network" | "local" | "cloudflared";
@@ -34,6 +35,8 @@ export interface Config {
 	/** HTTPS addresses of your other machines that aren't on Tailscale (`*.ts.net` is always allowed). */
 	machineOrigins?: string[];
 	voice?: VoiceConfig;
+	/** iPhone push through Apple (APNs) with your own `.p8` key; set with /remote settings. */
+	apns?: ApnsConfig;
 }
 
 export interface VoiceConfig {
@@ -256,12 +259,12 @@ export class OfferStore {
 /** VAPID keys and each device's push subscription. Only the hub writes it. */
 export class PushStore {
 	private readonly path: string;
-	private state: { vapid: Vapid; subs: Record<string, PushSubscriptionJSON> };
+	private state: { vapid: Vapid; subs: Record<string, PushSubscriptionJSON>; apns?: Record<string, ApnsToken> };
 
 	constructor(dir = stateDir()) {
 		this.path = join(dir, "push.json");
-		const raw = readJson<{ vapid?: Vapid; subs?: Record<string, PushSubscriptionJSON> }>(this.path, {});
-		this.state = { vapid: raw.vapid ?? generateVapid(), subs: raw.subs ?? {} };
+		const raw = readJson<{ vapid?: Vapid; subs?: Record<string, PushSubscriptionJSON>; apns?: Record<string, ApnsToken> }>(this.path, {});
+		this.state = { vapid: raw.vapid ?? generateVapid(), subs: raw.subs ?? {}, apns: raw.apns ?? {} };
 		if (!raw.vapid) this.save();
 	}
 
@@ -282,6 +285,18 @@ export class PushStore {
 	set(deviceId: string, sub: PushSubscriptionJSON | undefined): void {
 		if (sub) this.state.subs[deviceId] = sub;
 		else delete this.state.subs[deviceId];
+		this.save();
+	}
+
+	/** iPhone app device tokens (APNs), beside the Web Push subscriptions. */
+	apnsEntries(): [string, ApnsToken][] {
+		return Object.entries(this.state.apns ?? {});
+	}
+
+	setApns(deviceId: string, token: ApnsToken | undefined): void {
+		const all = (this.state.apns ??= {});
+		if (token) all[deviceId] = token;
+		else delete all[deviceId];
 		this.save();
 	}
 
