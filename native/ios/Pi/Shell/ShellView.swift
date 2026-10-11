@@ -32,6 +32,7 @@ struct ShellView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: phase)
+        .voiceScreen(model.voice)
         .alert(forgetTitle, isPresented: forgetShown, presenting: model.forgetQueue.first) { m in
             Button("Forget", role: .destructive) { model.forget(m) }
             Button("Keep", role: .cancel) { model.keep(m) }

@@ -20,6 +20,9 @@ packages:
   Sodium:
     url: https://github.com/jedisct1/swift-sodium
     exactVersion: 0.11.0
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    exactVersion: 154.0.0
 targets:
   Pi:
     type: application
@@ -29,8 +32,16 @@ targets:
       - path: Shared
     dependencies:
       - package: Sodium
+      - package: WebRTC
       - target: PiWidgets
       - target: PiNotifications
+    preBuildScripts:
+      # Fallback copy of the shared voice logic (plans/native-apps.md D3); the hub's copy wins at run time.
+      - name: Bundle voice-core.js
+        script: mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH" && cp "$SRCROOT/../../web/voice-core.js" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/voice-core.js"
+        inputFiles: [$(SRCROOT)/../../web/voice-core.js]
+        outputFiles: [$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/voice-core.js]
+        basedOnDependencyAnalysis: true
     # Entitlements: Pi/App/Pi.entitlements (keychain group), or PiPush.entitlements when PI_PUSH=YES (below).
     settings:
       base:

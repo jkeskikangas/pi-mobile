@@ -35,6 +35,9 @@ struct WebShell: UIViewRepresentable {
         #if DEBUG
         web.isInspectable = true
         #endif
+        context.coordinator.voiceClosed = NotificationCenter.default.addObserver(forName: .piVoiceClosed, object: nil, queue: .main) { [weak web] _ in
+            MainActor.assumeIsolated { _ = web?.evaluateJavaScript("window.PiNative?.voiceClosed?.()") }
+        }
         context.coordinator.load(web)
         return web
     }
@@ -56,6 +59,8 @@ struct WebShell: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
         var parent: WebShell
         var reloadToken: Int
+        /// Observer for `.piVoiceClosed` (BRIDGE.md `voiceClosed()`).
+        var voiceClosed: NSObjectProtocol?
 
         init(_ parent: WebShell) {
             self.parent = parent

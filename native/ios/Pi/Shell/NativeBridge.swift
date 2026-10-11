@@ -27,7 +27,12 @@ struct NativeBridge {
             await model.webUnpaired()
             return .value(.null)
         case "voice.start":
-            return .error("Voice mode isn't in this version of the app yet.")
+            guard let agent = body["agent"]?.string, !agent.isEmpty else { return .error("Open a session first.") }
+            let machine = body["machine"]?.string.flatMap { $0.isEmpty ? nil : $0 } ?? model.primary?.id ?? ""
+            do {
+                try await VoiceHost.start(model: model, agent: agent, machine: machine, dictation: dictation)
+                return .value(.null)
+            } catch { return .error(error.localizedDescription) }
         case "dictation.start":
             do { try await dictation.start(); return .value(.null) } catch { return .error(error.localizedDescription) }
         case "dictation.stop":

@@ -36,7 +36,7 @@ Simulator check (no APNs needed): the simulator never runs a service extension f
 | Package | Version | Why |
 |---|---|---|
 | [jedisct1/swift-sodium](https://github.com/jedisct1/swift-sodium) | 0.11.0 | secretbox (XSalsa20-Poly1305), wire-compatible with tweetnacl-js (plan D6) |
-| [stasel/WebRTC](https://github.com/stasel/WebRTC) | not added yet; pin 154.0.0 (latest tag on 2026-10-11) in the voice step | realtime voice (plan D4). Left out until Step 5 to keep builds fast. |
+| [stasel/WebRTC](https://github.com/stasel/WebRTC) | 154.0.0 | realtime voice (plan D4): audio track + `oai-events` data channel |
 
 ## Layout
 
@@ -46,6 +46,8 @@ Pi/App/               PiApp, AppModel (machines, prefs, one HubClient per machin
 Pi/Core/              JSON, Envelope (sodium), HubClient (pair, rpc, agent, SSE events), SSEParser, Models, Keychain (+ MachineStore)
 Pi/Pairing/           PairingView (scan, paste, inline errors), ScannerView (VisionKit DataScanner)
 Pi/Shell/             WebShell (WKWebView), ShellView (native loading/offline), NativeBridge (piNative handler)
+Pi/Voice/             VoiceEngine (port of web/voice.js VoiceMode), VoiceCore (web/voice-core.js in JSContext), VoicePorts (seams),
+                      RealtimeClient + Levels (WebRTC), AudioSessionController, BasicVoice, Earcons, LiveFleet, VoiceHost (voice.start)
 PiWidgets/            placeholder widget bundle (Live Activity and Control arrive in Step 7)
 Shared/               VoiceActivityAttributes (app + widgets)
 scripts/integration.sh
@@ -55,7 +57,7 @@ scripts/integration.sh
 
 - **Machines** live in the Keychain as `[{ id, machine, name, origin, d, k, primary, added, lastSeen }]` (account `machines`, service `pi-mobile`, accessible after first unlock, shared access group `$(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared` when entitled). A single older `device` entry is migrated. The page's `localStorage` copy is rewritten at every load (`BRIDGE.md`).
 - **ATS:** `NSAllowsArbitraryLoads` stays on with `NSAllowsLocalNetworking`: hubs are reached on plain HTTP over the LAN or Tailscale (`100.x`), and every payload is end-to-end encrypted. [verify] on a device whether `NSAllowsLocalNetworking` alone covers Tailscale addresses; if it does, drop `NSAllowsArbitraryLoads`.
-- **Voice and dictation** messages from the page answer "not in this version yet" until Steps 5 and 8.
+- **Voice engine** (plan Step 5): every decision goes through `web/voice-core.js`, loaded from the hub (`GET /voice-core.js`) and else from the copy the `Bundle voice-core.js` pre-build phase puts in the app. `PiTests/Voice` drives the engine with `FakeRealtime` + `FakeHub` and that real file. Device-only checks are marked `[verify]` in the code.
 
 ## Device checklist [device]
 

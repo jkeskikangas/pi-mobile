@@ -8,6 +8,8 @@ final class AppModel {
     /// Computers the page dropped that still accept this phone: the user confirms before the key goes.
     var forgetQueue: [Machine] = []
     let prefs: VoicePrefs
+    /// The app's one voice engine (shell, bridge `voice.start`, intents, Live Activity).
+    let voice = VoiceEngine()
     @ObservationIgnored private let store: MachineStore
     @ObservationIgnored private var clients: [String: HubClient] = [:]
     @ObservationIgnored var session: URLSession = .shared
