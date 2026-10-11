@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
+import { httpsUrl } from "../bin/https-url.mjs";
 import { b64u, randomKey } from "./crypto.ts";
 import type { ApnsConfig, ApnsToken } from "./apns.ts";
 import type { RelayTarget } from "./relay.ts";
@@ -106,7 +107,7 @@ export function loadConfig(dir = stateDir()): Config {
 	const raw = readJson<Partial<Config>>(configPath(dir), {});
 	const config: Config = { ...DEFAULT_CONFIG, ...raw };
 	// HTTPS only: a plain-HTTP address would never be offered to a phone.
-	if (config.publicUrl !== undefined && !/^https:\/\/[^\s/]+/.test(String(config.publicUrl))) config.publicUrl = undefined;
+	if (config.publicUrl !== undefined) config.publicUrl = httpsUrl(config.publicUrl);
 	if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) config.port = DEFAULT_CONFIG.port;
 	return config;
 }

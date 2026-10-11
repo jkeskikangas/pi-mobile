@@ -28,6 +28,7 @@ import { registerDictation } from "./voice/dictation.ts";
 import { VoiceHost } from "./voice/host.ts";
 import { registryComplete } from "./voice/model.ts";
 import { agentVoiceNote } from "./voice/speech.ts";
+import { httpsUrl } from "../bin/https-url.mjs";
 
 /** Set by `/remote off` → "Only this session"; lives on globalThis so it survives /new and /reload. */
 const HIDDEN = Symbol.for("pi-mobile.hidden");
@@ -404,9 +405,10 @@ export default function piMobile(pi: ExtensionAPI): void {
 			const v = await c.ui.input(`HTTPS address that forwards to port ${cfg.port}; empty for automatic (Tailscale Serve)`, cfg.publicUrl ?? "https://");
 			if (v === undefined) return;
 			const trimmed = v.trim().replace(/\/+$/, "");
-			const empty = !trimmed || trimmed === "https:";
-			if (!empty && !/^https:\/\/[^\s/]+/.test(trimmed)) return c.ui.notify("That is not an https:// address.", "warning");
-			next.publicUrl = empty ? undefined : trimmed;
+			const empty = !trimmed || trimmed === "https:" || trimmed === "https://";
+			const url = httpsUrl(trimmed);
+			if (!empty && !url) return c.ui.notify("That is not a plain https:// address (no user name, ? or #).", "warning");
+			next.publicUrl = empty ? undefined : url;
 		} else if (pick === port) {
 			const v = await c.ui.input("Port (1024–65535)", String(cfg.port));
 			if (v === undefined) return;

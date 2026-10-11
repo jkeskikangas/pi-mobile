@@ -16,6 +16,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSy
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { httpsUrl } from "./https-url.mjs";
 import { ensureServe, tailnetName } from "./tailscale.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -164,8 +165,9 @@ export async function add(host, opts = {}, dir = stateDir()) {
 		...(opts.origin ? { origin: opts.origin } : {}),
 	};
 	const result = await (opts.run || runRemote)(host, input);
-	const origin = String(result?.origin || "");
-	if (!/^https:\/\//.test(origin)) throw new Error(`${host} gave no HTTPS address (${origin || "none"})`);
+	const raw = String(result?.origin || "");
+	const origin = httpsUrl(raw);
+	if (!origin) throw new Error(`${host} gave no HTTPS address (${raw || "none"})`);
 	const mine = opts.tailnet !== undefined ? opts.tailnet : await tailnetName();
 	const suffix = mine?.split(".").slice(1).join(".");
 	if (suffix && !new URL(origin).hostname.endsWith(`.${suffix}`) && !opts.allowOrigin)
