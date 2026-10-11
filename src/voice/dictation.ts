@@ -218,7 +218,7 @@ class Recording {
 			} else this.c.ui.setEditorText(text);
 			const how = d.by === "model" ? "distilled" : `cleaned up locally${d.error ? ` (model unavailable: ${d.error.slice(0, 80)})` : ""}`;
 			this.c.ui.setWidget(WIDGET, [
-				t2.fg("dim", `🎙 ${secs}s, ${words} words → ${how}${send ? " and sent" : ""}${d.unclear.length ? ` · ${d.unclear.length} unclear point${d.unclear.length > 1 ? "s" : ""} noted` : ""} · /voice raw for the transcript · /voice undo restores`),
+				t2.fg("dim", `Dictated ${secs}s, ${words} words → ${how}${send ? " and sent" : ""}${d.unclear.length ? ` · ${d.unclear.length} unclear point${d.unclear.length > 1 ? "s" : ""} noted` : ""} · /voice raw for the transcript · /voice undo restores`),
 			]);
 		} catch (e: any) {
 			if (this.state === "thinking") this.cancel(`Voice input: ${e?.message ?? e}`, "error");
@@ -251,7 +251,7 @@ class Recording {
 		const meter = this.levels.map((l) => BARS[Math.min(BARS.length - 1, Math.round(Math.sqrt(l) * (BARS.length - 1)))]).join("");
 		const head =
 			this.state === "starting"
-				? t.fg("dim", "🎙 starting the microphone…")
+				? `${t.fg("dim", "○")} ${t.fg("dim", "Starting the microphone…  Esc cancels")}`
 				: this.state === "listening"
 					? `${t.fg("error", "●")} ${t.bold("Listening")} ${t.fg("dim", clock)} ${t.fg("accent", meter)}  ${t.fg("dim", "Enter/alt+m finish · Esc cancel")}`
 					: `${t.fg("accent", "◌")} ${t.bold("Distilling")} ${t.fg("dim", "what you meant…  Esc cancels")}`;

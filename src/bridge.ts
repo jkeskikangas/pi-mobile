@@ -501,7 +501,7 @@ export class Bridge {
 		}
 		const content = images.length ? [{ type: "text" as const, text }, ...images] : text;
 		const snippet = text.trim().split("\n")[0].slice(0, 60) || `${images.length} image(s)`;
-		originalNotify(this.ctx)?.(`📱 ${from}: ${snippet}`, "info");
+		originalNotify(this.ctx)?.(`From ${from}: ${snippet}`, "info");
 		if (this.ctx.isIdle()) {
 			this.pi.sendUserMessage(content, { expandPromptTemplates: true });
 			return { ok: true, delivered: "prompt" };

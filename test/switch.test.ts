@@ -67,7 +67,7 @@ test("a running pi joins and leaves when the machine switch flips elsewhere", as
 	assert.equal(h.statuses.at(-1), undefined, "not shared before /remote");
 
 	saveConfig({ ...loadConfig(), enabled: true }); // `/remote` in another terminal
-	await until(() => h.statuses.at(-1) === "📱 shared", 6000);
+	await until(() => h.statuses.at(-1) === "/remote", 6000);
 
 	saveConfig({ ...loadConfig(), enabled: false }); // `/remote off` → every session, elsewhere
 	await until(() => h.statuses.at(-1) === undefined, 6000);
@@ -79,7 +79,7 @@ test("/remote turns the switch on; /remote off can hide just this session", asyn
 	await h.fire("session_start", { reason: "startup" });
 	await h.run(""); // no paired device yet → shows the pairing code (rpc mode: as a notification)
 	assert.equal(loadConfig().enabled, true);
-	await until(() => h.statuses.at(-1) === "📱 shared");
+	await until(() => h.statuses.at(-1) === "/remote");
 
 	await h.run("off");
 	assert.equal(h.statuses.at(-1), undefined);
@@ -88,6 +88,6 @@ test("/remote turns the switch on; /remote off can hide just this session", asyn
 	assert.equal(h.statuses.at(-1), undefined, "the config watcher does not re-share a hidden session");
 
 	await h.run("");
-	await until(() => h.statuses.at(-1) === "📱 shared");
+	await until(() => h.statuses.at(-1) === "/remote");
 	await h.fire("session_shutdown", { reason: "quit" });
 });

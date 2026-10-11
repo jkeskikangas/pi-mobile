@@ -14,7 +14,7 @@
 
 import { unwatchFile, watchFile } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Bridge } from "./bridge.ts";
 import { registerHerdrBlocked } from "./herdr.ts";
 import { closeProcessHub, type LinkState } from "./link.ts";
@@ -39,7 +39,25 @@ const SUBCOMMANDS = [
 	{ value: "add", label: "add", description: "Add a machine you can ssh to (your phone approves it)" },
 	{ value: "remove", label: "remove", description: "Remove a machine from your phone's list" },
 ];
-const STATUS_ICON: Record<string, string> = { idle: "○", working: "●", waiting: "◐" };
+/** Session state as a glyph and a theme colour; the glyph alone still reads without colour. */
+const STATUS_ICON: Record<string, [string, "warning" | "accent" | "dim"]> = {
+	waiting: ["◐", "warning"],
+	working: ["●", "accent"],
+	idle: ["○", "dim"],
+};
+/** Prose in a panel wraps at a readable measure; only the QR code may make a panel wider. */
+const PANEL_MEASURE = 76;
+/**
+ * A line that sizes the panel instead of wrapping: an address (wraps only when the terminal is
+ * narrower) or, with `narrow`, a centred graphic (the QR code) replaced by that text when it can't fit.
+ */
+interface Fixed {
+	fixed: string;
+	width: number;
+	narrow?: string;
+}
+const unwrapped = (fixed: string): Fixed => ({ fixed, width: visibleWidth(fixed) });
+type PanelLine = string | Fixed;
 
 interface HubStatus {
 	pid: number;
@@ -73,14 +91,22 @@ export default function piMobile(pi: ExtensionAPI): void {
 		return { systemPrompt: e.systemPrompt + agentVoiceNote(mode) };
 	});
 
+	// Like Claude Code's `/rc`: the command that controls it, in plain text, green while sharing. No
+	// emoji (they ignore the theme colour and their width varies by terminal); the word carries the
+	// state too, so it reads without colour.
+	let everLinked = false;
 	const footer = (s: LinkState | undefined) => {
 		if (!ctx?.hasUI) return;
 		const t = ctx.ui.theme;
-		if (!s) return ctx.ui.setStatus("remote", undefined);
-		if (s.kind === "connecting") return ctx.ui.setStatus("remote", t.fg("dim", "📱 connecting…"));
-		if (s.kind === "error") return ctx.ui.setStatus("remote", t.fg("error", "📱 error"));
-		const n = s.clients.count;
-		ctx.ui.setStatus("remote", n ? t.fg("success", `📱 ${n} connected`) : t.fg("dim", "📱 shared"));
+		if (!s) {
+			everLinked = false;
+			return ctx.ui.setStatus("remote", undefined);
+		}
+		if (s.kind === "connecting")
+			return ctx.ui.setStatus("remote", everLinked ? t.fg("warning", "/remote reconnecting") : t.fg("dim", "/remote connecting"));
+		if (s.kind === "error") return ctx.ui.setStatus("remote", t.fg("error", "/remote failed"));
+		everLinked = true;
+		ctx.ui.setStatus("remote", t.fg("success", "/remote") + viewers(t, s.clients));
 	};
 
 	const start = (c: ExtensionContext) => {
@@ -99,10 +125,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 		b.onMessage = (msg) => {
 			if (msg.t === "paired" && closePanel) {
 				closePanel();
-				ctx?.ui.notify(
-					`📱 Paired ${msg.device.name}. Every pi session on this machine is on your phone.`,
-					"info",
-				);
+				ctx?.ui.notify(`Paired ${msg.device.name}. Every pi session on this machine is on your phone.`, "info");
 			}
 		};
 		bridge = b;
@@ -265,17 +288,18 @@ export default function piMobile(pi: ExtensionAPI): void {
 		const [primary, ...others] = s.endpoints;
 		const sessions = [...s.agents].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 		const phones = s.clients.count ? `${s.clients.count} phone${s.clients.count === 1 ? "" : "s"} connected` : "no phone connected right now";
-		await panel(c, [
-			t.bold(`pi-mobile · ${sessions.length} session${sessions.length === 1 ? "" : "s"} shared · ${phones}`),
+		await panel(c, "pi-mobile", "any key closes", [
+			`${t.fg("success", "Sharing")} ${sessions.length} session${sessions.length === 1 ? "" : "s"} ${t.fg("dim", "·")} ${phones}`,
 			"",
-			`Open on your phone: ${t.fg("accent", primary.url)}  ${t.fg("dim", primary.label)}`,
-			...others.filter((o) => o.label !== "this computer").map((o) => t.fg("dim", `                    ${o.url}  ${o.label}`)),
-			...(s.tunnelError ? [t.fg("error", `tunnel: ${s.tunnelError}`)] : []),
+			unwrapped(`${t.fg("dim", "Open")} ${t.fg("accent", primary.url)} ${t.fg("dim", primary.label)}`),
+			...others.filter((o) => o.label !== "this computer").map((o) => unwrapped(`${t.fg("dim", "or  ")} ${o.url} ${t.fg("dim", o.label)}`)),
+			...(s.tunnelError ? ["", t.fg("error", `Tunnel failed: ${s.tunnelError}`)] : []),
 			...serveEnableLines(c, s.serveEnable),
 			"",
 			...sessions.map((a) => {
-				const me = a.pid === process.pid ? t.fg("dim", " (this one)") : "";
-				return `${STATUS_ICON[a.status] ?? "○"} ${a.name}${me}  ${t.fg("dim", a.task ?? "")}`;
+				const [glyph, color] = STATUS_ICON[a.status] ?? STATUS_ICON.idle;
+				const me = a.pid === process.pid ? t.fg("dim", " · this terminal") : "";
+				return `${t.fg(color, glyph)} ${a.name}${me}${a.task ? `  ${t.fg("dim", a.task)}` : ""}`;
 			}),
 			"",
 			t.fg("dim", "/remote pair  another device · /remote off  stop sharing · /remote settings"),
@@ -294,31 +318,32 @@ export default function piMobile(pi: ExtensionAPI): void {
 			return;
 		}
 		const t = c.ui.theme;
-		await panel(c, [
-			t.bold(header),
+		const qr = qrLines(primary.url);
+		const narrow = t.fg("warning", `Widen the terminal to ${qr.width + 6} columns to show the QR code, or open the address below on your phone.`);
+		await panel(c, "Pair a phone", "closes when paired · any key closes", [
+			header,
 			"",
-			...qrLines(primary.url).lines,
+			...qr.lines.map((fixed) => ({ fixed, width: qr.width, narrow })),
 			"",
-			`${t.fg("accent", primary.label)}  ${primary.url}`,
-			...others.filter((o) => o.label !== "this computer").map((o) => t.fg("dim", `${o.label}  ${o.url}`)),
+			unwrapped(`${t.fg("accent", primary.url)} ${t.fg("dim", primary.label)}`),
+			...others.filter((o) => o.label !== "this computer").map((o) => unwrapped(`${o.url} ${t.fg("dim", o.label)}`)),
 			"",
 			t.fg("dim", "Single-use code, valid 10 min. Traffic is end-to-end encrypted."),
 			...serveEnableLines(c, pairing.serveEnable),
 			...(primary.label.startsWith("lan") && !pairing.serveEnable
 				? [t.fg("dim", "Voice and lock-screen notifications need HTTPS: install Tailscale here and on your phone, then run /remote again.")]
 				: []),
-			t.fg("dim", "Closes by itself once your phone is paired; any key closes it now."),
 		]);
 	}
 
 	/** Tailscale runs here but the tailnet has not enabled Serve: one click, and pi finishes by itself. */
-	function serveEnableLines(c: ExtensionCommandContext, link: string | undefined): string[] {
+	function serveEnableLines(c: ExtensionCommandContext, link: string | undefined): PanelLine[] {
 		if (!link) return [];
 		const t = c.ui.theme;
 		return [
 			"",
 			t.fg("warning", "Voice and lock-screen notifications need HTTPS. Turn on HTTPS for your tailnet (one click):"),
-			t.fg("accent", link),
+			unwrapped(t.fg("accent", link)),
 			t.fg("dim", "pi finishes the setup by itself; then run /remote again for the new code."),
 		];
 	}
@@ -392,11 +417,15 @@ export default function piMobile(pi: ExtensionAPI): void {
 		c.ui.notify("Saved. The hub restarts with the new settings and phones reconnect by themselves (pair again if the address changed).", "info");
 	}
 
-	async function panel(c: ExtensionCommandContext, lines: string[]): Promise<void> {
+	/** A bordered overlay: title in the top border, a key hint in the bottom one, prose wrapped to fit. */
+	async function panel(c: ExtensionCommandContext, title: string, hint: string, lines: PanelLine[]): Promise<void> {
 		if (c.mode !== "tui") {
-			c.ui.notify(lines.join("\n"), "info");
+			c.ui.notify(lines.filter((l) => typeof l === "string").join("\n"), "info");
 			return;
 		}
+		const fixedWidth = Math.max(0, ...lines.map((l) => (typeof l === "string" ? 0 : l.width)));
+		const proseWidth = Math.max(...lines.map((l) => (typeof l === "string" ? visibleWidth(l) : 0)));
+		const content = Math.max(fixedWidth, Math.min(PANEL_MEASURE, proseWidth), visibleWidth(title) + visibleWidth(hint) + 6);
 		await c.ui.custom<void>(
 			(_tui, theme, _kb, done) => {
 				closePanel = () => {
@@ -407,12 +436,30 @@ export default function piMobile(pi: ExtensionAPI): void {
 					render(width: number) {
 						const inner = Math.max(10, width - 4);
 						const border = (s: string) => theme.fg("borderAccent", s);
-						const out = [border(`╭${"─".repeat(inner + 2)}╮`)];
+						const row = (s: string) => {
+							const cut = truncateToWidth(s, inner);
+							return `${border("│")} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${border("│")}`;
+						};
+						const name = truncateToWidth(title, Math.max(1, inner - 2));
+						const out = [border("╭─ ") + theme.fg("accent", theme.bold(name)) + border(` ${"─".repeat(Math.max(0, inner - visibleWidth(name) - 1))}╮`)];
+						let narrowShown = false;
 						for (const l of lines) {
-							const cut = truncateToWidth(l, inner);
-							out.push(`${border("│")} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${border("│")}`);
+							if (typeof l !== "string") {
+								if (l.width <= inner) out.push(row(l.narrow ? " ".repeat((inner - l.width) >> 1) + l.fixed : l.fixed));
+								else if (!l.narrow) for (const w of wrapTextWithAnsi(l.fixed, inner)) out.push(row(w));
+								else if (!narrowShown) {
+									narrowShown = true;
+									for (const w of wrapTextWithAnsi(l.narrow, inner)) out.push(row(w));
+								}
+							} else if (!l) out.push(row(""));
+							else for (const w of wrapTextWithAnsi(l, inner)) out.push(row(w));
 						}
-						out.push(border(`╰${"─".repeat(inner + 2)}╯`));
+						const keys = visibleWidth(hint) + 4 <= inner ? hint : "";
+						out.push(
+							keys
+								? border(`╰${"─".repeat(inner - visibleWidth(keys) - 1)} `) + theme.fg("dim", keys) + border(" ─╯")
+								: border(`╰${"─".repeat(inner + 2)}╯`),
+						);
 						return out;
 					},
 					handleInput() {
@@ -425,13 +472,19 @@ export default function piMobile(pi: ExtensionAPI): void {
 				overlay: true,
 				overlayOptions: () => {
 					const cols = process.stdout.columns || 100;
-					const widest = Math.max(...lines.map((l) => visibleWidth(l)));
-					return { anchor: "center", width: Math.min(widest + 4, cols - 2), maxHeight: "95%" };
+					return { anchor: "center", width: Math.min(content + 4, cols - 2), maxHeight: "95%" };
 				},
 			},
 		);
 		closePanel = undefined;
 	}
+}
+
+/** Who is looking right now, dimmed after the green `/remote`: one phone by name, several by count. */
+function viewers(t: ExtensionContext["ui"]["theme"], clients: { count: number; names: string[] }): string {
+	if (!clients.count) return "";
+	const who = clients.names.length === 1 ? truncateToWidth(clients.names[0], 18, "…") : `${Math.max(clients.count, clients.names.length)} phones`;
+	return t.fg("dim", ` · ${who}`);
 }
 
 function rank(a: AgentInfo): number {

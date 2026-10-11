@@ -53,7 +53,7 @@ On the phone:
 - The header says what the open session is doing ("Working · 0:42", "Needs you · Allow file change?").
 - Tool calls are single rows (Read, Ran, Edited…); tap one for its output. Failures open with their error; edits show a diff.
 - Only the session on screen streams its output, so ten busy sessions cost little battery or data.
-- What you send from the phone is echoed in the terminal as `📱 <device>: …`.
+- What you send from the phone is echoed in the terminal as `From <device>: …`.
 
 ### Lock-screen notifications and HTTPS
 

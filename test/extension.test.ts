@@ -104,12 +104,12 @@ before(async () => {
 	writeFileSync(join(stateDir(), "config.json"), JSON.stringify({ port, expose: "local" }));
 	h = host();
 	await h.fire("session_start", { reason: "startup" });
-	await until(() => !!processHub() && h.statuses.at(-1) === "📱 shared");
+	await until(() => !!processHub() && h.statuses.at(-1) === "/remote");
 	phone = new Phone();
 	await phone.pair(processHub()!.createPairing().links[0].url);
 	agent = (await phone.rpc("hub")).agents[0].agent;
 	await phone.stream(undefined, agent);
-	await until(() => h.statuses.at(-1) === "📱 1 connected");
+	await until(() => h.statuses.at(-1) === "/remote · test phone");
 });
 
 after(async () => {
@@ -142,7 +142,7 @@ test("the phone sees the session and its transcript", async () => {
 test("prompts from the phone reach pi, steering or queueing while it works", async () => {
 	await call("send", { text: "add tests" });
 	assert.deepEqual(h.sent.at(-1), { content: "add tests", options: { expandPromptTemplates: true } });
-	assert.match(h.notes.at(-1)!, /📱 test phone: add tests/);
+	assert.match(h.notes.at(-1)!, /From test phone: add tests/);
 
 	h.setIdle(false);
 	await call("send", {
