@@ -201,8 +201,9 @@ final class VoiceEngine {
         uses = Int(deps.prefs.get(Self.usesKey) ?? "") ?? 0
         wireAudioSession()
         listen()
+        let g = gen
         await loadWorld()
-        if closed { return }
+        if closed || g != gen { return }
         loadPersonas()
         await open()
     }
@@ -307,17 +308,28 @@ final class VoiceEngine {
 
     /// A tap on the question card (`renderAsk` → answer).
     func answer(_ option: VoiceQuestion.Option) async {
-        guard let p = openPrompt else { return }
+        guard let id = question?.id else { return }
+        await answer(option, questionId: id)
+    }
+
+    /// Answers only if `questionId` is still pi's open question (a tap on a card that changed is rejected).
+    @discardableResult
+    func answer(_ option: VoiceQuestion.Option, questionId: String) async -> Bool {
+        guard !closed, let p = openPrompt, p["id"]?.string == questionId, grace == nil else { return false }
+        let g = gen
         do {
             var params: [String: JSON] = ["id": p["id"] ?? .null]
             if let v = option.value { params["value"] = v }
             try await sessionCall("answer", .object(params))
+            guard g == gen, !closed else { return true }
             if engineKind == .realtime { inject("[PI] The developer answered on screen: \(option.label). Do not ask again.", respond: false) }
             silence()
             if engineKind == .realtime && active { rt(["type": "response.cancel"]) }
             earcon("heard")
+            return true
         } catch {
-            setNote(error.localizedDescription)
+            if g == gen, !closed { setNote(error.localizedDescription) }
+            return false
         }
     }
 
@@ -335,12 +347,16 @@ final class VoiceEngine {
         let p = currentPersona
         if engineKind == .basic { return speak(Self.sampleLine(p)) }
         if engineKind != .realtime { return }
+        let g = gen
         stopRealtime()
         setState(.connecting)
         do {
             try await startRealtime()
+            guard g == gen, !closed else { return }
             inject("[PI] The developer just picked a new voice for you. Say only one short sentence in it: \"This is \(p?.name ?? "me").\"", respond: true)
         } catch {
+            // Ended (or reopened) while redialling: no fallback, no mic.
+            guard g == gen, !closed, engineKind == nil else { return }
             stopRealtime()
             startCascade()
             render()
@@ -665,13 +681,14 @@ final class VoiceEngine {
         timers.append(deps.scheduler.every(1) { [weak self] in self?.tick() })
         timers.append(deps.scheduler.every(0.1) { [weak self] in self?.updateLevels() })
         var realtimeError = ""
+        let g = gen
         do { try await startRealtime() } catch {
-            if closed { return }
+            guard g == gen, !closed, engineKind == nil else { return }
             realtimeError = error.localizedDescription
             stopRealtime()
             startCascade()
         }
-        if closed { return }
+        if closed || g != gen { return }
         render()
         if !realtimeError.isEmpty { basic(realtimeError) }
         earcon("listen")

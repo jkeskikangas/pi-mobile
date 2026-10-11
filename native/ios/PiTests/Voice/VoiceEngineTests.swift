@@ -297,6 +297,44 @@ final class VoiceEngineTests: XCTestCase {
 
     // MARK: review regressions
 
+    func testEndDuringPersonaRedialStartsNothing() async {
+        await open()
+        // The redial's voiceSession hangs, then fails after End.
+        hub.hold = ["voiceSession"]
+        hub.reply = { c in
+            if c.m == "voiceSession" { throw HubError.remote("realtime unavailable: off") }
+            return [:]
+        }
+        rt = FakeRealtime()
+        let t = Task { await engine.setPersona("cedar") }
+        await settle()
+        XCTAssertEqual(engine.state, .connecting)
+        engine.stop()
+        hub.release("voiceSession")
+        await t.value
+        await settle()
+        XCTAssertNil(engine.engineKind)
+        XCTAssertFalse(basic.started, "no basic-voice mic after End")
+        XCTAssertTrue(basic.spoken.isEmpty)
+        XCTAssertFalse(engine.isOpen)
+    }
+
+    func testCardAnswerIsCheckedAgainstTheShownQuestion() async {
+        await open()
+        hub.event("m1", ["type": "prompt", "agent": "a1", "prompt": ["id": "q1", "kind": "confirm", "title": "Run the tests?"]])
+        await settle()
+        hub.event("m1", ["type": "prompt_end", "agent": "a1", "id": "q1", "by": "terminal"])
+        hub.event("m1", ["type": "prompt", "agent": "a1", "prompt": ["id": "q2", "kind": "confirm", "title": "Delete the cache?"]])
+        await settle()
+        let yes = VoiceQuestion.Option(label: "Yes", value: true, destructive: false)
+        let stale = await engine.answer(yes, questionId: "q1")
+        XCTAssertFalse(stale)
+        XCTAssertTrue(hub.calls("answer").isEmpty, "a tap on the old card never answers the new question")
+        let ok = await engine.answer(yes, questionId: "q2")
+        XCTAssertTrue(ok)
+        XCTAssertEqual(hub.calls("answer").last?.p, ["id": "q2", "value": true])
+    }
+
     func startGraceForDeploy(_ id: String = "p1") async {
         say("deploy the app to production")
         rt.emit(["type": "response.done"])
