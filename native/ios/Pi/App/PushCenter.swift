@@ -157,29 +157,51 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
         // A build without push never enrols, and takes back an enrolment an earlier build left behind.
         let on = pushAvailable && enabled
         if on, relay != nil, token != nil, cap == nil { _ = await registerRelay() }
+        var why: [String: String] = [:]
         for m in machines {
-            guard let hub = try? await rpc(m, "hub", [:]) else { continue }
+            let hub: JSON
+            do { hub = try await rpc(m, "hub", [:]) } catch {
+                why[m.id] = "isn't reachable right now"
+                continue
+            }
             if let relay {
                 // Through the relay: each computer holds {url, cap}; a direct token an older build left goes.
                 if hub["apnsOn"]?.bool == true { _ = try? await rpc(m, "push", ["apns": .null]) }
-                guard hub["relay"]?.bool == true else { continue } // a computer too old for the relay
+                guard hub["relay"]?.bool == true else { // a computer too old for the relay
+                    why[m.id] = "runs an older pi-mobile: update it there"
+                    continue
+                }
                 var step = Self.relayAction(enabled: on, url: relay, cap: cap, relayOn: hub["relayOn"]?.bool ?? false, sent: registered.contains(relayTag(m)))
                 if step.reregister, let fresh = await registerRelay() {
                     step = Self.relayAction(enabled: on, url: relay, cap: fresh, relayOn: false, sent: false)
                 }
+                if on, cap == nil { why[m.id] = lastRelayError?.localizedDescription ?? "the notification relay can't be reached" }
                 if let p = step.rpc {
-                    guard (try? await rpc(m, "push", p)) != nil else { continue }
+                    do { _ = try await rpc(m, "push", p) } catch {
+                        if on { why[m.id] = error.localizedDescription }
+                        continue
+                    }
                     if p["relay"]?.isNull == true { registered.remove(relayTag(m)) } else { registered.insert(relayTag(m)) }
                 }
                 continue
             }
             let held = hub["apnsOn"]?.bool ?? false
+            if on, hub["apns"]?.bool != true { why[m.id] = "has no Apple push key: run /remote settings there" }
             if let p = Self.action(enabled: on, token: token, held: held, sent: registered.contains(tag(m))) {
-                guard (try? await rpc(m, "push", p)) != nil else { continue }
+                do { _ = try await rpc(m, "push", p) } catch {
+                    if on { why[m.id] = error.localizedDescription }
+                    continue
+                }
                 if p["apns"]?.isNull == true { registered.remove(tag(m)) } else { registered.insert(tag(m)) }
             }
         }
+        notifyStatus = on ? Dictionary(uniqueKeysWithValues: machines.map { ($0.id, why[$0.id]) }) : [:]
     }
+
+    /// After the last reconcile with notifications on: each computer's entry id → nil when it will notify
+    /// this phone, else why not (shown per computer in the web menu, BRIDGE.md `push.status`).
+    private(set) var notifyStatus: [String: String?] = [:]
+    var notifyingCount: Int { notifyStatus.values.filter { $0 == nil }.count }
 
     private func tag(_ m: Machine) -> String { "\(m.id)|\(m.d)|\(token ?? "")" }
     private func relayTag(_ m: Machine) -> String { "relay|\(m.id)|\(m.d)|\(cap ?? "")" }
@@ -272,7 +294,14 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
 
     func status() async -> JSON {
         let p = await permission()
-        return ["on": .bool(pushAvailable && enabled && p == "granted" && token != nil), "permission": .string(p), "available": .bool(pushAvailable)]
+        // On only when something is registered: at least one computer will notify this phone.
+        let on = pushAvailable && enabled && p == "granted" && token != nil && notifyingCount > 0
+        let computers = JSON.array(notifyStatus.sorted { $0.key < $1.key }.map { id, why in
+            var o: [String: JSON] = ["machine": .string(id), "notify": .bool(why == nil)]
+            if let why { o["why"] = .string(why) }
+            return .object(o)
+        })
+        return ["on": .bool(on), "permission": .string(p), "available": .bool(pushAvailable), "computers": computers]
     }
 
     struct Failure: LocalizedError {
@@ -300,6 +329,14 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
             throw lastRelayError as? RelayNotReady ?? Failure(errorDescription: "Couldn't reach the notification relay. Try again later.")
         }
         await reconcile()
+        // Never "on" with nothing registered: say which computer can't and why.
+        if notifyingCount == 0 {
+            enabled = false
+            let names = Dictionary(uniqueKeysWithValues: (model?.machines ?? []).map { ($0.id, $0.name) })
+            let reasons = notifyStatus.compactMap { id, why in why.map { "\(names[id] ?? "Your computer") \($0)" } }.sorted()
+            await reconcile()
+            throw Failure(errorDescription: reasons.isEmpty ? "Pair a computer first." : "No computer can notify this iPhone yet. \(reasons.joined(separator: "; ")).")
+        }
         return await status()
     }
 

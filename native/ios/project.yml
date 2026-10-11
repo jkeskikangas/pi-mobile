@@ -10,7 +10,9 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     PI_BUNDLE_PREFIX: dev.pi-mobile
-    PI_RELAY_URL: ""
+    # The push relay (relay/), used when PI_PUSH=YES; Debug builds register sandbox tokens there.
+    # Own-team self-builds with a different bundle ID set it to "" for direct APNs (README → Push).
+    PI_RELAY_URL: https://push.pi-mobile.dev
     MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""
@@ -61,8 +63,6 @@ targets:
           PI_APS_ENVIRONMENT: development
         Release:
           PI_APS_ENVIRONMENT: production
-          # The deployed push relay (relay/); Debug builds keep the direct own-team path. Override with PI_RELAY_URL=.
-          PI_RELAY_URL: https://push.pi-mobile.dev
     info:
       path: Pi/App/Info.plist
       properties:

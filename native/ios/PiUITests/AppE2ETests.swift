@@ -42,6 +42,9 @@ final class AppE2ETests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Where your voice goes"].exists)
         shot("02a-consent")
         allow.tap()
+        // A fresh simulator asks for the microphone next (a system alert in SpringBoard).
+        let micAlert = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]
+        if micAlert.waitForExistence(timeout: 3) { micAlert.tap() }
         let end = app.buttons["End voice mode"]
         if !end.waitForExistence(timeout: 10) {
             shot("02-voice-missing")

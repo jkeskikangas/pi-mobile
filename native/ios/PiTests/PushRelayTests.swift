@@ -117,6 +117,29 @@ final class PushRelayTests: XCTestCase {
         XCTAssertEqual(hubs["e1"]!.pushes.last?["relay"]?["cap"], "cap-ok")
     }
 
+    func testEachComputerSaysWhetherItWillNotifyAndWhyNot() async {
+        let c = center()
+        let ok = Hub()
+        await c.reconcile([mac, box]) { m, method, p in
+            if m.id == "e2" { throw HubError.network("down") }
+            return ok.rpc(method, p)
+        }
+        XCTAssertEqual(c.notifyingCount, 1)
+        XCTAssertEqual(c.notifyStatus["e1"], .some(nil))
+        XCTAssertEqual(c.notifyStatus["e2"], .some("isn't reachable right now"))
+        // An older hub without the relay can't notify, and says so.
+        await c.reconcile([mac]) { _, method, p in method == "hub" ? ["relayOn": false] : ok.rpc(method, p) }
+        XCTAssertEqual(c.notifyingCount, 0)
+        XCTAssertEqual(c.notifyStatus["e1"], .some("runs an older pi-mobile: update it there"))
+        // Relay not ready: nothing registered, and the reason is the relay's.
+        let d = center()
+        d.token = "ffff" // a token without a cap yet
+        d.relayRegister = { _ in throw PushCenter.RelayNotReady() }
+        await d.reconcile([mac]) { _, method, p in Hub().rpc(method, p) }
+        XCTAssertEqual(d.notifyingCount, 0)
+        XCTAssertEqual(d.notifyStatus["e1"], .some("Notifications aren't available yet. Try again later."))
+    }
+
     func testOffTakesTheRelayBackFromEveryComputer() async {
         let c = center()
         let hubs = ["e1": Hub(), "e2": Hub()]

@@ -70,6 +70,8 @@
 		offers: [], // machines offered by another of your computers, waiting for "Add"
 		accepted: undefined, // an offer already accepted from its notification
 		pushKeys: new Map(), // machine -> the push key it signs with
+		notifyOn: new Map(), // machine -> it holds this browser's push subscription (hub `pushOn`)
+		notifyWhy: new Map(), // machine -> why sharing the subscription with it failed
 	};
 	const Unauthorized = window.PiFleet.Unauthorized;
 	const PROTOCOL = 1; // src/protocol.ts
@@ -266,6 +268,7 @@
 			// The subscription's own key wins; without one, the computer serving the app decides.
 			if (!S.push.fromSub && (fleet.get(id)?.primary || !S.push.key)) S.push.key = hub.pushKey;
 			S.push.on = S.push.on || !!hub.pushOn;
+			S.notifyOn.set(id, !!hub.pushOn);
 			// iPhone app: a computer can send APNs once its key is set (/remote settings).
 			S.push.apns = S.push.apns || !!hub.apns;
 			// Every machine notifies on its own: give one that doesn't know this phone's subscription.
@@ -1662,13 +1665,14 @@
 				if (n?.available === false) body.appendChild(el("p", "note", "Notifications aren't available in this build of the app."));
 				else if (n?.on) add("Turn off notifications", () => setNativePush(false), "", "bell", "You get one when pi finishes or asks");
 				else add("Turn on notifications", () => setNativePush(true), "", "bell", n?.permission === "denied" ? "Allow them for pi in iPhone Settings first" : "When pi finishes or needs you");
-				if (n?.available !== false && !S.push.apns) body.appendChild(el("p", "note", "Your computer sends them once it has an Apple push key: run /remote settings there."));
+				if (n?.available !== false) notifyLines(body);
 			} else if (!pushSupported()) {
 				body.appendChild(el("p", "note", "On iPhone, add this page to your Home Screen (Share → Add to Home Screen) and open pi from there to get lock-screen notifications."));
 			} else {
 				g = group(body);
-				if (S.push.on) add("Turn off notifications", () => setPush(false), "", "bell", "You get one when pi finishes or asks");
-				else add("Turn on notifications", () => setPush(true), "", "bell", "When pi finishes or needs you");
+				if (pushOn()) add("Turn off notifications", () => setPush(false), "", "bell", "You get one when pi finishes or asks");
+				else add("Turn on notifications", () => setPush(true), "", "bell", Notification.permission === "denied" ? "Allow notifications for this site in the browser settings first" : "When pi finishes or needs you");
+				notifyLines(body);
 			}
 			if (window.PiVoice?.sheet) {
 				section(body, "Voice");
@@ -1818,19 +1822,57 @@
 		pill.hidden = false;
 	}
 
-	/** One-time offer, only where notifications can actually work. */
+	/** Notifications reach this phone from at least one computer (never "on" with nothing registered). */
+	function pushOn() {
+		if (window.PiNative) return !!S.push.native?.on;
+		return S.push.on && [...S.notifyOn.values()].some(Boolean);
+	}
+
+	/** Per computer: will it notify this phone, and if not, why (issue #4). */
+	function notifyLines(body) {
+		if (!fleet.machines.length) return;
+		const native = window.PiNative ? S.push.native?.computers || [] : null;
+		const on = window.PiNative ? !!S.push.native?.on || native.length > 0 : S.push.on;
+		for (const m of fleet.machines) {
+			const name = m.name || "Your computer";
+			let line;
+			if (!on) line = `${name} won't notify this phone: notifications are off.`;
+			else if (native) {
+				const c = native.find((x) => x.machine === m.id);
+				line = c?.notify ? `${name} notifies this phone.` : `${name} won't notify this phone${c?.why ? `: it ${c.why}` : " yet"}.`;
+			} else if (S.notifyOn.get(m.id)) line = `${name} notifies this phone.`;
+			else line = `${name} won't notify this phone: ${m.state !== "online" ? "it isn't reachable right now" : S.notifyWhy.get(m.id) || "it doesn't have this phone's subscription yet"}.`;
+			body.appendChild(el("p", "note notify-line", line));
+		}
+	}
+
+	/** What the one-time offer should say, or null: only where notifications can work, or how to get there. */
+	function onboardKind() {
+		if (store.get("pi-mobile-onboarded") || !S.device) return null;
+		if (window.PiNative) {
+			const n = S.push.native;
+			return n && n.available !== false && !n.on && n.permission !== "denied" ? "native" : null;
+		}
+		if (pushSupported()) return !pushOn() && Notification.permission !== "denied" ? "web" : null;
+		// iPhone Safari offers Web Push only to Home Screen apps: lead the user there.
+		return /iP(hone|ad|od)/.test(navigator.userAgent) && !navigator.standalone ? "homescreen" : null;
+	}
+
+	/** One-time offer, only where notifications can actually work (or the step that makes them work). */
 	function maybeOnboard() {
 		const box = $("onboard");
-		box.hidden = !(
-			pushSupported() &&
-			!S.push.on &&
-			Notification.permission !== "denied" &&
-			!store.get("pi-mobile-onboarded")
-		);
+		const kind = onboardKind();
+		box.hidden = !kind;
+		if (!kind) return;
+		const text = box.querySelector(".onboard-text");
+		if (kind === "homescreen") text.replaceChildren(el("b", "", "Get notified on this iPhone"), el("span", "", "Add pi to your Home Screen first"));
+		else text.replaceChildren(el("b", "", "Turn on notifications"), el("span", "", "When pi finishes or needs you"));
 		$("onboardYes").onclick = () => {
 			store.set("pi-mobile-onboarded", true);
 			box.hidden = true;
-			setPush(true);
+			if (kind === "native") setNativePush(true);
+			else if (kind === "web") setPush(true);
+			else toast("In Safari tap Share → Add to Home Screen, open pi from there, then turn notifications on.");
 		};
 		$("onboardNo").onclick = () => {
 			store.set("pi-mobile-onboarded", true);
@@ -1853,7 +1895,10 @@
 			: null;
 		return Promise.all([
 			callNative({ type: "push.status" })
-				.then((s) => (S.push.native = s))
+				.then((s) => {
+					S.push.native = s;
+					maybeOnboard();
+				})
 				.catch(() => {}),
 			consent,
 		]);
@@ -1876,6 +1921,7 @@
 			toast(on ? "Notifications on" : "Notifications off");
 		} catch (e) {
 			toast(`Notifications: ${e.message}`, "error");
+			await refreshNativePush();
 		}
 	}
 
@@ -1888,15 +1934,24 @@
 			if (on) {
 				if ((await Notification.requestPermission()) !== "granted") throw new Error("notifications are blocked for this site");
 				sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64u(S.push.key) });
-				S.push.on = true;
 				S.push.key = b64u(new Uint8Array(sub.options.applicationServerKey));
 				S.push.fromSub = true;
-				await Promise.all(fleet.machines.map((m) => shareSubscription(m.id, sub)));
-				toast("Notifications on");
+				const ok = await Promise.all(fleet.machines.map((m) => shareSubscription(m.id, sub)));
+				// Never "on" with nothing registered: say which computer refused and why.
+				if (!ok.some(Boolean)) {
+					await sub.unsubscribe().catch(() => {});
+					S.push.on = false;
+					const why = fleet.machines.map((m) => `${m.name || "your computer"}: ${m.state !== "online" ? "not reachable" : S.notifyWhy.get(m.id) || "no answer"}`);
+					throw new Error(`no computer accepted this phone (${why.join("; ")}). Try again when it is online.`);
+				}
+				S.push.on = true;
+				const missed = ok.filter((x) => !x).length;
+				toast(missed ? `Notifications on (${missed} computer${missed === 1 ? "" : "s"} not yet: see the menu)` : "Notifications on");
 			} else {
 				await Promise.all(fleet.machines.map((m) => fleet.rpc(m.id, "push", { subscription: null }).catch(() => {})));
 				await sub?.unsubscribe();
 				S.push.on = false;
+				for (const m of fleet.machines) S.notifyOn.set(m.id, false);
 				toast("Notifications off");
 			}
 		} catch (e) {
@@ -1911,16 +1966,27 @@
 	async function shareSubscription(id, sub) {
 		try {
 			sub ||= await (await navigator.serviceWorker.ready).pushManager.getSubscription();
-			if (!sub) return;
+			if (!sub) return false;
 			const hub = await fleet.rpc(id, "push", { subscription: sub.toJSON() });
 			if (hub?.pushKey && S.push.key && hub.pushKey !== S.push.key) {
 				const source = fleet.machines.find((m) => m.id !== id && m.state === "online" && S.pushKeys.get(m.id) === S.push.key);
-				if (!source) return;
+				if (!source) {
+					S.notifyWhy.set(id, "it signs notifications with another key; turn notifications off and on again");
+					S.notifyOn.set(id, false);
+					return false;
+				}
 				const vapid = await fleet.rpc(source.id, "vapid", {});
 				await fleet.rpc(id, "push", { subscription: sub.toJSON(), vapid });
 			}
 			S.pushKeys.set(id, S.push.key);
-		} catch {}
+			S.notifyOn.set(id, true);
+			S.notifyWhy.delete(id);
+			return true;
+		} catch (e) {
+			S.notifyOn.set(id, false);
+			S.notifyWhy.set(id, e.message || "it refused the subscription");
+			return false;
+		}
 	}
 
 	/** Moves every machine to a new signing key, so a removed one can no longer notify this phone. */
