@@ -433,9 +433,24 @@ final class VoiceEngineTests: XCTestCase {
         XCTAssertEqual(engine.state, .listening)
     }
 
-    func testSystemMuteAtStartAndMuteDropsGrace() async {
+    func testANewSessionStartsUnmutedAndEndingClearsTheMute() async {
+        // (b) a mute left on app-wide doesn't carry into a new session.
         session.isInputMuted = true
         await open()
+        XCTAssertFalse(engine.muted)
+        XCTAssertFalse(session.isInputMuted)
+        XCTAssertTrue(rt.micEnabled)
+        // (a) ending a muted session clears the app-wide mute.
+        engine.toggleMute()
+        XCTAssertTrue(session.isInputMuted)
+        engine.stop()
+        XCTAssertFalse(session.isInputMuted)
+        XCTAssertFalse(engine.muted)
+    }
+
+    func testSystemMuteDuringASessionAndMuteDropsGrace() async {
+        await open()
+        session.onInputMute?(true)
         XCTAssertTrue(engine.muted)
         XCTAssertEqual(engine.state, .paused)
         XCTAssertFalse(rt.micEnabled)

@@ -220,6 +220,10 @@ final class VoiceEngine {
         guard isOpen, !closed else { return }
         closed = true
         gen += 1
+        // Mute ends with the session (End button, Live Activity, intent, error): the app-wide input mute
+        // would otherwise silence every later dictation (issue #3).
+        if muted || deps?.audioSession?.isInputMuted == true { deps?.audioSession?.setInputMuted(false) }
+        muted = false
         dropGrace() // pi's question stays open in the app and the terminal
         deps?.earcons.play("off")
         if let fleet = deps?.fleet, !agent.isEmpty {
@@ -732,8 +736,10 @@ final class VoiceEngine {
             }
             route = s.route
             audioToken = AudioOwner.shared.claim()
-            // The system input mute persists (AirPods, Control Center): start in sync with it.
-            if s.isInputMuted { muted = true }
+            // Mute is scoped to a voice session (issue #3): a new session starts unmuted, even if a mute
+            // (AirPods, Control Center, an earlier session) was left on app-wide.
+            if s.isInputMuted { s.setInputMuted(false) }
+            muted = false
         }
         for (k, v) in infos { statusOf[k] = v["status"]?.string }
         heartbeat(true)

@@ -1,10 +1,46 @@
 import AVFoundation
 
+/// The app-wide input mute (`AVAudioApplication`), a seam for tests.
+@MainActor
+protocol InputMute: AnyObject {
+    var isInputMuted: Bool { get }
+    func setInputMuted(_ muted: Bool) throws
+}
+
+@MainActor
+final class SystemInputMute: InputMute {
+    var isInputMuted: Bool { AVAudioApplication.shared.isInputMuted }
+    func setInputMuted(_ muted: Bool) throws { try AVAudioApplication.shared.setInputMuted(muted) }
+}
+
 /// AVAudioRecorder: AAC in .m4a, mono, 16 kHz. The session is `.playAndRecord` only while recording.
 @MainActor
 final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate {
     var onEnded: ((String) -> Void)?
     var onLevel: ((Double) -> Void)?
+    /// Voice mode's mute (and AirPods / Control Center) sets the app-wide input mute, which outlives voice
+    /// mode: every later recording is then digital silence (issue #3). Dictation is an explicit "listen now".
+    var inputMute: InputMute = SystemInputMute()
+    /// The loudest instantaneous level of this take, in dB (-160 = digital silence).
+    private(set) var peakDB: Double = -160
+
+    /// The sentence to show instead of sending a take whose loudest moment was silence, else nil.
+    nonisolated static func silenceMessage(peakDB: Double, stillMuted: Bool) -> String? {
+        // Only digital silence (a muted or blocked input): a real microphone in a quiet room still reads
+        // about -70 dB or louder. Quiet speech is the hub's call (`silent` from transcribe).
+        guard peakDB <= -100 else { return nil }
+        if stillMuted { return "the microphone is muted for pi. Unmute it (AirPods stem, Control Center or voice mode) and try again." }
+        return "the microphone recorded only silence. Check that no other app or call is using it and that pi has microphone access in Settings, then try again."
+    }
+
+    /// Unmutes the app-wide input mute for a take; returns whether it is still muted afterwards.
+    static func unmuteForTake(_ m: InputMute) -> Bool {
+        if m.isInputMuted {
+            try? m.setInputMuted(false)
+            print("pi dictation: the input was muted at start; unmuted for the take (still muted: \(m.isInputMuted))")
+        }
+        return m.isInputMuted
+    }
     private var recorder: AVAudioRecorder?
     private var meter: Timer?
     /// Shared-session ownership (AudioOwner): release only if voice mode didn't take it since.
@@ -23,6 +59,10 @@ final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate 
             try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try s.setActive(true)
             audioToken = AudioOwner.shared.claim()
+            if Self.unmuteForTake(inputMute) {
+                throw DictationError(message: Self.silenceMessage(peakDB: -160, stillMuted: true)!)
+            }
+            peakDB = -160
             let r = try AVAudioRecorder(url: url, settings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 16_000,
@@ -47,6 +87,7 @@ final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate 
                 guard let r = self?.recorder else { return }
                 r.updateMeters()
                 let db = Double(r.averagePower(forChannel: 0)) // -160…0
+                if let self { self.peakDB = max(self.peakDB, Double(r.peakPower(forChannel: 0))) }
                 self?.onLevel?(min(1, max(0, (db + 50) / 50)))
             }
         }
@@ -54,10 +95,20 @@ final class AudioRecorder: NSObject, DictationRecorder, AVAudioRecorderDelegate 
 
     func stop() async throws -> Data {
         guard let r = recorder else { throw DictationError(message: "nothing is being recorded.") }
-        return try await withCheckedThrowingContinuation { c in
+        r.updateMeters()
+        peakDB = max(peakDB, Double(r.peakPower(forChannel: 0)))
+        let peak = peakDB, muted = inputMute.isInputMuted
+        let data: Data = try await withCheckedThrowingContinuation { c in
             stopping = c
             r.stop() // → audioRecorderDidFinishRecording
         }
+        #if DEBUG
+        let input = AVAudioSession.sharedInstance().currentRoute.inputs.first
+        print("pi dictation: peak \(Int(peak)) dB, \(data.count) bytes, muted \(muted), input \(input?.portType.rawValue ?? "none")/\(input?.portName ?? "")")
+        #endif
+        // Never send silence to be transcribed into nothing: say why instead.
+        if let why = Self.silenceMessage(peakDB: peak, stillMuted: muted) { throw DictationError(message: why) }
+        return data
     }
 
     func cancel() {
