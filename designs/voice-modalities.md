@@ -62,6 +62,73 @@ Why it is obvious: nothing unsent is invisible, nothing is merged behind your ba
 
 `/dictate` and alt+m turn speech into a prompt you edit before sending; nothing is spoken back. Voice mode is a conversation. Both use the editor the same way, so moving between them needs nothing new.
 
+## Long-form: talk it through, get a draft
+
+Talking for minutes is how people think through a feature, a bug or a design. Claude's dictation, Superwhisper's modes and Wispr Flow summarise such a ramble once, at the end. That leaves three gaps: nothing shows what was understood while you talk, the summary can lose or invent things without you noticing, and fixing it means editing a wall of text or rambling again. Here the result is a **draft**: a structured Markdown document you watch form, can check against what you said, and keep shaping by voice or keyboard until Enter sends it.
+
+### Rules
+
+1. **Length is not a mode.** A short dictation becomes a prompt, as today. A long one, or one whose content is a description rather than a request, becomes a draft. Nobody picks a mode.
+2. **You end it, not a pause.** Pauses are thinking. A draft recording ends on Enter, alt+m, or "that's it" (in voice mode). The 5-minute cap goes; the limit becomes 30 minutes.
+3. **Faithful and checkable.**
+   - Nothing is added that you didn't say.
+   - When you contradict yourself, the later statement wins and the draft notes it: *You first said X, later Y; kept Y.*
+   - Tangents go to an **Also mentioned** section; nothing you said is dropped silently.
+   - Ambiguities become **Open questions**.
+   - The transcript is written to disk as you speak; `/dictate raw` shows it, and neither a crash nor Esc loses it.
+4. **The shape follows the content, and you can name it.** A request becomes a prompt, a design musing becomes design notes, several things to do become a task list. Saying the shape at either end ("make this a spec") overrides the guess. Drafts use the session's own model, not the fast one: quality matters more than seconds here.
+5. **The draft lives in the editor**, rendered (below), and is refined by voice ("drop the third point", "add that it must work offline") or by typing, in any mix. Enter sends it to pi.
+
+### The draft editor: rendered Markdown that shows what just changed
+
+While a draft is open, pi's editor is replaced (`ctx.ui.setEditorComponent` with `CustomEditor`, so pi's shortcuts keep working) by a draft editor:
+
+- **Live preview, like Obsidian or Typora.** Every line is rendered as Markdown (headings, bullets, emphasis, code) except the line the cursor is on, which shows its source so typing works as in any editor. Uses pi-tui's `Markdown` component and the theme's Markdown colours (`getMarkdownTheme()`).
+- **Recent changes glow, then fade.** What dictation just added or changed gets the accent background, which steps down through two dimmer shades to normal over about three seconds. Removed text stays briefly as dim struck-through text, then disappears. Your own typing is never highlighted: the glow means "this came from what you said".
+- **It follows the change.** While you speak, the view scrolls to keep the latest change visible; the editor grows to at most 60% of the terminal height, then scrolls. Typing or moving the cursor stops the following until the next dictated change.
+- **Status line:** *Draft · 6:42 of speech · 2 open questions · /dictate raw for the transcript · Enter sends · Esc keeps it as text*.
+- **Without motion** (a reduced-motion setting, or a terminal without enough colours): no fade; changed lines get a `▎` mark in the left margin until the next key press.
+- Esc turns the draft into ordinary editor text; nothing is lost.
+
+During the recording, the same view shows the **outline forming**: one line per topic heard so far, open threads marked `(?)`, updated every ~20 s from the transcript so far. When you stop, the outline is replaced by the draft, with the changes glowing.
+
+```
+● Listening 6:42 · Enter finish · Esc keeps transcript
+  Retry logic: exponential backoff, cap at 5
+  Flaky upload test: probably the timeout
+  Docs (?)
+```
+
+### In voice mode: recognising a monologue
+
+In a conversation a long monologue is "thinking out loud". The voice must neither interrupt nor send fragments to pi.
+
+- **Intent, not keywords.** The voice model recognises that you are composing something (describing a feature, listing requirements, reasoning about a design) and calls a `draft` tool. From then on what you say goes into the draft instead of into the conversation.
+- **Duration as a backstop.** Continuous speech for more than ~20 s without addressing the voice also starts a draft (decided locally, so the model can't miss it). Draft capture starts mid-utterance without losing anything already said.
+- **Visible, and undoable.** Starting a draft is obvious: the draft editor appears with the outline forming, and a soft tone marks it. If it was wrong ("no, just answer that"), the draft closes and what you said becomes an ordinary request.
+- **While drafting** the realtime session stops creating responses (`turn_detection.create_response: false`) so pauses never trigger a reply; the voice stays silent.
+- **Closing:** "that's it", or a pause of ~8 s after which the voice asks once, quietly, "is that everything?".
+- **Read-back follows the output rule:** one spoken sentence ("Got it: three things, retries, the flaky test and docs, and two questions"), the draft as text.
+- **Clarifying by voice.** The voice asks the open questions one at a time; each answer edits the draft, and the edit glows. Voice is better than text at this.
+- **Sending:** "send it", or Enter. Eyes-free (phone): the read-back gives the count and the top-level points; the draft waits on screen.
+
+Dictation and voice mode share the draft and the draft editor; the only difference is whether a voice talks back.
+
+### Phase 1: long dictation in the terminal (buildable now)
+
+| Area | Change |
+|---|---|
+| Recording (`dictation.ts`) | `MAX_MS` 5 min → 30 min. No silence stop once the recording is longer than 30 s (silence still stops a short dictation with nothing said). |
+| Transcript safety | Recognised text is appended to `<speechDir>/drafts/<timestamp>.txt` as each segment finalises; deleted only after the draft is sent or 7 days. `/dictate raw` reads it. |
+| Recogniser | Apple: restart the stream every ~5 min at a pause, carrying context hints over (long-run stability unverified; test first). OpenAI: transcribe in ~60 s chunks cut at pauses. |
+| Outline | Every ~20 s of new speech, the fast model turns the transcript so far into one line per topic (≤ 8 lines); shown in the draft editor during recording. |
+| Draft | On finish, a recording longer than ~60 s, or one whose content is a description, is distilled with a long-form prompt: shape detection, the sections above, contradictions noted, nothing added. Session model. |
+| Draft editor | Live-preview Markdown, glow-and-fade for dictated changes, follow-the-change, the status line, the no-motion fallback. Replaces the editor while a draft is open; Esc or Enter restores pi's editor. |
+| Refining | Dictating while a draft is open edits it ("Editing by voice", already in `distill.ts`), with the changes glowing. |
+| Tests | Long-form prompt parsing (sections, contradictions, also-mentioned); transcript written incrementally and recoverable after a crash; the glow fades on schedule and never marks typed text; a 10-minute recorded ramble (file mic, `PI_SPEECH_MIC=file:`) produces a draft that keeps every point from a hand-made checklist. |
+
+Later phases: the draft editor and drafts in the phone composer; the monologue handling in voice mode.
+
 ## Behaviour of the voice itself
 
 1. **The voice never knows; pi knows.** It answers only from the conversation and pi's reports. Anything needing a tool, a file or current information goes to pi (issue #5).
@@ -117,7 +184,7 @@ Transport: WebRTC from Node with `werift` (pure TypeScript, no native build; ~8 
 ## Open questions
 
 1. GPT-Live with the ChatGPT sign-in: the endpoint accepts the call (`?intent=quicksilver&architecture=avas`, `OpenAI-Alpha: quicksilver=v2`, `model: gpt-live-1-codex`, `delegation: {type: "client"}`) and connects, then closes with "Voice session access denied." Likely gated to Codex's own clients or by plan; not pursued further. GPT-Live therefore needs an API key.
-2. Can an extension show a marked spoken segment *inside* pi's editor, or only beside it (a widget above the editor)? Decides how rule 2 looks.
+2. ~~Can an extension show a marked spoken segment inside pi's editor?~~ Yes: `ctx.ui.setEditorComponent` with `CustomEditor` replaces the editor while keeping pi's shortcuts; the same mechanism carries the draft editor.
 3. Remote sessions: how does a remote pi's editor show a parked request, given the voice runs on the laptop? Through the machine link's editor commands, or the laptop keeps the parked text and pastes on Enter.
 4. Typing-pause length and the parking word list are starting values to tune.
 
