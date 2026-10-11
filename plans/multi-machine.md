@@ -128,14 +128,27 @@ Then update:
 
 ## Status (2026-10-11, on `main`, 0.2.0)
 
-- **Done:** steps 1–5 and 7, plus step 6's computer picker, and **Add** on the offer's notification (Android). The command is `bin/pi-mobile.mjs`: plain JavaScript, because Node won't strip TypeScript types inside `node_modules`, so `npx` runs it on a fresh box. The Tailscale Serve logic is `bin/tailscale.mjs`, shared with the hub (`src/expose.ts` re-exports it), so `enrol` finds a box's address exactly as its hub does.
+- **Done:** steps 1–7, the code-checkable part of step 8 (README "Several computers", the comparison table, `docs/ui.md`, `plans/native-apps.md`), and **Add** on the offer's notification (Android).
+  - **Scan in Add a computer** (2026-10-11): a camera scan sheet in `web/app.js` reads with `BarcodeDetector`, else the vendored jsQR 1.4.0 (`web/qr.js`, Apache-2.0, licence in `web/qr.LICENSE`, 130 KB minified, loaded on first use). A pi link goes through the paste flow. In the iPhone app, Scan uses the native VisionKit scanner (bridge `scan`, gated on `window.PiNative.scan`).
+  - **Step 6** checked end to end: the picker shows only the chosen computer's folders, and the spawn runs there (`npm run shots -- --only machines`, "new session on the box").
+  - The command is `bin/pi-mobile.mjs`: plain JavaScript, because Node won't strip TypeScript types inside `node_modules`, so `npx` runs it on a fresh box. The Tailscale Serve logic is `bin/tailscale.mjs`, shared with the hub (`src/expose.ts` re-exports it), so `enrol` finds a box's address exactly as its hub does.
 - **Covered by tests:**
   - `test/machines.test.ts`: enrol/add/remove, offers, CORS, CSP and the push key;
   - `test/fleet.test.ts`: real hubs; one list, routing, offline and back, revoked, duplicates;
   - `matchSession`;
-  - `npm run shots -- --only machines`, in both themes at 390 and 320 px.
-- **Not built:** Scan in Add a computer (paste only for now; iOS has no `BarcodeDetector`).
-- **Not verified:**
+  - `npm run shots -- --only machines`, in both themes at 390 and 320 px;
+  - `test/qr.test.ts`: jsQR reads the QR `/remote` draws, on light and dark terminals; `npm run shots -- --only scan`: every scan-sheet state, and both decoders against a fake camera;
+  - `BridgeTests`: the native `scan` replies (link, cancelled, busy).
+- **Not built:** nothing.
+- **What remains** is the real-world check in step 8, which needs the owner's laptop and two boxes on Tailscale:
+  - `add` for each box over real ssh, with `tailscale serve` on a real box, then approve on the phone;
+  - close the lid: the boxes keep working and notifying, and the laptop shows offline;
+  - `remove` a box;
+  - voice-switch from a box session to a laptop session and back;
+  - open the app from the Home Screen while the laptop sleeps (and the iOS offline launch);
+  - scan a real `/remote pair` QR in Safari (jsQR) and in the iPhone app (VisionKit);
+  - Chrome Local Network Access on Android.
+- **Not verified** (part of that check):
   - `/remote add` over real ssh, and `tailscale serve` on a real box;
   - the iOS offline launch;
   - Chrome Local Network Access.

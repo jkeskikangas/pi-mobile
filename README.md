@@ -118,8 +118,9 @@ Every session on every computer, in one list on the phone, each labelled with it
 1. **Once:** run `/remote` on your laptop and scan the QR code.
 2. **For each new box:** in pi on the laptop, run `/remote add <ssh-host>` (or ask pi to; scripts can run `npx pi-mobile add <ssh-host>`). Your phone asks "Add box?"; tap **Add** and its sessions join the list. No QR code, no keys to copy.
 3. **When a box goes:** `/remote remove box`, or remove it on the phone under **⋯ → Computers**.
+4. **Every day:** one list. While the laptop sleeps it shows as "Offline since 14:02"; the boxes keep working and keep sending notifications, and the app still opens. Voice mode can switch between computers ("the api session on the box"), and **New session** asks which computer to start pi on.
 
-While the laptop sleeps it shows as "Offline since 14:02"; the boxes keep working and keep sending notifications, and the app still opens. Voice mode can switch between computers ("the api session on the box").
+No computer you already use can reach the new one? Run `/remote pair` on it, then on the phone **⋯ → Computers → Add a computer** and scan its QR code or paste its link.
 
 `add` sets pi-mobile up on the box over SSH and needs Tailscale there, with HTTPS turned on for your tailnet (it tells you the exact fix if not). Your phone needs Tailscale too. Machine names appear in public certificate logs as `box.<tailnet>.ts.net`, so name machines accordingly. Run pi on the box inside herdr or tmux so it survives your SSH disconnects. pi-mobile only listens on loopback, private LAN and Tailscale addresses, never on a public IP. Design: [designs/multi-machine.md](designs/multi-machine.md).
 
@@ -153,7 +154,7 @@ While the laptop sleeps it shows as "Offline since 14:02"; the boxes keep workin
 | Answer any extension's dialogs from the phone | **yes** | no | notifies only | pi-ask questions | not stated |
 | Every pi on the machine, one pairing | yes | yes (agent mesh) | yes (central server) | per-directory room | per session toggle |
 | Lock-screen notifications | Web Push (HTTPS) | native app | Web Push (HTTPS) | Web Push | APNs via a gateway |
-| Several computers in one list | yes, phone to each computer, no relay | yes (agent mesh, via its relay) | not stated | not stated | not stated |
+| Several computers in one list | yes, phone to each computer, no relay; add one from pi or by QR | yes (agent mesh, via its relay) | not stated | not stated | not stated |
 
 The others have things this doesn't: native apps in the app stores (remote-pi, Pi Relay; pi-mobile's [iPhone app](#iphone-app) you build yourself), an agent-to-agent mesh across machines (remote-pi), and transcripts of sessions that have since closed (mipsel64).
 

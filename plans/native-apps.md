@@ -69,7 +69,7 @@ All of it exists today; the web app (`web/app.js`, `web/voice.js`) is the refere
 - sessions are keyed `machine/agent`;
 - a machine that can't be reached shows as offline.
 
-Machines are added by a trusted machine (`/remote add box`). The offer arrives as a `machine_offer` event (or a push) and the app asks "Add box?". Add a computer (scan or paste) is the fallback. With APNs (Step 9), every machine sends its own notifications. Voice follows `plans/multi-machine.md` step 7:
+Machines are added by a trusted machine (`/remote add box`). The offer arrives as a `machine_offer` event (or a push) and the app asks "Add box?". Add a computer (scan or paste) is the fallback; in the app its Scan button opens the native VisionKit scanner through the bridge's `scan` message (`native/ios/BRIDGE.md`), since `WKWebView` has no `BarcodeDetector`. With APNs (Step 9), every machine sends its own notifications. Voice follows `plans/multi-machine.md` step 7:
 - `PiVoiceCore.matchSession` for switching;
 - one speech machine per voice mode;
 - the machine named only when there are several;
