@@ -57,6 +57,21 @@
 		});
 	}
 
+	// ── native app (native/ios/BRIDGE.md) ──────────────────────────────────────────────────────────────
+	// Inside the iOS app, window.PiNative exists and the native side records dictation and runs voice
+	// mode. Without it, nothing below changes behaviour.
+	const native = () => !!window.PiNative;
+	function nativePost(msg) {
+		const h = window.webkit?.messageHandlers?.piNative;
+		return h ? Promise.resolve(h.postMessage(msg)) : Promise.reject(new Error("the app is not reachable"));
+	}
+	/** Stores a voice preference; the native app keeps its own copy for native voice mode. */
+	function setPref(key, value) {
+		localStorage.setItem(key, value);
+		if (native()) nativePost({ type: "prefs", key, value }).catch(() => {});
+	}
+	const NATIVE_REC = { native: true };
+
 	function recorderMime() {
 		for (const m of ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/ogg;codecs=opus"]) if (window.MediaRecorder?.isTypeSupported?.(m)) return m;
 		return "";
@@ -102,24 +117,39 @@
 	async function startDictation(held) {
 		if (dict.busy || dict.rec) return;
 		dict.held = held;
-		try {
-			dict.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
-		} catch (e) {
-			return showDictMessage(micError(e), "error");
+		if (native()) {
+			dict.busy = true;
+			try {
+				await nativePost({ type: "dictation.start" });
+			} catch (e) {
+				return showDictMessage(`Microphone: ${e?.message || e}`, "error");
+			} finally {
+				dict.busy = false;
+			}
+			dict.rec = NATIVE_REC;
+			dict.level = 0;
+			dict.levels = [];
+			dict.started = Date.now();
+		} else {
+			try {
+				dict.stream = await navigator.mediaDevices.getUserMedia({ audio: MIC });
+			} catch (e) {
+				return showDictMessage(micError(e), "error");
+			}
+			const mime = recorderMime();
+			dict.rec = new MediaRecorder(dict.stream, mime ? { mimeType: mime } : undefined);
+			dict.chunks = [];
+			dict.levels = [];
+			dict.rec.ondataavailable = (e) => e.data.size && dict.chunks.push(e.data);
+			dict.rec.start(250);
+			dict.started = Date.now();
+			try {
+				const c = audioCtx();
+				dict.analyser = c.createAnalyser();
+				dict.analyser.fftSize = 512;
+				c.createMediaStreamSource(dict.stream).connect(dict.analyser);
+			} catch {}
 		}
-		const mime = recorderMime();
-		dict.rec = new MediaRecorder(dict.stream, mime ? { mimeType: mime } : undefined);
-		dict.chunks = [];
-		dict.levels = [];
-		dict.rec.ondataavailable = (e) => e.data.size && dict.chunks.push(e.data);
-		dict.rec.start(250);
-		dict.started = Date.now();
-		try {
-			const c = audioCtx();
-			dict.analyser = c.createAnalyser();
-			dict.analyser.fftSize = 512;
-			c.createMediaStreamSource(dict.stream).connect(dict.analyser);
-		} catch {}
 		$("micBtn").classList.add("rec");
 		$("micBtn").setAttribute("aria-pressed", "true");
 		$("micBtn").setAttribute("aria-label", "Finish dictation");
@@ -142,20 +172,39 @@
 		const rec = dict.rec;
 		dict.rec = null;
 		if (!rec) return;
-		const stopped = new Promise((r) => (rec.onstop = r));
-		rec.stop();
-		await stopped;
-		stopStream();
-		if (!keep) return hideDictBar();
+		let audio, mime, size;
+		if (rec === NATIVE_REC) {
+			let r;
+			try {
+				r = await nativePost({ type: keep ? "dictation.stop" : "dictation.cancel" });
+			} catch (e) {
+				stopStream();
+				return keep ? showDictMessage(`Voice input failed: ${e?.message || e}`, "error") : hideDictBar();
+			}
+			stopStream();
+			if (!keep) return hideDictBar();
+			audio = r?.audio || "";
+			mime = r?.mime || "audio/mp4";
+			size = Math.floor((audio.length * 3) / 4);
+		} else {
+			const stopped = new Promise((r) => (rec.onstop = r));
+			rec.stop();
+			await stopped;
+			stopStream();
+			if (!keep) return hideDictBar();
+			const blob = new Blob(dict.chunks, { type: rec.mimeType || "audio/webm" });
+			mime = blob.type;
+			size = blob.size;
+			audio = blob;
+		}
 		navigator.vibrate?.(10);
-		const blob = new Blob(dict.chunks, { type: rec.mimeType || "audio/webm" });
-		if (Date.now() - dict.started < 600 || blob.size < 1500) return showDictMessage(dict.held ? "Hold the mic while you talk, or tap once to start." : "Too short. Tap the mic, talk, then tap again.");
+		if (Date.now() - dict.started < 600 || size < 1500) return showDictMessage(dict.held ? "Hold the mic while you talk, or tap once to start." : "Too short. Tap the mic, talk, then tap again.");
 		const input = app().input();
 		const before = input.value;
 		dict.busy = true;
 		showDictMessage("Understanding what you meant…", "busy");
 		try {
-			const r = await app().speechCall("transcribe", { audio: await blobToBase64(blob), mime: blob.type, draft: before });
+			const r = await app().speechCall("transcribe", { audio: typeof audio === "string" ? audio : await blobToBase64(audio), mime, draft: before });
 			if (!r.raw?.trim()) return showDictMessage("Didn't catch anything. Try again a little closer to the mic.");
 			input.value = r.editor || r.text;
 			app().autosize();
@@ -235,7 +284,7 @@
 			const secs = Math.floor((Date.now() - dict.started) / 1000);
 			time.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
 			if (secs >= 300) return void finishDictation(true);
-			dict.levels.push(rmsOf(dict.analyser));
+			dict.levels.push(dict.rec === NATIVE_REC ? dict.level : rmsOf(dict.analyser));
 			drawWave(wave, dict.levels);
 			dict.raf = requestAnimationFrame(draw);
 		};
@@ -558,9 +607,9 @@
 			this.render();
 			if (realtimeError) this.basic(realtimeError);
 			earcon("listen");
-			localStorage.setItem(USES_KEY, String(++this.uses));
+			setPref(USES_KEY, String(++this.uses));
 			if (!localStorage.getItem(INTRO_KEY)) {
-				localStorage.setItem(INTRO_KEY, "1");
+				setPref(INTRO_KEY, "1");
 				this.tell(
 					"I'm listening. Just talk to pi, and say stop any time.",
 					"[PI] This is the developer's first time in voice mode. In one short sentence, say you're listening, they can just talk, and \"stop\" works any time.",
@@ -888,7 +937,7 @@
 		setAttention(a) {
 			if (a === this.attention) return;
 			this.attention = a;
-			localStorage.setItem(MODE_KEY, this.attention);
+			setPref(MODE_KEY, this.attention);
 			this.heartbeat(true);
 			if (this.engine === "realtime")
 				this.inject(
@@ -905,7 +954,7 @@
 			this.turns = turns;
 			this.talking = false;
 			if (turns === "tap") this.clientTurns(false);
-			localStorage.setItem(TURN_KEY, this.turns);
+			setPref(TURN_KEY, this.turns);
 			const t = this.stream?.getAudioTracks()[0];
 			if (this.engine === "realtime" && t) t.enabled = !this.muted && this.turns === "open";
 			this.setState(this.muted ? "paused" : this.listenState());
@@ -1935,7 +1984,7 @@
 					for (const [p, r] of rows) r.setAttribute("aria-pressed", String(p.id === cur?.id));
 				};
 				const choose = (p) => {
-					localStorage.setItem(PERSONA_KEY, p.id);
+					setPref(PERSONA_KEY, p.id);
 					mark();
 					if (mode && !mode.closed) mode.setPersona(p);
 					else playSample(p, info);
@@ -1958,6 +2007,8 @@
 	function startVoiceMode() {
 		if (!app()?.S.device) return;
 		if (!app().S.current) return app().toast("No session to talk to yet.", "warning");
+		// The app runs voice mode natively and has the microphone, so no secure-context check.
+		if (native()) return void nativePost({ type: "voice.start", agent: app().S.current }).catch((e) => app().toast(e?.message || String(e), "error"));
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return secureSheet();
 		mode = new VoiceMode();
 		mode.open();
@@ -2036,6 +2087,27 @@
 			return !!mode && !mode.closed;
 		},
 	};
+
+	// Functions the native app calls (native/ios/BRIDGE.md).
+	if (window.PiNative)
+		Object.assign(window.PiNative, {
+			/** Dictation input level, RMS amplitude 0–1, while recording (about 20–60 times a second). */
+			level(x) {
+				dict.level = Math.max(0, Math.min(1, Number(x) || 0));
+			},
+			/** The native side stopped recording on its own (interruption, error): drop the take. */
+			dictationEnded(message) {
+				if (dict.rec !== NATIVE_REC) return;
+				dict.rec = null;
+				stopStream();
+				if (message) showDictMessage(String(message), "error");
+				else hideDictBar();
+			},
+			/** The native voice screen closed: catch the transcript up. */
+			voiceClosed() {
+				if (app()?.S.device) app().loadCurrent();
+			},
+		});
 
 	if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
 	else wire();

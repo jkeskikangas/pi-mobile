@@ -151,6 +151,8 @@
 	}
 
 	function unpaired(reason) {
+		// In the native app, a real unpair (always with a reason) also clears its Keychain (native/ios/BRIDGE.md).
+		if (reason && window.PiNative) window.webkit?.messageHandlers?.piNative?.postMessage({ type: "unpaired" })?.catch?.(() => {});
 		fleet.stop();
 		for (const m of fleet.machines) fleet.remove(m.id);
 		store.set(DEVICE_KEY, null);
@@ -1615,8 +1617,11 @@
 				"",
 				"refresh",
 			);
-			section(body, "Notifications");
-			if (!pushSupported()) {
+			// Web Push does not exist in the native app's web view, so it has no Notifications section.
+			if (!window.PiNative) section(body, "Notifications");
+			if (window.PiNative) {
+				// Native notifications arrive with Step 9 of plans/native-apps.md.
+			} else if (!pushSupported()) {
 				if (window.isSecureContext) body.appendChild(el("p", "note", "On iPhone, add this page to your Home Screen (Share → Add to Home Screen) and open pi from there to get lock-screen notifications."));
 				else secureMove(body, "Lock-screen notifications need this page on a secure (HTTPS) address.");
 			} else {
@@ -2242,6 +2247,7 @@
 		openSheet,
 		secureMove,
 		sessionsSheet,
+		loadCurrent,
 		statusLine,
 		icon,
 		input: () => $("input"),
