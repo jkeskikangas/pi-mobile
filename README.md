@@ -67,12 +67,14 @@ An optional native iPhone app (`native/ios`) shows the same web UI and adds what
 
 ### iPhone push (native app)
 
-The native iPhone app gets notifications through Apple's push service, sent by each of your computers with your own key (needs a paid Apple developer account):
+**App Store app:** nothing to set up on your computers. When you turn on notifications, the app registers with the open-source [push relay](relay/README.md) and gives each paired computer the relay URL and an opaque capability. The computer seals the session name and text to your phone's device key and sends only that ciphertext. The relay and Apple see a generic "pi / New activity" alert and your device token, never what pi said. If the relay reports the capability dead (`410`), the computer forgets it and the app registers again.
+
+**Self-built app (your own bundle ID and team):** use your own APNs key on each computer instead, or [deploy your own relay](relay/README.md#self-hosting). Direct APNs needs a paid Apple developer account:
 
 1. In [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list) → Keys, create a key with **Apple Push Notifications service (APNs)** enabled and download `AuthKey_<KEYID>.p8` (Apple lets you download it once; keep it private: `chmod 600 AuthKey_<KEYID>.p8`).
 2. On every computer that should notify: `/remote settings` → **iPhone push** → the `.p8` path, the key ID, your team ID (Membership details), the app's bundle ID, and *production* (TestFlight/App Store) or *sandbox* (run from Xcode). This writes `apns: { keyFile, keyId, teamId, topic, sandbox }` to `config.json`.
 
-Apple sees only a generic "pi" alert; the session name and text travel encrypted to your phone's device key and are opened on the phone.
+Either way, Apple sees only a generic "pi" alert; the session name and text travel encrypted to your phone's device key and are opened on the phone.
 
 ## Voice
 
