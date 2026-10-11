@@ -4,6 +4,8 @@
 
 ## Identity
 
+A placeholder app that reserves the package name is in [`native/android/`](../native/android/README.md). Its README covers the toolchain, the upload key, building the AAB, Play App Signing, internal testing, and the 12-tester, 14-day closed test.
+
 - **Package name:** `dev.pi_mobile.app`. It is the reverse of the project domain `pi-mobile.dev`; Java package naming (which Android package names follow) replaces a domain's hyphens with underscores. The iOS bundle id is `dev.pi-mobile.app`; the two can't match exactly because iOS forbids underscores and Android forbids hyphens.
 - **Permanent:** the package name can't change once an app is uploaded to Google Play, just as the bundle id can't for Apple.
 - **Gradle:** set both `applicationId` (store and Firebase identity) and `namespace` (the Kotlin package of the code) to `dev.pi_mobile.app`. They may differ; keeping them equal is simpler.

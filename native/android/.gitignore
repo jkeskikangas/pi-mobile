@@ -1,0 +1,16 @@
+# Build output and local SDK path
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+
+# Signing: the upload key and its passwords never go into git
+*.jks
+*.keystore
+keystore.properties
+
+# Firebase config is added when push lands; it is not secret but is per-project
+# google-services.json
