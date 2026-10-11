@@ -2,8 +2,9 @@ import Foundation
 import JavaScriptCore
 
 /// `web/voice-core.js` evaluated in JavaScriptCore (plans/native-apps.md D3): every decision voice
-/// mode delegates to `PiVoiceCore` goes through here, never reimplemented in Swift. Loaded from the
-/// hub (`GET /voice-core.js`, so it always matches the hub), else the copy bundled at build time.
+/// mode delegates to `PiVoiceCore` goes through here, never reimplemented in Swift. Only the copy
+/// bundled at build time runs (App Review guideline 2.5.2: no downloaded code); the hub's protocol and
+/// feature flags keep an older app compatible with a newer computer.
 @MainActor
 final class VoiceCore {
     struct Command: Equatable, Sendable { var kind: String }
@@ -23,7 +24,7 @@ final class VoiceCore {
 
     private let ctx: JSContext
     private let api: JSValue
-    /// Where the script came from: "hub" or "bundle".
+    /// Where the script came from ("bundle" in the app; tests may load others).
     let source: String
     let help: String
     let settings: [String]
@@ -61,19 +62,6 @@ final class VoiceCore {
             throw CoreError.load("not bundled")
         }
         return try VoiceCore(script: s, source: "bundle")
-    }
-
-    /// The hub's copy, else the bundled one.
-    static func load(origin: String?, session: URLSession = .shared) async -> VoiceCore? {
-        if let origin, let url = URL(string: "\(origin)/voice-core.js") {
-            var req = URLRequest(url: url, timeoutInterval: 5)
-            req.cachePolicy = .reloadIgnoringLocalCacheData
-            if let (data, resp) = try? await session.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200,
-               let s = String(data: data, encoding: .utf8), let core = try? VoiceCore(script: s, source: "hub") {
-                return core
-            }
-        }
-        return try? bundled()
     }
 
     // MARK: bridging
