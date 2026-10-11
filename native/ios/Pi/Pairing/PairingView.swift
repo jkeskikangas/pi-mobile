@@ -142,7 +142,14 @@ struct PairingView: View {
             camera = AVCaptureDevice.authorizationStatus(for: .video)
             if !ok { return }
         }
-        if !cameraDenied { scanning = true }
+        guard !cameraDenied else { return }
+        // Supported hardware can still be unavailable (camera in use, restricted by Screen Time).
+        guard DataScannerViewController.isAvailable else {
+            failed += 1
+            error = ScannerView.unavailableMessage
+            return
+        }
+        scanning = true
     }
 
     private func pair(_ text: String) async {

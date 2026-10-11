@@ -18,7 +18,7 @@ final class BridgeTests: XCTestCase {
     }
 
     func testMachinesPersistAndMigrateTheSingleDevice() {
-        store.save([machine("a", primary: true)])
+        try? store.save([machine("a", primary: true)])
         XCTAssertEqual(store.load(), [machine("a", primary: true)])
         store.clear()
         store.keychain.set(Data(#"{"origin":"http://h:1","d":"D","k":"K","role":"control","host":"Mac"}"#.utf8), for: MachineStore.legacyAccount)
@@ -56,7 +56,7 @@ final class BridgeTests: XCTestCase {
         let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
         model.session = StubProtocol.session()
         StubProtocol.reset { _, _ in .init(status: 500) } // a computer that does not say 401 keeps its key
-        model.added(machine("a", primary: true))
+        try? model.added(machine("a", primary: true))
         let bridge = NativeBridge(model: model, primaryOrigin: "http://127.0.0.1:9")
         let entryA = machine("a", primary: true).webEntry
         let entryB = machine("b", origin: "http://box:1").webEntry
@@ -74,9 +74,41 @@ final class BridgeTests: XCTestCase {
         let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
         model.session = StubProtocol.session()
         StubProtocol.reset { _, _ in .init(status: 401) }
-        model.added(machine("a", primary: true))
+        try? model.added(machine("a", primary: true))
         _ = await NativeBridge(model: model, primaryOrigin: "http://127.0.0.1:9").handle(["type": "unpaired"])
         XCTAssertNil(model.primary)
         XCTAssertEqual(store.load(), [])
+    }
+
+    func testRevocationCheckNeverDeletesARePairedCredential() async throws {
+        let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
+        model.session = StubProtocol.session()
+        let old = machine("a", primary: true)
+        try model.added(old)
+        // While the 401 check is in flight, the same entry is re-paired with a new key.
+        var repaired = old
+        repaired.d = "d-new"
+        StubProtocol.reset { _, _ in
+            DispatchQueue.main.sync { MainActor.assumeIsolated { try? model.added(repaired) } }
+            return .init(status: 401)
+        }
+        await model.webUnpaired()
+        XCTAssertEqual(model.primary?.d, "d-new")
+        XCTAssertEqual(store.load().map(\.d), ["d-new"])
+        model.forget(old) // a stale confirmation must not delete the new key either
+        XCTAssertEqual(store.load().map(\.d), ["d-new"])
+    }
+
+    func testHTTPErrorPagesBecomeNativeMessages() {
+        XCTAssertTrue(WebShell.Coordinator.message(status: 404).contains("isn't pi"))
+        XCTAssertTrue(WebShell.Coordinator.message(status: 503).contains("HTTP 503"))
+    }
+
+    func testPairingFailsWhenTheKeyCannotBeSaved() async throws {
+        // An access group this build isn't entitled to and no fallback: every write fails.
+        let broken = MachineStore(keychain: Keychain(service: "pi-mobile-tests-broken", accessGroup: "nope.invalid", fallback: false))
+        let model = AppModel(store: broken, prefs: VoicePrefs(defaults: defaults))
+        XCTAssertThrowsError(try model.added(machine("a", primary: true)))
+        XCTAssertNil(model.primary)
     }
 }

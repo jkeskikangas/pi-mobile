@@ -7,6 +7,8 @@ import Security
 struct Keychain: Sendable {
     var service = "pi-mobile"
     var accessGroup: String? = Keychain.sharedGroup
+    /// Retry without the group when this build isn't entitled to it.
+    var fallback = true
 
     static let sharedGroup: String? = {
         guard let g = Bundle.main.object(forInfoDictionaryKey: "PiKeychainGroup") as? String, !g.isEmpty, !g.hasPrefix("$(") else { return nil }
@@ -26,7 +28,7 @@ struct Keychain: Sendable {
     /// errSecMissingEntitlement: this build may not use the shared group; fall back to the default one.
     private func withGroup<T>(_ body: (String?) -> (OSStatus, T)) -> (OSStatus, T) {
         let r = body(accessGroup)
-        if r.0 == errSecMissingEntitlement, accessGroup != nil { return body(nil) }
+        if r.0 == errSecMissingEntitlement, accessGroup != nil, fallback { return body(nil) }
         return r
     }
 
@@ -74,13 +76,17 @@ struct MachineStore: Sendable {
         guard let data = keychain.data(Self.legacyAccount), let old = try? JSON.parse(data),
               let d = old["d"]?.string, let k = old["k"]?.string, let origin = old["origin"]?.string else { return [] }
         let migrated = [Machine(name: old["host"]?.string ?? "", origin: origin, d: d, k: k, primary: true, added: 0)]
-        save(migrated)
-        keychain.remove(Self.legacyAccount)
+        // Keep the old entry unless the new one is safely written.
+        if (try? save(migrated)) != nil { keychain.remove(Self.legacyAccount) }
         return migrated
     }
 
-    func save(_ machines: [Machine]) {
-        keychain.set(machines.isEmpty ? nil : try? JSONEncoder().encode(machines), for: Self.account)
+    struct SaveFailed: Error {}
+
+    /// Throws when the Keychain refuses the write: callers must not report success (pairing codes are single use).
+    func save(_ machines: [Machine]) throws {
+        let data = machines.isEmpty ? nil : try JSONEncoder().encode(machines)
+        guard keychain.set(data, for: Self.account) else { throw SaveFailed() }
     }
 
     func clear() {

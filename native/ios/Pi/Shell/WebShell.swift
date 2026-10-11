@@ -90,6 +90,21 @@ struct WebShell: UIViewRepresentable {
             return .cancel
         }
 
+        /// An HTTP error for the page itself (a proxy, another server on the port) is shown natively, never rendered.
+        func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+            guard response.isForMainFrame, let http = response.response as? HTTPURLResponse, http.statusCode >= 400 else { return .allow }
+            parent.phase = .offline(Self.message(status: http.statusCode))
+            return .cancel
+        }
+
+        static func message(status: Int) -> String {
+            switch status {
+            case 404: "Something answered at this address, but it isn't pi (HTTP 404)."
+            case 502, 503, 504: "Your computer answered, but pi isn't serving right now (HTTP \(status))."
+            default: "Your computer answered with an error (HTTP \(status))."
+            }
+        }
+
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if let url = action.request.url { UIApplication.shared.open(url) }
             return nil
@@ -114,7 +129,8 @@ struct WebShell: UIViewRepresentable {
         private func fail(_ error: Error) {
             let e = error as NSError
             if e.domain == NSURLErrorDomain, e.code == NSURLErrorCancelled { return }
-            if e.domain == "WebKitErrorDomain", e.code == 102 { return } // frame load interrupted by our own policy
+            // Frame load interrupted by our own policy (an external link, or an HTTP error already shown).
+            if e.domain == "WebKitErrorDomain", e.code == 102 { return }
             parent.phase = .offline(HubError.from(error).errorDescription ?? "Can't reach your computer.")
         }
 

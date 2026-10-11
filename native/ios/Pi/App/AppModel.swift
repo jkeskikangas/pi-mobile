@@ -25,12 +25,16 @@ final class AppModel {
 
     func pair(_ link: PairingLink) async throws {
         let m = try await HubClient.pair(link: link, name: Self.deviceName, session: session)
-        added(m)
+        do { try added(m) } catch {
+            throw HubError.remote("Paired, but this iPhone couldn't save the key. Run /remote again and scan the new code.")
+        }
     }
 
-    func added(_ m: Machine) {
-        machines = store.adding(m, to: machines)
-        store.save(machines)
+    /// Stored first, then shown: a computer only appears once its key is safely in the Keychain.
+    func added(_ m: Machine) throws {
+        let next = store.adding(m, to: machines)
+        try store.save(next)
+        machines = next
     }
 
     /// One sealed client per machine; rebuilt when a computer is re-paired.
@@ -57,7 +61,7 @@ final class AppModel {
         }
         let missing = machines.filter { m in !list.contains { $0.id == m.id } }
         machines = next
-        store.save(machines)
+        try? store.save(machines) // the page re-sends its list on every change; the next save retries
         await reconcile(missing)
     }
 
@@ -67,7 +71,11 @@ final class AppModel {
 
     private func reconcile(_ candidates: [Machine]) async {
         for m in candidates {
-            if await revoked(m) { remove(m) } else if !forgetQueue.contains(m) { forgetQueue.append(m) }
+            let gone = await revoked(m)
+            // The check crossed an await: act only if the stored entry is still the credential we checked
+            // (not re-paired or changed meanwhile).
+            guard let now = machines.first(where: { $0.id == m.id }), now.origin == m.origin, now.d == m.d, now.k == m.k else { continue }
+            if gone { remove(now) } else if !forgetQueue.contains(where: { $0.id == now.id }) { forgetQueue.append(now) }
         }
     }
 
@@ -78,7 +86,9 @@ final class AppModel {
 
     func forget(_ m: Machine) {
         forgetQueue.removeAll { $0.id == m.id }
-        remove(m)
+        // Only the credential the user was asked about.
+        guard let now = machines.first(where: { $0.id == m.id }), now.d == m.d, now.k == m.k, now.origin == m.origin else { return }
+        remove(now)
     }
 
     func keep(_ m: Machine) {
@@ -89,7 +99,7 @@ final class AppModel {
         machines.removeAll { $0.id == m.id }
         clients[m.id] = nil
         if !machines.isEmpty, !machines.contains(where: \.primary) { machines[0].primary = true }
-        store.save(machines)
+        try? store.save(machines)
     }
 
     func forgetAll() {

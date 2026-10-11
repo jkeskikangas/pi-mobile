@@ -7,13 +7,17 @@ struct ScannerScreen: View {
     let onPaste: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var hint = "Point at the code from /remote"
+    @State private var unavailable = false
     @State private var done = false
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if DataScannerViewController.isSupported {
-                ScannerView { payload in
+            if DataScannerViewController.isSupported && !unavailable {
+                ScannerView(onUnavailable: { message in
+                    unavailable = true
+                    hint = message
+                }) { payload in
                     guard !done else { return }
                     if PairingLink(payload) != nil {
                         done = true
@@ -54,7 +58,11 @@ struct ScannerScreen: View {
                     .padding(.bottom, 12)
                     .accessibilityAddTraits(.updatesFrequently)
                 Button("Paste link instead", action: onPaste)
-                    .font(.body.weight(.medium))
+                    .font(unavailable ? .headline : .body.weight(.medium))
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .tint(unavailable ? .white : .clear)
+                    .foregroundStyle(unavailable ? .black : .white)
                     .tint(.white)
                     .frame(minHeight: 44)
                     .padding(.bottom, 12)
@@ -65,9 +73,12 @@ struct ScannerScreen: View {
 }
 
 struct ScannerView: UIViewControllerRepresentable {
+    let onUnavailable: (String) -> Void
     let onPayload: (String) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(onPayload: onPayload) }
+    static let unavailableMessage = "The camera isn't available right now. Paste the link instead."
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPayload: onPayload, onUnavailable: onUnavailable) }
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
         let vc = DataScannerViewController(
@@ -79,7 +90,13 @@ struct ScannerView: UIViewControllerRepresentable {
             isGuidanceEnabled: false,
             isHighlightingEnabled: true)
         vc.delegate = context.coordinator
-        try? vc.startScanning()
+        if !DataScannerViewController.isAvailable {
+            Task { @MainActor in onUnavailable(Self.unavailableMessage) }
+        } else {
+            do { try vc.startScanning() } catch {
+                Task { @MainActor in onUnavailable(Self.unavailableMessage) }
+            }
+        }
         return vc
     }
 
@@ -92,7 +109,16 @@ struct ScannerView: UIViewControllerRepresentable {
     @MainActor
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         let onPayload: (String) -> Void
-        init(onPayload: @escaping (String) -> Void) { self.onPayload = onPayload }
+        let onUnavailable: (String) -> Void
+        init(onPayload: @escaping (String) -> Void, onUnavailable: @escaping (String) -> Void) {
+            self.onPayload = onPayload
+            self.onUnavailable = onUnavailable
+        }
+
+        /// Camera taken by another app, restricted, or interrupted mid-scan.
+        func dataScanner(_ dataScanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) {
+            onUnavailable(ScannerView.unavailableMessage)
+        }
 
         func dataScanner(_ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
             for item in addedItems {
