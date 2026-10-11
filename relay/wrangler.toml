@@ -2,8 +2,9 @@
 name = "pi-push-relay"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
-# Use a custom domain in production if you like:
-# routes = [{ pattern = "push.example.com", custom_domain = true }]
+# The production address. workers.dev stays on so builds that use it keep working.
+routes = [{ pattern = "push.pi-mobile.dev", custom_domain = true }]
+workers_dev = true
 
 # Logs show request metadata only; the code never logs bodies, caps or tokens.
 [observability]

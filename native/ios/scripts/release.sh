@@ -15,7 +15,7 @@ BUILD="${1:-}"
 # The App Store build pushes through the relay (relay/, deployed first; APP_STORE.md → Push).
 PI_PUSH="${PI_PUSH:-YES}"
 # The deployed relay (relay/); override for your own deployment.
-PI_RELAY_URL="${PI_RELAY_URL:-https://pi-push-relay.pi-push-relay.workers.dev}"
+PI_RELAY_URL="${PI_RELAY_URL:-https://push.pi-mobile.dev}"
 [[ "$PI_RELAY_URL" =~ ^https://[^[:space:]?#]+$ ]] || { echo "PI_RELAY_URL must be an https:// address"; exit 2; }
 AUTH=()
 if [ -n "${ASC_KEY_PATH:-}" ]; then
@@ -35,7 +35,7 @@ cp ExportOptions.plist "$OPTS"
 plutil -replace teamID -string "$DEVELOPMENT_TEAM" "$OPTS"
 
 xcodegen -q
-echo "Archiving build $BUILD ($(git rev-parse --short HEAD)) for $PI_BUNDLE_PREFIX.pi, push $PI_PUSH…"
+echo "Archiving build $BUILD ($(git rev-parse --short HEAD)) for $PI_BUNDLE_PREFIX.app, push $PI_PUSH…"
 xcodebuild archive -project Pi.xcodeproj -scheme Pi -configuration Release \
   -destination generic/platform=iOS -archivePath "$ARCHIVE" -allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"} \
   DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" PI_BUNDLE_PREFIX="$PI_BUNDLE_PREFIX" PI_PUSH="$PI_PUSH" PI_RELAY_URL="$PI_RELAY_URL" \

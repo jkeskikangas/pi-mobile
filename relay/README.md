@@ -37,7 +37,7 @@ openssl rand -base64 32 | npx wrangler secret put CAP_KEY
 npx wrangler secret put APNS_KEY < AuthKey_XXXXXXXXXX.p8
 echo -n XXXXXXXXXX | npx wrangler secret put APNS_KEY_ID
 echo -n YOURTEAMID | npx wrangler secret put APNS_TEAM_ID
-echo -n com.example.pi | npx wrangler secret put APNS_TOPIC
+echo -n dev.pi-mobile.app | npx wrangler secret put APNS_TOPIC
 # Optional, Android: a Firebase service account with the FCM role
 npx wrangler secret put FCM_SERVICE_ACCOUNT < service-account.json
 npx wrangler deploy

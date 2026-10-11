@@ -5,7 +5,7 @@ import WidgetKit
 /// Control Center, Lock Screen and Action button: start voice mode without opening the app (D7).
 struct StartVoiceControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
-        StaticControlConfiguration(kind: "dev.pimobile.pi.voice.start") {
+        StaticControlConfiguration(kind: "dev.pi-mobile.app.voice.start") {
             ControlWidgetButton(action: StartVoiceIntent()) {
                 Label("Talk to pi", systemImage: "waveform")
             }
