@@ -64,7 +64,10 @@ final class AppE2ETests: XCTestCase {
 
         // Hold to talk.
         // The transcription focuses the composer; put the keyboard away so the mic is reachable.
-        if app.keyboards.firstMatch.exists { app.toolbars.buttons.allElementsBoundByIndex.last?.tap() }
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.exists { app.toolbars.buttons.allElementsBoundByIndex.last?.tap() }
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: keyboard)
+        if XCTWaiter.wait(for: [hidden], timeout: 5) != .completed { fail("keyboard still up") }
         if !mic.waitForExistence(timeout: 5) || !mic.isHittable { fail("mic not reachable after the first take") }
         let composer = web.textViews["Message"]
         if !(composer.value as? String ?? "").contains("round them to cents") { fail("distilled text not in the composer") }
