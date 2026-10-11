@@ -52,7 +52,7 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(cancel, .value(.null))
     }
 
-    func testMachinesMessageAddsAndKeepsReachableOnes() async {
+    func testMachinesMessageAddsAndKeepsReachableOnes() async throws {
         let model = AppModel(store: store, prefs: VoicePrefs(defaults: defaults))
         model.session = StubProtocol.session()
         StubProtocol.reset { _, _ in .init(status: 500) } // a computer that does not say 401 keeps its key
@@ -66,7 +66,8 @@ final class BridgeTests: XCTestCase {
         _ = await bridge.handle(["type": "machines", "machines": [entryA]])
         XCTAssertEqual(model.machines.map(\.id), ["a", "b"], "kept until confirmed")
         XCTAssertEqual(model.forgetQueue.map(\.id), ["b"])
-        model.forget(model.forgetQueue[0])
+        // Unwrapped, not indexed: an empty queue is a failure here, not a crash of the test host.
+        model.forget(try XCTUnwrap(model.forgetQueue.first))
         XCTAssertEqual(store.load().map(\.id), ["a"])
     }
 
