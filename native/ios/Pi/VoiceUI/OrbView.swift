@@ -12,14 +12,23 @@ struct OrbView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var model = OrbModel()
+    /// Grey states don't move once their colour has eased in, so the timeline stops (no idle redraws).
+    @State private var settled = false
 
     var body: some View {
-        // Runs at the display's rate (120 Hz on ProMotion); paused when still or in the background.
-        TimelineView(.animation(paused: reduceMotion || scenePhase != .active)) { timeline in
+        // Runs at the display's rate (120 Hz on ProMotion); paused when still, settled or in the background.
+        // While paused, a new level or press still redraws once through the view update.
+        TimelineView(.animation(paused: reduceMotion || settled || scenePhase != .active)) { timeline in
             Canvas { g, size in
                 model.draw(g, size: size, t: timeline.date.timeIntervalSinceReferenceDate,
                            state: state, level: level, holding: holding, still: reduceMotion)
             }
+        }
+        .task(id: "\(state)\(holding)") {
+            settled = false
+            guard VoicePalette.isDim(state), !holding else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            if !Task.isCancelled { settled = true }
         }
         .accessibilityHidden(true)
         .allowsHitTesting(false)

@@ -40,6 +40,14 @@ struct VoiceScreen: View {
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: engine.state)
         }
         .voiceHaptics(engine)
+        // VoiceOver hears a new question or problem without hunting for it.
+        .onChange(of: engine.question?.id) { _, id in
+            guard id != nil, let q = engine.question else { return }
+            AccessibilityNotification.Announcement("pi asks: \(q.title)").post()
+        }
+        .onChange(of: engine.note) { _, note in
+            if !note.isEmpty { AccessibilityNotification.Announcement(note).post() }
+        }
         .sheet(isPresented: $showSessions) { VoiceSessionSheet(engine: engine).presentationDetents([.medium, .large]) }
         .sheet(isPresented: $showSettings) { VoiceSettingsSheet(engine: engine).presentationDetents([.medium, .large]) }
         // Awake only while voice is on and the screen is up; locking is fine (the call continues).
@@ -101,9 +109,15 @@ struct VoiceScreen: View {
                     .frame(minHeight: engine.question == nil ? 88 : 0, alignment: .top)
                 if let q = engine.question {
                     QuestionCard(question: q,
-                                 answer: { await engine.answer($0) },
+                                 // Only the question on screen is answered: a late tap on a card that
+                                 // was just replaced does nothing.
+                                 answer: { opt in
+                                     guard engine.question?.id == q.id else { return }
+                                     await engine.answer(opt)
+                                 },
                                  cancelGrace: { engine.cancelGrace() },
                                  doItNow: { await engine.doItNow() })
+                        .id(q.id) // a new question is a new card: no busy state or taps carried over
                         .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 }
                 if !engine.note.isEmpty {
@@ -150,6 +164,9 @@ struct VoiceStage: View {
     static let holdSeconds = 0.35
     @State private var downAt: Date?
     @State private var startedTurn = false
+    /// The finger slid off the circle during this press.
+    @State private var left = false
+    @State private var bounds = CGRect.zero
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -176,7 +193,7 @@ struct VoiceStage: View {
                 .font(.system(.title, weight: .semibold))
                 .tracking(-0.3)
                 .multilineTextAlignment(.center)
-                .contentTransition(.opacity)
+                .contentTransition(reduceMotion ? .identity : .opacity)
                 .fixedSize(horizontal: false, vertical: true)
             if !compact {
                 Text(engine.hint.isEmpty ? " " : engine.hint)
@@ -192,7 +209,9 @@ struct VoiceStage: View {
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(.rect(cornerRadius: 24))
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .local) } action: { bounds = $0 }
         .gesture(press)
+        .onDisappear { cancelPress() }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: engine.label)
         // VoiceOver: one element that names the action; activation is a tap.
         .accessibilityElement(children: .ignore)
@@ -211,55 +230,76 @@ struct VoiceStage: View {
     }
 
     /// Hold while you talk, or tap to start and stop (`pressStart`/`pressEnd`); a press that didn't
-    /// start a turn is a tap (interrupt, unmute, retry).
+    /// start a turn is a tap (interrupt, unmute, retry). Sliding off the circle cancels a tap; a turn
+    /// already started ends as on release (the web's `pointercancel`), so the mic is never left held.
     private var press: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { _ in
-                guard downAt == nil else { return }
-                downAt = .now
-                startedTurn = engine.pressStart()
-                if startedTurn { VoiceHaptics.press() }
-            }
-            .onEnded { _ in
-                let held = downAt.map { Date.now.timeIntervalSince($0) >= Self.holdSeconds } ?? false
-                downAt = nil
-                if startedTurn {
-                    startedTurn = false
-                    engine.pressEnd(held: held)
-                    if held { VoiceHaptics.release() }
-                } else {
-                    VoiceHaptics.press()
-                    engine.tap()
+            .onChanged { v in
+                if downAt == nil {
+                    downAt = .now
+                    left = false
+                    startedTurn = engine.pressStart()
+                    if startedTurn { VoiceHaptics.press() }
+                    return
+                }
+                if !left && !bounds.insetBy(dx: -32, dy: -32).contains(v.location) {
+                    left = true
+                    finishPress(inside: false)
                 }
             }
+            .onEnded { v in
+                if left { left = false; downAt = nil; return }
+                finishPress(inside: bounds.insetBy(dx: -32, dy: -32).contains(v.location))
+            }
+    }
+
+    private func finishPress(inside: Bool) {
+        let held = downAt.map { Date.now.timeIntervalSince($0) >= Self.holdSeconds } ?? false
+        if !left { downAt = nil }
+        if startedTurn {
+            startedTurn = false
+            engine.pressEnd(held: held || !inside)
+            VoiceHaptics.release()
+        } else if inside {
+            VoiceHaptics.press()
+            engine.tap()
+        }
+    }
+
+    /// The screen went away mid-press: give the floor back.
+    func cancelPress() {
+        if startedTurn { startedTurn = false; engine.pressEnd(held: true) }
+        downAt = nil
+        left = false
     }
 }
 
-/// Captions: what you said (muted, "You ·") and what pi says, live as words arrive; clamped, never scrolled.
+/// Captions: what you said ("You ·") and what pi says, live as words arrive; clamped, never scrolled.
+/// Live text is told apart by colour (contrast-tested `--text-2`), never by dimming.
 struct VoiceCaptions: View {
     let heard: VoiceCaption
     let said: VoiceCaption
     let hidePi: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if !heard.text.isEmpty {
                 (Text("You · ").font(.footnote.weight(.bold)).foregroundColor(VoicePalette.youText)
-                    + Text(heard.text).font(.subheadline).foregroundColor(.secondary))
+                    + Text(heard.text).font(.subheadline).foregroundColor(VoicePalette.text2))
                     .lineLimit(2)
-                    .opacity(heard.live ? 0.75 : 1)
                     .accessibilityLabel("You said: \(heard.text)")
             }
             if !said.text.isEmpty && !hidePi {
                 Text(said.text)
                     .font(.title3.weight(.medium))
+                    .foregroundStyle(said.live ? VoicePalette.text2 : Color.primary)
                     .lineLimit(4)
-                    .opacity(said.live ? 0.75 : 1)
                     .accessibilityLabel("pi: \(said.text)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeOut(duration: 0.15), value: said.text.isEmpty)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: said.text.isEmpty)
     }
 }
 
@@ -270,14 +310,14 @@ struct VoiceRoundButton: View {
     let face: Color
     let ink: Color
     let action: () -> Void
-    @Environment(\.verticalSizeClass) private var vsc
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
                 Image(systemName: systemImage)
                     .font(.system(size: 26, weight: .semibold))
-                    .contentTransition(.symbolEffect(.replace))
+                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                     .foregroundStyle(ink)
                     .frame(width: faceSize, height: faceSize)
                     .background(face, in: .circle)

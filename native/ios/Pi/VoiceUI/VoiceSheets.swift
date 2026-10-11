@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// The session switcher: every reachable session, grouped as the web's (`urgency()` in `web/app.js`).
@@ -51,20 +52,47 @@ struct VoiceSessionSheet: View {
 /// The voice picker (`voiceSheet()`): the computer's personas; choosing one plays its sample.
 struct VoicePersonaList: View {
     let engine: VoiceEngine
+    /// The voice being switched to (a realtime call redials), and the last pick waiting behind it:
+    /// rapid picks coalesce to the latest instead of overlapping redials.
+    @State private var applying: String?
+    @State private var pending: String?
+    @State private var local = LocalSample()
+
+    private func choose(_ id: String) {
+        if applying != nil { pending = id; return }
+        Task {
+            var next: String? = id
+            while let id = next {
+                applying = id
+                if engine.engineKind == nil {
+                    // No call to speak through (connecting or the mic failed): the phone's closest voice, as the web does.
+                    engine.settings.personas.first { $0.id == id }.map { local.play($0) }
+                }
+                await engine.setPersona(id)
+                next = pending
+                pending = nil
+            }
+            applying = nil
+        }
+    }
 
     var body: some View {
         let s = engine.settings
         List {
             Section {
                 ForEach(s.personas) { p in
-                    Button { Task { await engine.setPersona(p.id) } } label: {
+                    Button { choose(p.id) } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(p.name).foregroundStyle(.primary)
                                 Text(p.blurb).font(.subheadline).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 8)
-                            if p.id == s.persona { Image(systemName: "checkmark").fontWeight(.semibold).foregroundStyle(.tint) }
+                            if applying == p.id {
+                                ProgressView().accessibilityLabel("Switching voice")
+                            } else if p.id == s.persona {
+                                Image(systemName: "checkmark").fontWeight(.semibold).foregroundStyle(.tint)
+                            }
                         }
                         .contentShape(.rect)
                     }
@@ -73,10 +101,29 @@ struct VoicePersonaList: View {
                     .accessibilityHint("Plays a sample")
                 }
             } footer: {
-                Text("Tap a voice to hear it. It changes how pi sounds, never what it says or how much.")
+                VStack(alignment: .leading, spacing: 6) {
+                    if !engine.note.isEmpty { Text(engine.note).foregroundStyle(VoicePalette.warnText) }
+                    Text("Tap a voice to hear it. It changes how pi sounds, never what it says or how much.")
+                }
             }
         }
         .navigationTitle("Voice")
+    }
+}
+
+/// A persona sample in the phone's closest voice (the web's `playSample` fallback).
+@MainActor final class LocalSample {
+    private let synth = AVSpeechSynthesizer()
+
+    func play(_ p: VoicePersona) {
+        synth.stopSpeaking(at: .immediate)
+        let u = AVSpeechUtterance(string: VoiceEngine.sampleLine(p))
+        let voices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
+        u.voice = voices.first { v in p.phonePrefer.contains { v.name.localizedCaseInsensitiveContains($0) } }
+            ?? voices.max { $0.quality.rawValue < $1.quality.rawValue }
+        u.pitchMultiplier = Float(p.phonePitch)
+        u.rate = AVSpeechUtteranceDefaultSpeechRate * Float(p.rate)
+        synth.speak(u)
     }
 }
 

@@ -36,6 +36,7 @@ enum VoicePalette {
     static let warnText = Color(light: 0x8A4F05, dark: 0xF5B84A)
     static let youText = Color(light: 0x2459D6, dark: 0x6E9BFF)
     static let danger = Color(light: 0xC42B2B, dark: 0xC53030)
+    static let text2 = Color(light: 0x4C4F55, dark: 0xB6B9BF)  // --text-2: 7.6:1 on light --bg, 9.8:1 on dark
     static let codeBg = Color(light: 0xF2F2EF, dark: 0x1B1D20)
 }
 

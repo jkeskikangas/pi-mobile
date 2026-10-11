@@ -143,11 +143,20 @@ struct QuestionCard: View {
 }
 
 /// The web's `:active` scale for big buttons.
+/// With Reduce Motion the press is a dim instead of a scale.
 struct PressScale: ButtonStyle {
     var scale: CGFloat = 0.96
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    func makeBody(configuration: Configuration) -> some View { Pressed(configuration: configuration, scale: scale) }
+
+    private struct Pressed: View {
+        let configuration: Configuration
+        let scale: CGFloat
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        var body: some View {
+            configuration.label
+                .scaleEffect(configuration.isPressed && !reduceMotion ? scale : 1)
+                .opacity(configuration.isPressed && reduceMotion ? 0.7 : 1)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+        }
     }
 }

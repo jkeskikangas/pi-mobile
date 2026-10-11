@@ -35,8 +35,13 @@ struct WebShell: UIViewRepresentable {
         #if DEBUG
         web.isInspectable = true
         #endif
+        let prefs = model.prefs
         context.coordinator.voiceClosed = NotificationCenter.default.addObserver(forName: .piVoiceClosed, object: nil, queue: .main) { [weak web] _ in
-            MainActor.assumeIsolated { _ = web?.evaluateJavaScript("window.PiNative?.voiceClosed?.()") }
+            MainActor.assumeIsolated {
+                // Settings changed on the native voice screen reach the live page before it hears voice ended.
+                let json = (try? JSONSerialization.data(withJSONObject: prefs.all)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                _ = web?.evaluateJavaScript("try{for(const[k,v]of Object.entries(\(json)))localStorage.setItem(k,v)}catch{};window.PiNative?.voiceClosed?.()")
+            }
         }
         context.coordinator.load(web)
         return web
