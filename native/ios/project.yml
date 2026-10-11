@@ -1,0 +1,119 @@
+# XcodeGen spec (plans/native-apps.md D10). `xcodegen` writes Pi.xcodeproj, which is not committed.
+name: Pi
+options:
+  bundleIdPrefix: dev.pimobile
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    PI_BUNDLE_PREFIX: dev.pimobile
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+packages:
+  Sodium:
+    url: https://github.com/jedisct1/swift-sodium
+    exactVersion: 0.11.0
+targets:
+  Pi:
+    type: application
+    platform: iOS
+    sources:
+      - path: Pi
+      - path: Shared
+    dependencies:
+      - package: Sodium
+      - target: PiWidgets
+    entitlements:
+      path: Pi/App/Pi.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PI_BUNDLE_PREFIX).pi
+        PRODUCT_NAME: Pi
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_CFBundleDisplayName: pi
+    info:
+      path: Pi/App/Info.plist
+      properties:
+        CFBundleDisplayName: pi
+        PiKeychainGroup: $(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes: [audio]
+        NSMicrophoneUsageDescription: pi listens while voice mode or dictation is on.
+        NSCameraUsageDescription: Scan the pairing code shown by /remote on your computer.
+        NSLocalNetworkUsageDescription: Reach pi on your computer.
+        NSSupportsLiveActivities: true
+        ITSAppUsesNonExemptEncryption: false
+        # Hubs are reached over the LAN or Tailscale on plain HTTP. Every payload is end-to-end
+        # encrypted (secretbox), so the transport never sees plaintext. See README → ATS.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
+  PiWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PiWidgets
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PI_BUNDLE_PREFIX).pi.widgets
+        PRODUCT_NAME: PiWidgets
+        SKIP_INSTALL: YES
+    info:
+      path: PiWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: pi
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  PiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PiTests
+      - path: ../fixtures/crypto-vectors.json
+        buildPhase: resources
+    dependencies:
+      - target: Pi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PI_BUNDLE_PREFIX).pi.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Pi.app/Pi
+        BUNDLE_LOADER: $(TEST_HOST)
+  PiIntegrationTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [PiIntegrationTests]
+    dependencies:
+      - target: Pi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PI_BUNDLE_PREFIX).pi.integration
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Pi.app/Pi
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  Pi:
+    build:
+      targets:
+        Pi: all
+    test:
+      gatherCoverageData: false
+      targets: [PiTests, PiIntegrationTests]
+    run:
+      config: Debug
