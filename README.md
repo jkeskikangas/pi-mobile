@@ -102,7 +102,7 @@ Tap the **bars icon** in the phone's header. Talk; pi answers out loud. On the c
 
 It uses a realtime speech model (`gpt-realtime-2`) over WebRTC straight from the phone, opened by pi with your ChatGPT sign-in or `OPENAI_API_KEY`; no token or audio passes through your computer. Without realtime it falls back to basic voice: recognition on your computer, a spoken brief, and the phone's speech (or any OpenAI-compatible speech endpoint via `voice.ttsUrl`, such as a local Kokoro).
 
-Limits: on the phone, voice needs the HTTPS address. On iPhone the microphone stops when the screen locks, so voice mode keeps the screen awake. Web apps can't use CarPlay; audio plays through the car as usual. Settings are in `~/.pi/agent/pi-mobile/config.json` under `"voice"`: `stt` (`auto`/`apple`/`openai`), `locale` (e.g. `"fi-FI"`), `model` (`provider/id` for dictation and spoken briefs), `realtime` (`auto`/`off`), `realtimeModel`, `realtimeVoice` (used until a phone picks a voice), `turnDetection` (`semantic`/`server`), `tts` (`auto`/`off`), `ttsUrl`, `ttsModel`, `ttsVoice` (likewise; kept for local servers other than Kokoro), `ttsKey`, `afterDictation` (`review`/`send`). `PI_MOBILE_MIC` picks the terminal's microphone.
+Limits in the browser: on the phone, voice needs the HTTPS address. On iPhone the microphone stops when the screen locks, so voice mode keeps the screen awake. The [iPhone app](#iphone-app) lifts both. Web apps can't use CarPlay; audio plays through the car as usual. Settings are in `~/.pi/agent/pi-mobile/config.json` under `"voice"`: `stt` (`auto`/`apple`/`openai`), `locale` (e.g. `"fi-FI"`), `model` (`provider/id` for dictation and spoken briefs), `realtime` (`auto`/`off`), `realtimeModel`, `realtimeVoice` (used until a phone picks a voice), `turnDetection` (`semantic`/`server`), `tts` (`auto`/`off`), `ttsUrl`, `ttsModel`, `ttsVoice` (likewise; kept for local servers other than Kokoro), `ttsKey`, `afterDictation` (`review`/`send`). `PI_MOBILE_MIC` picks the terminal's microphone.
 
 ## herdr (optional)
 
@@ -155,7 +155,7 @@ While the laptop sleeps it shows as "Offline since 14:02"; the boxes keep workin
 | Lock-screen notifications | Web Push (HTTPS) | native app | Web Push (HTTPS) | Web Push | APNs via a gateway |
 | Several computers in one list | yes, phone to each computer, no relay | yes (agent mesh, via its relay) | not stated | not stated | not stated |
 
-The others have things this doesn't: native apps (remote-pi, Pi Relay), an agent-to-agent mesh across machines (remote-pi), and transcripts of sessions that have since closed (mipsel64).
+The others have things this doesn't: native apps in the app stores (remote-pi, Pi Relay; pi-mobile's [iPhone app](#iphone-app) you build yourself), an agent-to-agent mesh across machines (remote-pi), and transcripts of sessions that have since closed (mipsel64).
 
 ## Development
 

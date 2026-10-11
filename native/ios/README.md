@@ -20,7 +20,7 @@ To run on your own iPhone, set these build settings in `project.yml` (`settings.
 | `PI_BUNDLE_PREFIX` | `dev.pimobile` | A reverse-DNS prefix you own, e.g. `com.example`. The app is `<prefix>.pi`, the extensions `<prefix>.pi.widgets` and `<prefix>.pi.notifications`, the shared Keychain group `<prefix>.shared`. Use the app's id as the bundle ID in `/remote settings` → iPhone push. |
 | `PI_PUSH` | `NO` | `YES` with a paid team: signs with `Pi/App/PiPush.entitlements` (push capability). See Push below. |
 
-Signing is automatic: Xcode makes the profiles on the first run. Apps from a free team stop opening after 7 days; run again from Xcode to renew. `PI_WIDGETS` is not yours to set: it is the compile condition that keeps app-only code out of the `PiWidgets` extension.
+Signing is automatic: Xcode makes the profiles on the first run. Apps from a free team stop opening after 7 days; run again from Xcode to renew. `PI_WIDGETS` is not a setting and has nothing to do with signing or provisioning: it is a compile guard (`#if PI_WIDGETS`) that keeps app-only code out of the `PiWidgets` extension, which compiles the intent files too.
 
 ## Tests
 
@@ -87,7 +87,7 @@ scripts/              integration.sh, e2e.sh
 ## Notes
 
 - **Machines** live in the Keychain as `[{ id, machine, name, origin, d, k, primary, added, lastSeen }]` (account `machines`, service `pi-mobile`, accessible after first unlock, shared access group `$(AppIdentifierPrefix)$(PI_BUNDLE_PREFIX).shared` when entitled). A single older `device` entry is migrated. The page's `localStorage` copy is rewritten at every load (`BRIDGE.md`).
-- **ATS:** `NSAllowsArbitraryLoads` stays on with `NSAllowsLocalNetworking`: hubs are reached on plain HTTP over the LAN or Tailscale (`100.x`), and every payload is end-to-end encrypted. [verify] on a device whether `NSAllowsLocalNetworking` alone covers Tailscale addresses; if it does, drop `NSAllowsArbitraryLoads`.
+- **ATS:** `NSAllowsArbitraryLoads` stays on with `NSAllowsLocalNetworking`: hubs are reached on plain HTTP over the LAN or Tailscale (`100.x`), and every hub request and event is end-to-end encrypted. The web UI files and `voice-core.js` are not: on a plain-HTTP LAN address they arrive unencrypted and could be altered on the way, so prefer the Tailscale HTTPS address that `/remote` sets up. [verify] on a device whether `NSAllowsLocalNetworking` alone covers Tailscale addresses; if it does, drop `NSAllowsArbitraryLoads`.
 - **Voice engine** (plan Step 5): every decision goes through `web/voice-core.js`, loaded from the hub (`GET /voice-core.js`) and else from the copy the `Bundle voice-core.js` pre-build phase puts in the app. `PiTests/Voice` drives the engine with `FakeRealtime` + `FakeHub` and that real file. Device-only checks are marked `[verify]` in the code.
 
 ## Device checklist [device]
