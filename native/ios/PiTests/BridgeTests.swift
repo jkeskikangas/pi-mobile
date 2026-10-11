@@ -131,6 +131,15 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(store.load().first(where: \.primary)?.id, "b")
     }
 
+    func testTextSizeMapsToPageZoom() {
+        XCTAssertEqual(WebShell.pageZoom(for: .large), 1.0)
+        XCTAssertEqual(WebShell.pageZoom(for: .extraLarge), 1.1)
+        XCTAssertEqual(WebShell.pageZoom(for: .accessibilityMedium), 1.45)
+        XCTAssertEqual(WebShell.pageZoom(for: .accessibilityExtraExtraExtraLarge), 1.6, "capped")
+        XCTAssertEqual(WebShell.pageZoom(for: .small), 1.0)
+        XCTAssertTrue(WebShell.zoomScript(1.6).contains("(1.6)"))
+    }
+
     func testFeelScriptKeepsPinchZoom() {
         XCTAssertFalse(NativeBridge.feelScript.contains("user-scalable"))
         XCTAssertFalse(NativeBridge.feelScript.contains("maximum-scale"))

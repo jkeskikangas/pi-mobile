@@ -32,6 +32,11 @@ struct WebShell: UIViewRepresentable {
         web.scrollView.alwaysBounceVertical = false
         web.scrollView.contentInsetAdjustmentBehavior = .never // the page uses viewport-fit=cover
         web.scrollView.keyboardDismissMode = .interactive
+        // Dynamic Type for the page (its CSS is px). `pageZoom` scales but keeps a device-width layout viewport on
+        // iOS (the page then overflows sideways and 100dvh runs off screen), so the viewport is narrowed instead.
+        context.coordinator.textSize = NotificationCenter.default.addObserver(forName: UIContentSizeCategory.didChangeNotification, object: nil, queue: .main) { [weak web] _ in
+            MainActor.assumeIsolated { _ = web?.evaluateJavaScript(WebShell.zoomScript(WebShell.currentZoom)) }
+        }
         #if DEBUG
         web.isInspectable = true
         #endif
@@ -45,6 +50,34 @@ struct WebShell: UIViewRepresentable {
         }
         context.coordinator.load(web)
         return web
+    }
+
+    static var currentZoom: CGFloat { pageZoom(for: UIApplication.shared.preferredContentSizeCategory) }
+
+    /// Narrows the layout viewport to screen width / zoom and scales it back up: text and controls grow, the page
+    /// reflows, `dvh` follows. Pinch zoom stays. Zoom 1 restores the page's own viewport.
+    static func zoomScript(_ zoom: CGFloat) -> String {
+        """
+        (function (z) {
+          var m = document.querySelector('meta[name=viewport]');
+          if (!m) return;
+          if (!m.dataset.orig) m.dataset.orig = m.content;
+          m.content = z === 1 ? m.dataset.orig : 'width=' + Math.round(screen.width / z) + ', initial-scale=' + z + ', viewport-fit=cover, interactive-widget=resizes-content';
+        })(\(zoom));
+        """
+    }
+
+    /// Page zoom per text size: the default size is 1, accessibility sizes cap at 1.6 (CSS width stays >= ~245 px).
+    static func pageZoom(for size: UIContentSizeCategory) -> CGFloat {
+        switch size {
+        case .extraSmall, .small, .medium, .large: 1.0
+        case .extraLarge: 1.1
+        case .extraExtraLarge: 1.2
+        case .extraExtraExtraLarge: 1.3
+        case .accessibilityMedium: 1.45
+        case .accessibilityLarge, .accessibilityExtraLarge, .accessibilityExtraExtraLarge, .accessibilityExtraExtraExtraLarge: 1.6
+        default: 1.0
+        }
     }
 
     func updateUIView(_ web: WKWebView, context: Context) {
@@ -67,6 +100,8 @@ struct WebShell: UIViewRepresentable {
         var reloadToken: Int
         /// Observer for `.piVoiceClosed` (BRIDGE.md `voiceClosed()`).
         var voiceClosed: NSObjectProtocol?
+        /// Observer for text size changes (page zoom).
+        var textSize: NSObjectProtocol?
 
         init(_ parent: WebShell) {
             self.parent = parent
@@ -85,6 +120,7 @@ struct WebShell: UIViewRepresentable {
             ucc.removeAllUserScripts()
             ucc.addUserScript(WKUserScript(source: NativeBridge.setupScript(machines: parent.model.machines, prefs: parent.model.prefs.all), injectionTime: .atDocumentStart, forMainFrameOnly: true))
             ucc.addUserScript(WKUserScript(source: NativeBridge.feelScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+            ucc.addUserScript(WKUserScript(source: WebShell.zoomScript(WebShell.currentZoom), injectionTime: .atDocumentEnd, forMainFrameOnly: true))
             web.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 15))
         }
 
