@@ -40,6 +40,7 @@
   },
   "scripts": {
     "test": "PI_MOBILE_TAILSCALE=off node --experimental-strip-types --test test/*.test.ts",
+    "test:relay": "node --experimental-strip-types --no-warnings --test relay/test/*.test.ts",
     "typecheck": "tsc --noEmit -p .",
     "ui": "node --experimental-strip-types --no-warnings test/ui/fixture.ts",
     "shots": "node test/ui/shots.mjs",

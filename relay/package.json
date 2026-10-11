@@ -1,0 +1,17 @@
+{
+  "name": "pi-push-relay",
+  "private": true,
+  "description": "Open-source push relay for the pi-mobile App Store app: a Cloudflare Worker that forwards sealed notifications to APNs/FCM.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run --outdir dist",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.36.0"
+  }
+}
