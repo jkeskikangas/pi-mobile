@@ -1659,9 +1659,10 @@
 				// The app's own notifications (APNs, native/ios/BRIDGE.md `push.*`): the permission is asked on this tap.
 				g = group(body);
 				const n = S.push.native;
-				if (n?.on) add("Turn off notifications", () => setNativePush(false), "", "bell", "You get one when pi finishes or asks");
+				if (n?.available === false) body.appendChild(el("p", "note", "Notifications aren't available in this build of the app."));
+				else if (n?.on) add("Turn off notifications", () => setNativePush(false), "", "bell", "You get one when pi finishes or asks");
 				else add("Turn on notifications", () => setNativePush(true), "", "bell", n?.permission === "denied" ? "Allow them for pi in iPhone Settings first" : "When pi finishes or needs you");
-				if (!S.push.apns) body.appendChild(el("p", "note", "Your computer sends them once it has an Apple push key: run /remote settings there."));
+				if (n?.available !== false && !S.push.apns) body.appendChild(el("p", "note", "Your computer sends them once it has an Apple push key: run /remote settings there."));
 			} else if (!pushSupported()) {
 				if (window.isSecureContext) body.appendChild(el("p", "note", "On iPhone, add this page to your Home Screen (Share → Add to Home Screen) and open pi from there to get lock-screen notifications."));
 				else secureMove(body, "Lock-screen notifications need this page on a secure (HTTPS) address.");
@@ -1675,6 +1676,15 @@
 				g = group(body);
 				const p = window.PiVoice.persona();
 				add(p ? p.name : "Choose a voice", window.PiVoice.sheet, "", "voice", p ? `${p.blurb} · how pi sounds in voice mode` : "How pi sounds in voice mode");
+			}
+			if (window.PiNative?.consent) {
+				// The app's OK to send your voice (native/ios/BRIDGE.md `consent.*`); the app asks for it itself.
+				if (!window.PiVoice?.sheet) {
+					section(body, "Voice");
+					g = group(body);
+				}
+				if (S.consent) add("Stop sharing my voice", revokeConsent, "danger", "voice", "Voice goes to OpenAI and your computer; pi asks again next time");
+				else body.appendChild(el("p", "note", "pi asks before voice mode or dictation sends your voice anywhere."));
 			}
 			section(body, "Computers");
 			g = group(body);
@@ -1865,9 +1875,27 @@
 	/** The app's notification state; iOS Settings can change it any time (inside the app only). */
 	function refreshNativePush() {
 		if (!window.PiNative) return Promise.resolve();
-		return callNative({ type: "push.status" })
-			.then((s) => (S.push.native = s))
-			.catch(() => {});
+		const consent = window.PiNative.consent
+			? callNative({ type: "consent.status" })
+					.then((s) => (S.consent = s?.granted === true))
+					.catch(() => {})
+			: null;
+		return Promise.all([
+			callNative({ type: "push.status" })
+				.then((s) => (S.push.native = s))
+				.catch(() => {}),
+			consent,
+		]);
+	}
+
+	async function revokeConsent() {
+		closeSheet();
+		try {
+			S.consent = (await callNative({ type: "consent.revoke" }))?.granted === true;
+			toast("Voice sharing off. pi asks again before voice mode or dictation.");
+		} catch (e) {
+			toast(e.message, "error");
+		}
 	}
 
 	async function setNativePush(on) {
@@ -2362,12 +2390,12 @@
 		$("modelBtn").onclick = modelSheet;
 		$("menuBtn").onclick = () => {
 			if (!S.device) return;
-			const before = JSON.stringify(S.push.native);
+			const before = JSON.stringify([S.push.native, S.consent]);
 			menuSheet();
 			// Redraw once if the permission changed in Settings since the last look (still the same sheet).
 			const title = $("sheetTitle")?.textContent;
 			refreshNativePush().then(() => {
-				if (JSON.stringify(S.push.native) !== before && !$("sheet").hidden && $("sheetTitle")?.textContent === title) menuSheet();
+				if (JSON.stringify([S.push.native, S.consent]) !== before && !$("sheet").hidden && $("sheetTitle")?.textContent === title) menuSheet();
 			});
 		};
 		$("olderBtn").onclick = loadOlder;

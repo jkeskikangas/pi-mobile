@@ -36,6 +36,12 @@ final class AppE2ETests: XCTestCase {
 
         // Voice: the native screen opens; the fixture has no realtime, so basic voice is used.
         voice.tap()
+        // First voice start: the consent sheet names who receives the voice (-PiReset cleared any earlier OK).
+        let allow = app.buttons["Allow"]
+        if !allow.waitForExistence(timeout: 10) { fail("no consent sheet before voice mode") }
+        XCTAssertTrue(app.staticTexts["Where your voice goes"].exists)
+        shot("02a-consent")
+        allow.tap()
         let end = app.buttons["End voice mode"]
         if !end.waitForExistence(timeout: 10) {
             shot("02-voice-missing")
@@ -78,10 +84,15 @@ final class AppE2ETests: XCTestCase {
 
         // Notifications row reflects the app's state (push.status).
         web.descendants(matching: .any)["Menu"].firstMatch.tap()
-        // The app's row (push.status: off, permission not asked), not the web's Home Screen note.
-        let row = web.buttons["Turn on notifications When pi finishes or needs you"]
-        if !row.waitForExistence(timeout: 5) { fail("no native notifications row") }
+        // The app's answer (push.status), not the web's Home Screen note. This build has no push entitlement
+        // (PI_PUSH=NO), so the row says so instead of offering a setup that can't work.
+        let pushNote = web.staticTexts.containing(NSPredicate(format: "label CONTAINS 'aren’t available in this build' OR label CONTAINS \"aren't available in this build\"")).firstMatch
+        if !pushNote.waitForExistence(timeout: 5) { fail("no push-unavailable note") }
+        XCTAssertFalse(web.buttons["Turn on notifications When pi finishes or needs you"].exists)
         XCTAssertFalse(web.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Home Screen'")).firstMatch.exists)
+        // Voice sharing was allowed above, so the menu offers to stop it (BRIDGE.md consent.*).
+        let revoke = web.buttons.containing(NSPredicate(format: "label BEGINSWITH 'Stop sharing my voice'")).firstMatch
+        if !revoke.waitForExistence(timeout: 5) { fail("no consent row in the menu") }
         shot("07-menu-notifications")
     }
 

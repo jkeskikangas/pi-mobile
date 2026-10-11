@@ -12,6 +12,9 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
     /// Sandbox tokens unless the build signs for production APNs: the same `PI_APS_ENVIRONMENT` that goes
     /// into the entitlements reaches Info.plist as `PiAPSEnvironment`.
     nonisolated static let sandbox = Bundle.main.object(forInfoDictionaryKey: "PiAPSEnvironment") as? String != "production"
+    /// The build signs with the push entitlement (`PI_PUSH=YES` reaches Info.plist as `PiPushAvailable`).
+    /// Without it the web's Notifications row says push isn't in this build instead of offering it.
+    nonisolated static let available = (Bundle.main.object(forInfoDictionaryKey: "PiPushAvailable") as? String)?.uppercased() == "YES"
 
     private let defaults: UserDefaults
     private var tokenWaiters: [UUID: CheckedContinuation<String?, Never>] = [:]
@@ -156,7 +159,7 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
 
     func status() async -> JSON {
         let p = await permission()
-        return ["on": .bool(enabled && p == "granted" && token != nil), "permission": .string(p)]
+        return ["on": .bool(Self.available && enabled && p == "granted" && token != nil), "permission": .string(p), "available": .bool(Self.available)]
     }
 
     struct Failure: LocalizedError {
@@ -170,6 +173,7 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
             await reconcile()
             return await status()
         }
+        guard Self.available else { throw Failure(errorDescription: "Notifications aren't available in this build of the app.") }
         let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
         guard granted else { throw Failure(errorDescription: "Notifications are off for pi. Turn them on in Settings.") }
         enabled = true
