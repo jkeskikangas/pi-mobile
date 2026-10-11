@@ -19,7 +19,7 @@ Then work through **README → Device checklist**. It is the gate: no TestFlight
 - [ ] Paid Apple Developer Program membership (individual or organisation; organisation shows your company as the seller and needs a D-U-N-S number).
 - [ ] Certificates, Identifiers & Profiles → Identifiers: the three App IDs Xcode makes on the first signed build (`<prefix>.pi`, `<prefix>.pi.widgets`, `<prefix>.pi.notifications`). Check that `<prefix>.pi` has **Push Notifications** on (if shipping with `PI_PUSH=YES`) and that all three have the **Keychain Sharing** group `<prefix>.shared` (from the entitlements). Automatic signing creates these; fix them by hand only if it fails.
 - [ ] Agreements, Tax, and Banking: accept the Free Apps agreement (the app is free).
-- [ ] Push: create an APNs auth key (Keys → +, Apple Push Notifications service) and set it on each computer with `/remote settings` → iPhone push (bundle ID `<prefix>.pi`).
+- [ ] Push (**self-built apps only**, own team; the App Store build will use a push relay, decided separately): create an APNs auth key (Keys → +, Apple Push Notifications service) and set it on each computer with `/remote settings` → iPhone push (bundle ID `<prefix>.pi`).
 
 ## 2. App Store Connect record
 
@@ -30,11 +30,12 @@ Then work through **README → Device checklist**. It is the gate: no TestFlight
 
 ## 3. App Privacy ("nutrition label")
 
-Match `Pi/Resources/PrivacyInfo.xcprivacy` and `PRIVACY.md`. Apple counts data as "collected" when it leaves the device in a way that you **or a third-party partner** can access beyond the real-time request. The developer gets nothing, but voice audio goes to OpenAI, so declare it to be safe:
+Match `Pi/Resources/PrivacyInfo.xcprivacy` and `PRIVACY.md` exactly. Apple counts data as "collected" when it leaves the device in a way that you **or a third-party partner** can access beyond the real-time request. The developer gets nothing, but OpenAI (and other AI providers your computer uses) process it under the user's own account, so the answers are deliberately conservative:
 
 - Do you or your third-party partners collect data from this app? **Yes**.
-- **Audio Data**: used for App Functionality. Linked to the user's identity: **No** (the developer has no accounts; OpenAI is reached with the user's own computer's credentials). Used for tracking: **No**.
-- **Other User Content** (messages, dictated text sent to your own computer, which forwards voice transcripts to OpenAI in voice mode): App Functionality; not linked; no tracking.
+- **Audio Data**: App Functionality; **linked** to the user's identity: **Yes** (processed under the user's OpenAI/ChatGPT account); used for tracking: **No**.
+- **Photos or Videos** (image attachments sent to the computer and on to its AI model): App Functionality; linked: **Yes**; tracking: **No**.
+- **Other User Content** (messages, dictated text, session context given to the realtime model): App Functionality; linked: **Yes**; tracking: **No**.
 - Everything else (contact info, identifiers, usage data, diagnostics, location, etc.): **not collected**. No analytics or crash SDKs are included.
 - Tracking: **No** (`NSPrivacyTracking` false, no tracking domains).
 
@@ -105,7 +106,13 @@ The reviewer's iPhone must reach a computer over **HTTPS** (the app refuses plai
 4. Run the Device checklist again on the TestFlight build (Release config: push uses production APNs, so set the computers' APNs key environment accordingly).
 5. External testers need a short beta review: fill in the test information with the review notes above.
 
-## 9. Submit
+## 9. Release gates
+
+- [ ] **Required-reason APIs in SDKs.** The manifest covers the app's own code only. Audit the archived binary (`nm -um Pi.app/Pi`, and each framework) for required-reason symbols that come from dependencies: libsodium's `randombytes` calls `fstat` on `/dev/urandom` (the file-timestamp category), and swift-sodium ships no privacy manifest. Don't declare a reason that doesn't apply (e.g. C617.1/0A2A.1 are about files the app shows or owns); if Apple's upload or TestFlight email flags an API, act on that feedback: pick the reason that truly fits, or update/replace the SDK.
+- [ ] The device checklist (README) is complete on a TestFlight build.
+- [ ] `scripts/release.sh` passed its manifest and ATS checks.
+
+## 10. Submit
 
 - [ ] Device checklist complete on a TestFlight build.
 - [ ] Screenshots, description, keywords, support and privacy URLs, age rating, App Privacy, export compliance done.

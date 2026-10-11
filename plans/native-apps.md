@@ -147,7 +147,7 @@ In `web/voice.js` only (plus one line in `web/app.js` if needed), when `window.P
 4. The menu's Voice row (`PiVoice.sheet`, the voice picker) stays in the web; it posts `prefs` on a pick. Its samples play in the web view (`speak`, else `speechSynthesis`).
 5. When the native voice screen closes, the web reloads the focused session (`loadCurrent()`) so the transcript catches up.
 
-**Check:** `npm test`; the web app in a normal browser behaves exactly as before (no `PiNative`); in the app, the voice button opens the native screen and dictation works over plain HTTP.
+**Check:** `npm test`; the web app in a normal browser behaves exactly as before (no `PiNative`); in the app, the voice button opens the native screen and dictation works (HTTPS pairing).
 
 ## 7. Step 5 — Voice engine (the core of the app)
 
