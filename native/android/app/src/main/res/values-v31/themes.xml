@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ splash: the page colour (iOS LaunchBackground) with the launcher icon. -->
+    <style name="Theme.Pi" parent="Base.Theme.Pi">
+        <item name="android:windowSplashScreenBackground">@color/pi_bg</item>
+    </style>
+</resources>

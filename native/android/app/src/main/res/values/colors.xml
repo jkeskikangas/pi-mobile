@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The web's page background (iOS LaunchBackground): window, splash and the page behind the web view match, so no flash. -->
+    <color name="pi_bg">#F7F7F5</color>
+    <!-- The launcher icon's face (iOS AppIcon.png). -->
+    <color name="ic_launcher_background">#5B93F5</color>
+</resources>
