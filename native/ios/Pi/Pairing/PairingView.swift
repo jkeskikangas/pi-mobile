@@ -281,6 +281,11 @@ struct PasteLinkSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                // Native fields keep a Done to put the keyboard away; the web view's accessory bar stays hidden.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focused = false }
+                }
             }
         }
     }

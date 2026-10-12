@@ -40,7 +40,12 @@
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },
+  "dependencies": {
+    "opusscript": "^0.1.1",
+    "werift": "^0.25.0"
+  },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   }
 }

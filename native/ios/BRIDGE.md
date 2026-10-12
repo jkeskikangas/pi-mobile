@@ -15,7 +15,7 @@ A `WKUserScript` at `.atDocumentStart`, `forMainFrameOnly: true`. The Keychain i
 localStorage["pi-mobile-machines"] = JSON.stringify(machines);           // authoritative list from the Keychain, may be [] only if the Keychain is empty
 localStorage["pi-mobile-device"] = JSON.stringify({ d, k, role: "control", host }); // the primary entry's d, k, name
 localStorage["pi-mobile-voice-persona"] = "…";                         // each voice pref the app holds (see prefs)
-window.PiNative = { version: 1, scan: true, consent: true };            // `scan`, `consent`: this build answers those messages
+window.PiNative = { version: 1, scan: true, consent: true, keyboardEvents: true }; // `scan`, `consent`: this build answers those messages; `keyboardEvents`: it calls `keyboard(…)`
 ```
 
 Machine entry (`web/fleet.js`): `{ id, machine, name, origin, d, k, primary, added, lastSeen }`.
@@ -33,7 +33,7 @@ Handler name `piNative`, registered with `WKScriptMessageHandlerWithReply` (`add
 
 | `type` | Other fields | When | Reply |
 |---|---|---|---|
-| `voice.start` | `agent: string` (the session id as the hub reports it), `machine: string` (the `id` of the machines-list entry that hosts it) | Header voice button tapped and a session is open | `null` once the native voice screen is presented. Error text is shown as a toast. **Idempotent:** if voice mode is already open, native just focuses it (switching to `agent` if different). **Cancels dictation:** native stops and discards any dictation recording first (the web has already dropped its recording UI and will not send `dictation.cancel`). The web sends at most one `voice.start` at a time (waits for the reply). |
+| `voice.start` | `agent: string` (the session id as the hub reports it), `machine: string` (the `id` of the machines-list entry that hosts it) | The composer's voice-mode button (or the menu's Voice mode) tapped and a session is open | `null` once the native voice screen is presented. Error text is shown as a toast. **Idempotent:** if voice mode is already open, native just focuses it (switching to `agent` if different). **Cancels dictation:** native stops and discards any dictation recording first (the web has already dropped its recording UI and will not send `dictation.cancel`). The web sends at most one `voice.start` at a time (waits for the reply). |
 | `dictation.start` | — | Composer mic pressed (hold or tap) | `null` once recording has started. Error text is shown as `Microphone: <text>`. The first take waits for the consent sheet (`consent.*`). |
 | `dictation.stop` | — | User finished (release, ✓, mic tap, 5-minute cap) | `{ audio: string, mime: string }`: `audio` is base64 (standard, no data-URL prefix) of the whole recording, `mime` e.g. `"audio/mp4"` (AAC in MP4/M4A, mono, 16–24 kHz is plenty). The web then calls `transcribe` itself. An empty/very short take (< 600 ms or < ~1.5 KB) is treated as "too short". Error text is shown as `Voice input failed: <text>`. |
 | `dictation.cancel` | — | User cancelled (✕), also while a `dictation.stop` is still pending, or when a `dictation.start` resolved after the web had given the take up | `null`; stop if recording and discard the audio. **Must be idempotent** (no recording → still `null`). If a `dictation.stop` is pending, native may still reply to it; the web ignores that reply. Errors are ignored. |
@@ -75,10 +75,15 @@ Call with `webView.evaluateJavaScript("window.PiNative.<fn>(…)")` on the main 
 | `dictationEnded(message?)` | optional `string` | Recording stopped on the native side without the web asking (interruption, route loss, error) | Drops the take and the recording UI (also a pending start); shows `message` as an error if given. Native discards the audio. |
 | `focus(machine, agent)` | `string` hub machine id (may be `""`), `string` session id | The user tapped a notification (or "Answer by voice" on one); sent once the page has loaded | Closes any sheet and opens that session (`openAgent`). |
 | `voiceClosed()` | — | The native voice screen was dismissed and the web view is visible again | Reloads the focused session (`loadCurrent()`) so the transcript catches up. |
+| `keyboard({ height, duration })` | `height`: `number`, CSS px of the web view's bottom the keyboard covers (already divided by the app's Dynamic Type page zoom), `0` when hidden; `duration`: `number`, the keyboard animation in ms (e.g. `250`; `0` = no animation) | Each time the keyboard starts to move (`UIKeyboardWillChangeFrame`): shows, hides, changes height (emoji, predictive bar), an interactive dismiss ends. Only when `window.PiNative.keyboardEvents` is true. | Optional for the web. Lets the composer drop its `env(safe-area-inset-bottom)` padding while the keyboard is up (that inset stays 34 px in `WKWebView`), in step with the keyboard; `visualViewport` reports the change only after the animation. |
+
+## Keyboard
+
+The app hides WebKit's form accessory bar ("^ v ✓" above the keyboard) for its web view (`Pi/Shell/FormAccessoryBar.swift`), so the composer sits directly on the keyboard. The web gets no Previous/Next/Done: the keyboard goes away with a swipe down the page (`keyboardDismissMode = .interactive`) or when the web blurs the field. The native shell adds no bottom inset of its own (the web view ignores the safe area; the page uses `viewport-fit=cover`), so any gap between the composer and the keyboard is the page's own padding.
 
 ## What the web changes when `window.PiNative` exists
 
-- Header voice button → `voice.start` instead of the web voice screen; no HTTPS check; any dictation in progress is dropped first.
+- The composer's voice-mode button (and the menu's Voice mode) → `voice.start` instead of the web voice screen; no HTTPS check; any dictation in progress is dropped first.
 - Composer dictation records natively (above); transcription, raw/undo chips and `learn` are unchanged.
 - The menu's Notifications row uses `push.status` / `push.enable` instead of Web Push (none in `WKWebView`); with no computer reporting `apns` in its `hub` result, a note points to `/remote settings`.
 - Voice preference writes also post `prefs`; machine-list saves post `machines`.

@@ -44,7 +44,7 @@ Release builds can fail where Debug doesn't (the Debug-only launch arguments are
 
 ### End to end in the simulator
 
-`scripts/e2e.sh` starts the fixture on port 7993 and runs `PiUITests/AppE2ETests` (skipped without a link). The app pairs with `-PiPairLink`; the web UI loads; the voice button first shows the consent sheet (the test taps Allow), then opens the native voice screen, which says "Using basic voice. Details in voice settings." (the fixture has no realtime voice); End returns to the web UI; a tapped and a held dictation take each reach the fixture's `transcribe`; the menu says notifications aren't available in this build (no `PI_PUSH`), not the web's Home Screen note, and offers Stop sharing my voice. The script fails unless the fixture logged both `transcribe` calls. Screenshots: `shots/e2e/`.
+`scripts/e2e.sh` starts the fixture on port 7993 and runs `PiUITests/AppE2ETests` (skipped without a link). The app pairs with `-PiPairLink`; the web UI loads; the voice button first shows the consent sheet (the test taps Allow), then opens the native voice screen, which says "Using basic voice. Details in voice settings." (the fixture has no realtime voice); End returns to the web UI; a tapped and a held dictation take each reach the fixture's `transcribe`; the menu says notifications aren't available in this build (no `PI_PUSH`), not the web's Home Screen note, and offers Stop sharing my voice. Tapping the composer opens the keyboard with no form accessory bar ("^ v Done", hidden by `FormAccessoryBar`) and the composer above the keyboard; typing "Hyvää yötä" lands in it, and a swipe down puts the keyboard away. That check needs the software keyboard: turn off I/O → Keyboard → Connect Hardware Keyboard in Simulator for the device (with it on, iOS shows no keyboard and the test records `keyboard-skipped`). The script fails unless the fixture logged both `transcribe` calls. Screenshots: `shots/e2e/`.
 
 ### Screenshots
 
@@ -79,7 +79,8 @@ Pi/Core/              JSON, Envelope (sodium), HubClient (pair, rpc, agent, SSE 
 Pi/Pairing/           PairingView (scan, paste, inline errors), ScannerView (VisionKit DataScanner)
 Pi/Consent/           AIConsent (the stored OK, the gate), ConsentSheet (who receives your voice)
 Pi/Resources/         Assets, PrivacyInfo.xcprivacy
-Pi/Shell/             WebShell (WKWebView), ShellView (native loading/offline), NativeBridge (piNative handler)
+Pi/Shell/             WebShell (WKWebView), ShellView (native loading/offline), NativeBridge (piNative handler),
+                      FormAccessoryBar (no "^ v ✓" bar above the keyboard)
 Pi/Voice/             VoiceEngine (port of web/voice.js VoiceMode), VoiceCore (web/voice-core.js in JSContext), VoicePorts (seams),
                       RealtimeClient + Levels (WebRTC), AudioSessionController, BasicVoice, Earcons, LiveFleet, VoiceHost (voice.start)
 Pi/VoiceUI/           VoiceScreen (orb, captions, question card, Mute/End), sheets, haptics

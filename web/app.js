@@ -577,8 +577,7 @@
 				break;
 			}
 			case "custom":
-				node = el("div", "msg custom");
-				node.append(el("div", "tag", item.customType), mdNode(item.text));
+				node = customNode(item);
 				break;
 			case "summary":
 				node = el("details", "msg summary");
@@ -592,6 +591,34 @@
 				node = el("div");
 		}
 		node.id = `i-${item.id}`;
+		return node;
+	}
+
+	/**
+	 * An extension's message (pi-actors deliveries, notes from other extensions): collapsed like pi's
+	 * terminal shows it (its source, then the start of the text, two lines at most), expanded on tap.
+	 * A message that fits on one short line has nothing to hide and stays plain.
+	 */
+	function customNode(item) {
+		const text = String(item.text || "").trim();
+		if (!text.includes("\n") && text.length <= 120) {
+			const node = el("div", "msg custom");
+			node.append(el("div", "tag", item.customType), mdNode(text));
+			return node;
+		}
+		const node = el("details", "msg custom");
+		const s = el("summary");
+		const tag = el("span", "tag");
+		tag.append(el("span", "grow", item.customType), icon("chev-down", "chev"));
+		// The start of the text, as plain words: no Markdown markers, lines run together.
+		const preview = text
+			.split("\n")
+			.map((l) => l.replace(/^\s*(?:#{1,6}\s+|[-*+>]\s+|\d+[.)]\s+|```\S*)/, "").replace(/[*_`]/g, "").trim())
+			.filter(Boolean)
+			.join(" ")
+			.slice(0, 400);
+		s.append(tag, el("span", "preview", preview));
+		node.append(s, mdNode(text));
 		return node;
 	}
 
@@ -1109,7 +1136,6 @@
 		const info = S.agents.get(S.current);
 		const dot = $("statusDot");
 		$("menuBtn").hidden = !S.device;
-		$("voiceBtn").hidden = !S.device || !info;
 		const others = sortedAgents().filter((a) => a.agent !== S.current && urgency(a) === 0).length;
 		$("top").classList.toggle("bare", !S.device);
 		if (!info) {
@@ -1255,8 +1281,23 @@
 		updateSend();
 	}
 
+	/**
+	 * The composer's last button: voice mode while there's nothing to send, Send once there is (text,
+	 * an image, a draft), in the same spot, so the two never show together and each is the one primary.
+	 */
 	function updateSend() {
-		$("sendBtn").classList.toggle("ready", !!($("input").value.trim() || S.attachments.length));
+		const send = $("sendBtn");
+		const voice = $("voiceBtn");
+		const draft = !!window.PiDraft?.open();
+		const something = draft || !!($("input").value.trim() || S.attachments.length);
+		// While a draft is open in the composer, Send sends the draft (web/draft.js).
+		send.classList.toggle("ready", draft ? window.PiDraft.canSend() : something);
+		const had = document.activeElement;
+		send.hidden = !something;
+		voice.hidden = something || !S.device || !S.agents.get(S.current);
+		// Keyboard focus follows the swap instead of falling back to the page.
+		if (had === send && send.hidden) (voice.hidden ? $("input") : voice).focus({ preventScroll: true });
+		else if (had === voice && voice.hidden) send.focus({ preventScroll: true });
 	}
 
 	/** After any change to the composer text, including dictation filling it in. */
@@ -1268,24 +1309,37 @@
 	}
 
 	async function send() {
+		if (window.PiDraft?.open()) return window.PiDraft.send();
 		const input = $("input");
 		const text = input.value;
 		if (!text.trim() && !S.attachments.length) return;
-		const images = S.attachments.map((a) => ({ data: a.data, mimeType: a.mimeType }));
+		if (!(await sendText(text, composerImages()))) return;
+		input.value = "";
+		clearAttachments();
+		autosize();
+		hideSuggest();
+	}
+
+	/** The images attached in the composer, as pi takes them (a draft sends them too). */
+	const composerImages = () => S.attachments.map((a) => ({ data: a.data, mimeType: a.mimeType }));
+	function clearAttachments() {
+		S.attachments = [];
+		renderAttachments();
+		updateSend();
+	}
+
+	/** Sends a message to pi (the composer's text, or a draft); true once pi has it, else an error toast. */
+	async function sendText(text, images = [], agent = S.current) {
 		$("sendBtn").disabled = true;
 		try {
-			const r = await call("send", { text, images, mode: S.mode });
-			input.value = "";
-			S.attachments = [];
-			renderAttachments();
-			autosize();
-			updateSend();
-			hideSuggest();
+			const r = await call("send", { text, images, mode: S.mode }, agent);
 			if (r.delivered === "steer") toast("Steering message queued");
 			else if (r.delivered === "followUp") toast("Follow-up queued");
 			else if (r.delivered === "command") toast("Command sent");
+			return true;
 		} catch (e) {
 			toast(e.message, "error");
+			return false;
 		} finally {
 			$("sendBtn").disabled = !S.online;
 		}
@@ -1330,9 +1384,13 @@
 				const w = el("div", "att");
 				const img = el("img");
 				img.src = a.preview;
-				const x = el("button");
-				x.appendChild(icon("x"));
-				x.setAttribute("aria-label", "Remove image");
+				img.alt = S.attachments.length > 1 ? `Attached image ${i + 1}` : "Attached image";
+				// A 44 px target over the thumbnail's corner; the visible 24 px disc sits in its top-right.
+				const x = el("button", "att-x");
+				const face = el("span", "att-x-face");
+				face.appendChild(icon("x"));
+				x.appendChild(face);
+				x.setAttribute("aria-label", S.attachments.length > 1 ? `Remove image ${i + 1}` : "Remove image");
 				x.onclick = () => {
 					S.attachments.splice(i, 1);
 					renderAttachments();
@@ -1677,6 +1735,18 @@
 			if (window.PiVoice?.sheet) {
 				section(body, "Voice");
 				g = group(body);
+				// The same as the composer's voice button, for when there's text in the composer.
+				if (S.agents.get(S.current))
+					add(
+						"Voice mode",
+						() => {
+							closeSheet();
+							$("voiceBtn").click();
+						},
+						"",
+						"wave",
+						`Talk with ${agentName(S.current)} hands-free`,
+					);
 				const p = window.PiVoice.persona();
 				add(p ? p.name : "Choose a voice", window.PiVoice.sheet, "", "voice", p ? `${p.blurb} · how pi sounds in voice mode` : "How pi sounds in voice mode");
 			}
@@ -2504,13 +2574,71 @@
 		};
 	}
 
+	// ── the on-screen keyboard ─────────────────────────────────────────────────────
+	// iOS doesn't shrink the layout viewport for the keyboard and keeps env(safe-area-inset-bottom) at 34 px
+	// while it is up, so the composer's bottom padding left a gap above the keyboard (its accessory bar) and
+	// the page scrolled the header away. While the keyboard is open the app takes the visible height and the
+	// composer drops the inset (`html.kb`, `--kb`). Heights come from the iPhone app as the keyboard starts to
+	// move (native/ios/BRIDGE.md `keyboard`), else from visualViewport (Safari, Home Screen app).
+	let nativeKeyboard = false;
+	function keyboard(height, ms = 0) {
+		const open = height > 80;
+		const root = document.documentElement;
+		if (open === root.classList.contains("kb") && (!open || root.style.getPropertyValue("--kb") === `${Math.round(height)}px`)) return;
+		root.style.setProperty("--kb", `${open ? Math.round(height) : 0}px`);
+		root.style.setProperty("--kb-ms", `${Math.max(0, ms)}ms`);
+		root.classList.toggle("kb", open);
+		// iOS scrolled the page to show the field; the app now fits above the keyboard, so put it back.
+		if (open) {
+			requestAnimationFrame(() => window.scrollTo(0, 0));
+			// WebKit may reveal the field again once the keyboard has settled.
+			setTimeout(() => document.documentElement.classList.contains("kb") && window.scrollTo(0, 0), Math.max(0, ms) + 60);
+		}
+	}
+	function watchKeyboard() {
+		// Putting the keyboard away without the accessory bar's Done (the iPhone app hides that bar): a swipe down on
+		// the transcript, as in Messages. The page fits above the keyboard and doesn't scroll as a whole, so the
+		// web view's own swipe-to-dismiss never fires; the transcript's scroller does it instead.
+		let startY = null;
+		const scroller = $("scroller");
+		scroller.addEventListener("touchstart", (e) => (startY = e.touches.length === 1 ? e.touches[0].clientY : null), { passive: true });
+		scroller.addEventListener(
+			"touchmove",
+			(e) => {
+				if (startY === null || !document.documentElement.classList.contains("kb")) return;
+				if (e.touches[0].clientY - startY > 24) {
+					startY = null;
+					document.activeElement?.blur?.();
+				}
+			},
+			{ passive: true },
+		);
+		const vv = window.visualViewport;
+		if (!vv) return;
+		const editing = () => document.activeElement?.matches?.("input, textarea, [contenteditable]") ?? false;
+		const update = () => {
+			if (nativeKeyboard) return;
+			// Pinch zoom also shrinks the visual viewport: only a keyboard over a field counts.
+			const covered = vv.scale > 1.01 || !editing() ? 0 : window.innerHeight - vv.height;
+			keyboard(covered);
+		};
+		vv.addEventListener("resize", update);
+		document.addEventListener("focusout", () => setTimeout(update, 50));
+	}
+
 	async function main() {
 		wire();
+		watchKeyboard();
 		if (window.PiNative) {
 			// A tapped notification: show that session (native/ios/BRIDGE.md `focus`).
 			window.PiNative.focus = (machine, agent) => {
 				closeSheet();
 				openAgent(String(agent || ""));
+			};
+			// The keyboard's covered height, as it starts to move (BRIDGE.md `keyboard`).
+			window.PiNative.keyboard = ({ height, duration } = {}) => {
+				nativeKeyboard = true;
+				keyboard(Number(height) || 0, Number(duration) || 0);
 			};
 			refreshNativePush();
 		}
@@ -2566,6 +2694,11 @@
 		reachable,
 		openAgent,
 		autosize,
+		updateSend,
+		sendText,
+		images: composerImages,
+		clearAttachments,
+		mdNode,
 		openSheet,
 		sessionsSheet,
 		loadCurrent,

@@ -12,7 +12,8 @@ export function micDevice(env = process.env): string | undefined {
 
 /** ffmpeg input for the microphone. */
 export function micInputArgs(platform = process.platform, device = micDevice()): string[] {
-	if (device?.startsWith("file:")) return ["-re", "-i", device.slice(5)];
+	// -re alone sends the first half second in a burst; real time from the first sample, like a microphone.
+	if (device?.startsWith("file:")) return ["-re", "-readrate_initial_burst", "0", "-i", device.slice(5)];
 	if (platform === "darwin") return ["-f", "avfoundation", "-i", `:${device ?? "default"}`];
 	if (platform === "win32") return ["-f", "dshow", "-i", `audio=${device ?? "default"}`];
 	return ["-f", "pulse", "-i", device ?? "default"];
@@ -60,13 +61,21 @@ export interface Mic {
 	readonly startedAt: number;
 }
 
-/** Starts capturing. `onData` gets PCM chunks; `onError` fires once if ffmpeg fails or the mic is unavailable. */
-export async function startMic(onData: (pcm: Buffer) => void, onError: (message: string) => void): Promise<Mic> {
+/**
+ * Starts capturing. `onData` gets PCM chunks; `onError` fires once if ffmpeg fails or the mic is unavailable.
+ * `rate` defaults to 16 kHz (recognisers); voice mode uses 48 kHz (Opus). With `onEnd`, a `file:` input that
+ * plays to its end calls it instead of `onError`.
+ */
+export async function startMic(
+	onData: (pcm: Buffer) => void,
+	onError: (message: string) => void,
+	opts: { rate?: number; onEnd?: () => void } = {},
+): Promise<Mic> {
 	const ff = await findFfmpeg();
 	if (!ff) throw new Error("voice input needs ffmpeg for the microphone (brew install ffmpeg / apt install ffmpeg)");
 	const child: ChildProcess = spawn(
 		ff,
-		["-hide_banner", "-loglevel", "error", "-nostdin", ...micInputArgs(), "-ac", "1", "-ar", String(MIC_RATE), "-f", "s16le", "-"],
+		["-hide_banner", "-loglevel", "error", "-nostdin", ...micInputArgs(), "-ac", "1", "-ar", String(opts.rate ?? MIC_RATE), "-f", "s16le", "-"],
 		{ stdio: ["ignore", "pipe", "pipe"] },
 	);
 	let stderr = "";
@@ -82,6 +91,7 @@ export async function startMic(onData: (pcm: Buffer) => void, onError: (message:
 	child.on("error", (e) => onError(`microphone: ${e.message}`));
 	child.on("close", (code) => {
 		if (stopped) return;
+		if (code === 0 && opts.onEnd && micDevice()?.startsWith("file:")) return opts.onEnd();
 		const hint =
 			process.platform === "darwin" && !got
 				? " (allow microphone access for your terminal in System Settings → Privacy & Security → Microphone)"

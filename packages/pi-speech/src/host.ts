@@ -1,12 +1,15 @@
 // Voice requests served inside each pi process (through the bridge): transcription and intent
-// distillation, spoken briefs and details for voice mode, the realtime call setup, and the voice
-// note that tells the agent its user is listening rather than reading.
+// distillation, long dictation as a draft (phone-drafts.ts), spoken briefs and details for voice
+// mode, the realtime call setup, and the voice note that tells the agent its user is listening
+// rather than reading.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type VoiceConfig, writePrivate } from "./config.ts";
 import { Dictionary } from "./dictionary.ts";
 import { distill, editorText } from "./distill.ts";
-import type { Complete } from "./model.ts";
+import { draftsDir } from "./drafting.ts";
+import { type Complete, sessionComplete } from "./model.ts";
+import { MAX_RECORDING, PhoneDrafts } from "./phone-drafts.ts";
 import { createCall, chatgptAccountId, DEFAULT_REALTIME_MODEL, type RealtimeCredentials, realtimeSession } from "./realtime.ts";
 import { type Attention, brief, countWord, digestText, runDigest, speakable } from "./speech.ts";
 import { SILENT_PEAK } from "./mic.ts";
@@ -15,13 +18,16 @@ import { chooseVoice, personaList } from "./personas.ts";
 import { synthesize, ttsTarget } from "./tts.ts";
 import { gatherVocabulary, recognizerHints, sayName } from "./vocab.ts";
 
-const MAX_AUDIO = 20 * 1024 * 1024;
+/** One recording to transcribe: the same limit as a draft's last piece (pi-mobile's hub sizes its requests for it). */
+const MAX_AUDIO = MAX_RECORDING;
 
 export interface VoiceHostDeps {
 	ctx: () => ExtensionContext;
 	config: () => VoiceConfig | undefined;
 	stateDir: () => string;
 	complete: Complete;
+	/** The session's own model, for a finished draft's check (defaults to it; falls back to `complete`). */
+	careful?: Complete;
 	/** Replaceable in tests. */
 	stt?: () => SttProvider;
 	credentials?: () => Promise<RealtimeCredentials | undefined>;
@@ -42,8 +48,18 @@ export class VoiceHost {
 		return this.listening && now - this.listening.seen < 150_000 ? this.listening.mode : undefined;
 	}
 
+	/** Long dictation from the phone: chunks in, the same drafting engine as the terminal, the draft out. */
+	readonly drafts: PhoneDrafts;
+
 	constructor(deps: VoiceHostDeps) {
 		this.deps = deps;
+		this.drafts = new PhoneDrafts({
+			stt: () => this.stt(),
+			vocabulary: () => this.vocabulary(),
+			fast: deps.complete,
+			careful: deps.careful ?? sessionComplete(deps.ctx),
+			dir: () => draftsDir(deps.stateDir()),
+		});
 	}
 
 	private branch(): any[] {

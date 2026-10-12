@@ -6,12 +6,16 @@
 //
 // PLAYWRIGHT=/path/to/node_modules/playwright/index.mjs if playwright is not resolvable from here.
 
+import { assertNoSound, NO_SOUND } from "../ui/no-sound.mjs";
+
 const { chromium } = await import(process.env.PLAYWRIGHT || "playwright");
 const [url, question, mmhmm, stop] = process.argv.slice(2);
 if (!stop) throw new Error("usage: turns.mjs <pair-url> <question.wav> <mm-hmm.wav> <wait-stop.wav>");
 
-const browser = await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required"] });
+const browser = await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+// No speech or audio may reach whoever runs this: --mute-audio doesn't cover speechSynthesis on macOS.
+await ctx.addInitScript({ content: NO_SOUND });
 await ctx.addInitScript(() => {
 	const ac = new AudioContext({ sampleRate: 48000 });
 	const dest = ac.createMediaStreamDestination();
@@ -41,6 +45,7 @@ await ctx.route("**/__clip/*", (route) => route.fulfill({ path: clips[route.requ
 const page = await ctx.newPage();
 page.on("pageerror", (e) => console.log("pageerror:", e.message));
 await page.goto(url);
+await assertNoSound(page);
 await page.waitForSelector("#composer:not([hidden])", { timeout: 15000 });
 await page.evaluate(() => {
 	window.PiVoiceDebug = [];

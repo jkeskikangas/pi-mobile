@@ -30,8 +30,8 @@ final class AppE2ETests: XCTestCase {
 
     func testWebVoiceDictationAndNotifications() throws {
         let web = app.webViews.firstMatch
-        let voice = web.buttons["Voice mode: talk with pi hands-free"]
-        XCTAssertTrue(voice.waitForExistence(timeout: 20), "web UI did not load")
+        let voice = web.buttons["Voice mode"] // the composer's voice-mode button (empty composer)
+        if !voice.waitForExistence(timeout: 20) { fail("web UI did not load") }
         shot("01-web")
 
         // Voice: the native screen opens; the fixture has no realtime, so basic voice is used.
@@ -71,16 +71,40 @@ final class AppE2ETests: XCTestCase {
         if !text.waitForExistence(timeout: 10) { fail("no transcription in the composer") }
         shot("05-dictation-done")
 
-        // Hold to talk.
-        // The transcription focuses the composer; put the keyboard away so the mic is reachable.
-        let keyboard = app.keyboards.firstMatch
-        if keyboard.exists { app.toolbars.buttons.allElementsBoundByIndex.last?.tap() }
-        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: keyboard)
-        if XCTWaiter.wait(for: [hidden], timeout: 5) != .completed { fail("keyboard still up") }
-        if !mic.waitForExistence(timeout: 5) || !mic.isHittable { fail("mic not reachable after the first take") }
+        // The transcription focuses the composer from script, which opens the keyboard: the composer still sits on
+        // it and the header stays. Then put it away with a swipe down (there is no accessory bar Done).
         let composer = web.textViews["Message"]
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.waitForExistence(timeout: 3) {
+            sleepRunLoop(1) // keyboard animation
+            shot("05a-dictation-keyboard")
+            checkComposerOnKeyboard("after-dictation")
+        }
+        if !dismissKeyboard() { fail("keyboard still up after a swipe down") }
         if !(composer.value as? String ?? "").contains("round them to cents") { fail("distilled text not in the composer") }
         shot("05b-transcribed")
+
+        // Tapping the composer: no form accessory bar ("^ v Done") above the keyboard, so the composer sits on it;
+        // typing works, non-ASCII too. Needs the software keyboard: with the simulator's hardware keyboard connected
+        // (I/O → Keyboard) iOS shows neither keyboard nor bar.
+        composer.tap()
+        if keyboard.waitForExistence(timeout: 5) {
+            sleepRunLoop(1) // keyboard animation
+            shot("05c-keyboard")
+            let bar = [app.toolbars.firstMatch, app.buttons["Done"], app.buttons["Previous"], app.buttons["Next"]].filter { $0.exists }
+            if !bar.isEmpty { fail("form accessory bar above the keyboard: \(bar)") }
+            checkComposerOnKeyboard("tapped")
+            composer.typeText(" Hyvää yötä")
+            if !(composer.value as? String ?? "").contains("Hyvää yötä") { fail("typed text not in the composer") }
+            shot("05d-typed")
+            if !dismissKeyboard() { fail("keyboard still up after a swipe down") }
+        } else {
+            let note = XCTAttachment(string: "no software keyboard (hardware keyboard connected?): accessory bar not checked")
+            note.name = "keyboard-skipped"; note.lifetime = .keepAlways; add(note)
+        }
+
+        // Hold to talk.
+        if !mic.waitForExistence(timeout: 5) || !mic.isHittable { fail("mic not reachable after the first take") }
         mic.press(forDuration: 1.6)
         sleepRunLoop(2.5) // the fixture answers transcribe after 1.2 s
         shot("06-hold-done")
@@ -97,6 +121,30 @@ final class AppE2ETests: XCTestCase {
         let revoke = web.buttons.containing(NSPredicate(format: "label BEGINSWITH 'Stop sharing my voice'")).firstMatch
         if !revoke.waitForExistence(timeout: 5) { fail("no consent row in the menu") }
         shot("07-menu-notifications")
+    }
+
+    /// With the keyboard up: the composer is above it, not under it, and the header (its menu button) is on screen.
+    /// The frames go into the result as `keyboard-<name>`.
+    func checkComposerOnKeyboard(_ name: String) {
+        let web = app.webViews.firstMatch
+        let composer = web.textViews["Message"], keyboard = app.keyboards.firstMatch
+        let menu = web.descendants(matching: .any)["Menu"].firstMatch
+        let a = XCTAttachment(string: "composer \(composer.frame) keyboard \(keyboard.frame) menu \(menu.frame)")
+        a.name = "keyboard-\(name)"; a.lifetime = .keepAlways; add(a)
+        XCTAssertLessThanOrEqual(composer.frame.maxY, keyboard.frame.minY, "\(name): composer under the keyboard")
+        XCTAssertTrue(menu.exists && menu.frame.minY >= 0 && menu.frame.maxY <= keyboard.frame.minY, "\(name): header scrolled off screen")
+    }
+
+    /// Puts the keyboard away the way a person would without the accessory bar's Done: a swipe down the transcript.
+    @discardableResult
+    func dismissKeyboard() -> Bool {
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists else { return true }
+        let web = app.webViews.firstMatch
+        let from = web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+        from.press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: keyboard)
+        return XCTWaiter.wait(for: [hidden], timeout: 5) == .completed
     }
 
     /// Fails with a screenshot and the element tree (also written next to the shots).

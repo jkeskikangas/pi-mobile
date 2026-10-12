@@ -440,10 +440,23 @@ export class Bridge {
 			case "speak":
 			case "voices":
 			case "learn":
-			case "voiceState": {
+			case "voiceState":
+			case "draftStart":
+			case "draftChunk":
+			case "draftState":
+			case "draftFinish":
+			case "draftEdit":
+			case "draftClose": {
 				const v = this.voice;
 				if (!v) throw new Error("voice is not available in this pi");
 				if (m === "transcribe") return v.transcribe(p);
+				// Long dictation as a draft: chunks of the recording (each at most MAX_CHUNK, checked by the host).
+				if (m === "draftStart") return v.drafts.start(p);
+				if (m === "draftChunk") return v.drafts.chunk(p);
+				if (m === "draftState") return v.drafts.state(p);
+				if (m === "draftFinish") return v.drafts.finish(p);
+				if (m === "draftEdit") return v.drafts.edit(p);
+				if (m === "draftClose") return v.drafts.close(p);
 				if (m === "distill") return v.distill(p);
 				if (m === "brief") return v.brief(p);
 				if (m === "details") return v.details(p);

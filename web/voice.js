@@ -110,11 +110,17 @@
 	// ── voice input in the composer ───────────────────────────────────────────────────────────────
 	// Hold the mic and talk, let go (walkie-talkie); or tap once to start and tap again to finish.
 	// The computer recognises the speech and distils it into the message you meant, which lands in
-	// the composer for review. "raw" shows what was heard, "undo" restores your text.
+	// the composer for review. "raw" shows what was heard, "undo" restores your text. A long dictation
+	// (or one that describes rather than asks) becomes a draft instead, formed while you talk (draft.js).
 	const HOLD_MS = 350;
+	/** A dictation's limit (a draft's too); a change to a draft by voice is short. */
+	const MAX_MS = 10 * 60_000;
+	const EDIT_MAX_MS = 2 * 60_000;
+	const Draft = () => window.PiDraft;
 	// Native takes (native/ios/BRIDGE.md): `phase` is idle | starting | rec | stopping; `gen` numbers each
 	// take so a late reply for a dropped one is ignored; `then` is what the user asked for while starting.
-	const dict = { rec: null, stream: null, chunks: [], started: 0, raf: 0, last: null, busy: false, analyser: null, held: false, levels: [], phase: "idle", gen: 0, then: null };
+	// `mode`: "dictate" (a prompt, or a draft once it is long) or "edit" (a change to the draft on screen).
+	const dict = { rec: null, stream: null, chunks: [], started: 0, raf: 0, last: null, busy: false, analyser: null, held: false, levels: [], phase: "idle", gen: 0, then: null, mode: "dictate" };
 
 	/** Drops the current native take on the web side; a pending reply for it is ignored. */
 	function dropNativeTake() {
@@ -126,8 +132,9 @@
 	}
 
 	async function startDictation(held) {
-		if (dict.busy || dict.rec || dict.phase !== "idle") return;
+		if (dict.busy || dict.rec || dict.phase !== "idle" || Draft()?.busy()) return;
 		dict.held = held;
+		dict.mode = Draft()?.refining() ? "edit" : "dictate";
 		let then = null;
 		if (native()) {
 			const gen = ++dict.gen;
@@ -171,6 +178,8 @@
 				dict.analyser = c.createAnalyser();
 				dict.analyser.fftSize = 512;
 				c.createMediaStreamSource(dict.stream).connect(dict.analyser);
+				// Also cut into chunks for the computer: a long dictation becomes a draft that forms while you talk.
+				if (dict.mode === "dictate") Draft()?.capture({ stream: dict.stream, ctx: c, agent: app().S.current, started: dict.started });
 			} catch {}
 		}
 		$("micBtn").classList.add("rec");
@@ -188,6 +197,7 @@
 		dict.stream?.getTracks().forEach((t) => t.stop());
 		dict.stream = null;
 		dict.analyser = null;
+		Draft()?.recording(false);
 		$("micBtn").classList.remove("rec");
 		$("micBtn").setAttribute("aria-pressed", "false");
 		$("micBtn").setAttribute("aria-label", "Dictate: hold to talk, or tap to start and stop");
@@ -238,20 +248,68 @@
 			rec.stop();
 			await stopped;
 			stopStream();
-			if (!keep) return hideDictBar();
 			const blob = new Blob(dict.chunks, { type: rec.mimeType || "audio/webm" });
+			if (!keep) {
+				hideDictBar();
+				// ✕ while a draft forms: nothing is lost, it goes to the message box as text (the recording, should the computer have lost the draft).
+				if (dict.mode === "dictate" && Draft()?.forming()) return void runDraft(() => Draft().finish({ elapsedMs: Date.now() - dict.started, keep: true }), blob, blob.type);
+				if (dict.mode === "dictate") Draft()?.discard();
+				return;
+			}
 			mime = blob.type;
 			size = blob.size;
 			audio = blob;
 		}
 		navigator.vibrate?.(10);
-		if (Date.now() - dict.started < 600 || size < 1500) return showDictMessage(dict.held ? "Hold the mic while you talk, or tap once to start." : "Too short. Tap the mic, talk, then tap again.");
+		const elapsedMs = Date.now() - dict.started;
+		if (dict.mode === "dictate" && Draft()?.forming()) {
+			hideDictBar();
+			return void runDraft(() => Draft().finish({ elapsedMs }), audio, mime);
+		}
+		if (elapsedMs < 600 || size < 1500) {
+			if (dict.mode === "dictate") Draft()?.discard();
+			return showDictMessage(dict.held ? "Hold the mic while you talk, or tap once to start." : "Too short. Tap the mic, talk, then tap again.");
+		}
+		if (dict.mode === "edit") {
+			hideDictBar();
+			return void Draft().change({ audio: typeof audio === "string" ? audio : await blobToBase64(audio), mime });
+		}
+		showDictMessage("Understanding what you meant…", "busy");
+		// Chunks went to the computer: it says whether this is a draft, or a prompt after all (its words come back).
+		if (rec !== NATIVE_REC) return void runDraft(() => Draft().finish({ elapsedMs }), audio, mime);
+		// The iPhone app can't send chunks: a long recording is checked for a draft once, at the end.
+		return void runDraft(() => Draft().whole({ audio, mime, elapsedMs, agent: app().S.current }), audio, mime);
+	}
+
+	/**
+	 * A draft (the sheet takes over), a prompt after all (its words are distilled), or no draft: the whole
+	 * recording is. A draft the computer lost is the whole recording too, so nothing said is lost.
+	 */
+	async function runDraft(finish, audio, mime) {
+		dict.busy = true;
+		let d = null;
+		try {
+			d = Draft() ? await finish() : null;
+		} catch {}
+		dict.busy = false;
+		if (d?.draft || d?.closed) {
+			dict.last = null;
+			return hideDictBar();
+		}
+		if (d && "prompt" in d) return distilled(() => app().speechCall("distill", { raw: d.prompt, draft: app().input().value }));
+		const b64 = typeof audio === "string" ? audio : await blobToBase64(audio);
+		const note = d?.lost ? "The computer lost the draft, so this is the whole recording as a dictation. Check it, then send." : undefined;
+		return distilled(() => app().speechCall("transcribe", { audio: b64, mime, draft: app().input().value }), note);
+	}
+
+	/** The dictation's prompt lands in the composer for review, with raw and undo. */
+	async function distilled(request, note) {
 		const input = app().input();
 		const before = input.value;
 		dict.busy = true;
 		showDictMessage("Understanding what you meant…", "busy");
 		try {
-			const r = await app().speechCall("transcribe", { audio: typeof audio === "string" ? audio : await blobToBase64(audio), mime, draft: before });
+			const r = await request();
 			if (!r.raw?.trim())
 				return showDictMessage(
 					r.silent
@@ -264,7 +322,7 @@
 			app().autosize();
 			input.focus({ preventScroll: true });
 			dict.last = { raw: r.raw, text: input.value, before };
-			const bar = showDictMessage(r.by === "model" ? "Distilled from your speech — check it, then send." : "Cleaned up locally (no model reachable).", "done");
+			const bar = showDictMessage(note || (r.by === "model" ? "Distilled from your speech — check it, then send." : "Cleaned up locally (no model reachable)."), "done");
 			const label = bar.querySelector(".grow");
 			const distilledLabel = label.textContent;
 			dictChip(bar, "raw", "Show what you said word for word", (b) => {
@@ -300,6 +358,7 @@
 
 	function hideDictBar() {
 		const bar = $("dictBar");
+		bar.classList.remove("drafting");
 		bar.replaceChildren();
 		bar.hidden = true;
 		delete bar.dataset.kind;
@@ -307,6 +366,7 @@
 
 	function showDictMessage(text, kind = "info") {
 		const bar = $("dictBar");
+		bar.classList.remove("drafting");
 		bar.replaceChildren(Object.assign(document.createElement("span"), { className: "grow", textContent: text }));
 		bar.dataset.kind = kind;
 		bar.hidden = false;
@@ -320,6 +380,7 @@
 	/** The recording strip: live waveform, timer, cancel and done. Built once, animated per frame. */
 	function showRecorder() {
 		const bar = $("dictBar");
+		bar.classList.remove("drafting");
 		bar.dataset.kind = "rec";
 		bar.hidden = false;
 		const cancel = Object.assign(document.createElement("button"), { className: "rec-x", title: "Cancel", innerHTML: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' });
@@ -328,16 +389,32 @@
 		const wave = Object.assign(document.createElement("canvas"), { className: "wave" });
 		wave.setAttribute("aria-hidden", "true");
 		const time = Object.assign(document.createElement("span"), { className: "rec-time", textContent: "0:00" });
-		const hint = Object.assign(document.createElement("span"), { className: "rec-hint", textContent: dict.held ? "Release to finish" : "Tap ✓ when done" });
+		const editing = dict.mode === "edit";
+		if (editing) Draft()?.recording(true);
+		const hint = Object.assign(document.createElement("span"), { className: "rec-hint", textContent: editing ? "Say the change" : dict.held ? "Release to finish" : "Tap ✓ when done" });
 		const done = Object.assign(document.createElement("button"), { className: "rec-done", title: "Done", innerHTML: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' });
-		done.setAttribute("aria-label", "Finish dictation");
+		done.setAttribute("aria-label", editing ? "Apply the change" : "Finish dictation");
 		done.onclick = () => finishDictation(true);
+		if (editing) cancel.setAttribute("aria-label", "Cancel the change");
 		bar.replaceChildren(cancel, wave, time, hint, done);
+		let drafting = false;
 		const draw = () => {
 			if (!dict.rec) return;
-			const secs = Math.floor((Date.now() - dict.started) / 1000);
-			time.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
-			if (secs >= 300) return void finishDictation(true);
+			// (Screenshots of the warning move the clock on: window.PiDraftDebug = { elapsedMs }.)
+			const ms = Date.now() - dict.started + (editing ? 0 : window.PiDraftDebug?.elapsedMs || 0);
+			const secs = Math.floor(ms / 1000);
+			// Once the draft shows: the time against the 10-minute limit, amber from a minute before it.
+			const c = !editing && Draft() ? Draft().tick(ms) : null;
+			const text = c?.shown ? c.time : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+			if (time.textContent !== text) time.textContent = text;
+			time.classList.toggle("warn", !!(c?.shown && c.warn));
+			if (!!c?.shown !== drafting) {
+				drafting = !!c?.shown;
+				bar.classList.toggle("drafting", drafting);
+				cancel.setAttribute("aria-label", drafting ? "Stop and keep the draft as text" : "Cancel dictation");
+				done.setAttribute("aria-label", drafting ? "Finish the draft" : "Finish dictation");
+			}
+			if (ms >= (editing ? EDIT_MAX_MS : MAX_MS)) return void finishDictation(true);
 			dict.levels.push(dict.rec === NATIVE_REC ? dict.level : rmsOf(dict.analyser));
 			drawWave(wave, dict.levels);
 			dict.raf = requestAnimationFrame(draw);
@@ -1152,8 +1229,7 @@
 		}
 
 		cancelsGrace(text) {
-			const cmd = V.parseCommand(text)?.kind;
-			return cmd === "stop" || cmd === "quiet" || /^(no|nope|cancel|wait|hold on|don't|do not|abort)\b/.test(V.norm(text));
+			return V.cancelsGrace(text);
 		}
 
 		/**
@@ -1553,12 +1629,20 @@
 							if (this.state === "thinking" || this.state === "hearing") this.setState(this.listenState());
 							break;
 						}
+						// "Stop", "shush": the voice stops and says nothing; pi carries on working (rule 7).
+						if (!echo && V.parseCommand(text)?.kind === "quiet") {
+							if (this.state === "speaking") this.hardInterrupt();
+							this.unduck();
+							this.setState(this.listenState());
+							break;
+						}
 						if (this.state === "speaking") this.hardInterrupt();
 						earcon("heard");
 						this.respond();
 					}
-					// Instant local stop, before the model has even answered; its own stop_pi is then a no-op.
-					if (V.parseCommand(text)?.kind === "stop" && app().S.agents.get(this.agent)?.status === "working") app().call("abort", {}, this.agent).catch(() => {});
+					// Instant local "stop pi", before the model has even answered; its own stop_pi is then a no-op. A bare
+					// "stop" only stopped the voice (cut above): interrupting the voice never stops pi.
+					if (V.parseCommand(text)?.kind === "stopPi" && app().S.agents.get(this.agent)?.status === "working") app().call("abort", {}, this.agent).catch(() => {});
 					if (V.parseCommand(text)?.kind === "end") setTimeout(() => this.close(), 1200);
 					if (!echo && V.SETTINGS.includes(V.parseCommand(text)?.kind)) this.applySetting(V.parseCommand(text).kind);
 					break;
@@ -1583,8 +1667,9 @@
 					break;
 				case "response.function_call_arguments.done":
 					// Handing a request to pi needs no words ("got it, passing that on"): the working sound
-					// says it. Cut whatever the voice was about to say with it.
-					if (ev.name === "ask_pi") this.rt({ type: "output_audio_buffer.clear" });
+					// says it. Cut whatever the voice was about to say with it, except the one word a lookup
+					// gets ("Checking.", realtime.ts): that wait would otherwise be silent.
+					if (ev.name === "ask_pi" && !/^\s*checking\.?\s*$/i.test(this.saidLive || "")) this.rt({ type: "output_audio_buffer.clear" });
 					this.runCall(ev.call_id, ev.name, ev.arguments);
 					break;
 				case "response.done": {
@@ -1769,9 +1854,10 @@
 				const prompts = [...(a.S.prompts.get(this.agent)?.values() || [])];
 				if (cmd?.kind === "end") return this.close();
 				if (cmd?.kind === "help") return this.speak(V.HELP);
-				if (cmd?.kind === "stop") {
+				// "Stop" stops the voice (quiet, below); only "stop pi" / "cancel that" stops pi's work.
+				if (cmd?.kind === "stopPi") {
 					await this.tool("stop_pi", {});
-					return this.speak("Stopped.");
+					return this.speak("Stopped pi.");
 				}
 				if (cmd?.kind === "quiet") return this.setState(this.listenState());
 				if (cmd?.kind === "repeat") return this.speak(this.lastSpoken || "I haven't said anything yet.");
@@ -2063,9 +2149,16 @@
 	// ── wiring ───────────────────────────────────────────────────────────────────────────────────────
 	let mode = null;
 
-	function startVoiceMode() {
+	async function startVoiceMode() {
 		if (!app()?.S.device) return;
 		if (!app().S.current) return app().toast("No session to talk to yet.", "warning");
+		// A dictation in the composer ends first, nothing lost (the voice-mode button hides while you dictate;
+		// this is the menu's Voice mode): its words go to the message box, a forming draft as text.
+		if (dict.rec && dict.rec !== NATIVE_REC) void finishDictation(!Draft()?.forming());
+		// The app's own recording: stopped and transcribed as usual (the stop must answer before voice mode
+		// takes the microphone). One still starting has nothing in it yet and is dropped by voice.start.
+		else if (dict.rec === NATIVE_REC && dict.phase === "rec") await finishDictation(true);
+		else if (Draft()?.open()) Draft().keepAsText();
 		// The app runs voice mode natively and has the microphone, so no secure-context check.
 		if (native()) return void startNativeVoice();
 		if (!navigator.mediaDevices?.getUserMedia) return app().toast("This browser can't use the microphone.", "warning");
@@ -2095,6 +2188,7 @@
 	function wire() {
 		wireMic();
 		wireLearning();
+		Draft()?.setHooks({ message: (text) => showDictMessage(text, "info") });
 		$("voiceBtn").onclick = startVoiceMode;
 		$("vEnd").onclick = () => {
 			mode?.close();

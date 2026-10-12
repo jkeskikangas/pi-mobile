@@ -1,6 +1,7 @@
 // pi-speech settings and state: ~/.pi/agent/pi-speech/ (config.json, voice-dictionary.json, bin/).
 // Voice settings used to live under "voice" in pi-mobile's config; they are copied over once.
 
+import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -28,10 +29,48 @@ export interface VoiceConfig {
 	tts?: "auto" | "off";
 	/** Terminal voice input: put the distilled text in the editor ("review", default) or send it ("send"). */
 	afterDictation?: "review" | "send";
+	/** Draft view: no glow-and-fade; what dictation changed gets a margin mark until the next key press. */
+	reducedMotion?: boolean;
+	/** Terminal voice mode (`/voice`): "quiet" (sounds only), "eyes-free" (longer spoken briefs) or "normal" (default). */
+	voiceSwitch?: "normal" | "quiet" | "eyes-free";
 }
 
 function agentDir(): string {
 	return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+}
+
+/** "en-FI", "fi_FI.UTF-8" → "en", "fi": the language part, as speech transcription wants it. */
+export function languageOf(locale: string | undefined): string | undefined {
+	const l = String(locale ?? "")
+		.trim()
+		.split(/[-_.@]/)[0]!
+		.toLowerCase();
+	return /^[a-z]{2,3}$/.test(l) ? l : undefined;
+}
+
+function appleLocale(): string | undefined {
+	try {
+		return execFileSync("defaults", ["read", "-g", "AppleLocale"], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The language the developer speaks, when the config doesn't say: on macOS the system locale (the one
+ * the on-device recogniser uses), elsewhere LC_ALL / LC_MESSAGES / LANG, then the runtime's locale.
+ */
+export function systemLanguage(env = process.env, platform = process.platform, readAppleLocale = appleLocale): string | undefined {
+	if (platform === "darwin") {
+		const l = languageOf(readAppleLocale());
+		if (l) return l;
+	}
+	for (const v of [env.LC_ALL, env.LC_MESSAGES, env.LANG]) if (v && !/^(?:C|POSIX)(?:[.@]|$)/.test(v) && languageOf(v)) return languageOf(v);
+	try {
+		return languageOf(Intl.DateTimeFormat().resolvedOptions().locale);
+	} catch {
+		return undefined;
+	}
 }
 
 export function speechDir(): string {

@@ -65,7 +65,6 @@
 			<span id="othersBadge" class="others" hidden></span>
 		</button>
 		<button id="modelBtn" class="model-btn" hidden></button>
-		<button id="voiceBtn" class="icon-btn voice-btn" aria-label="Voice mode: talk with pi hands-free" title="Voice mode"><svg class="i" aria-hidden="true"><use href="#i-wave"/></svg></button>
 		<button id="menuBtn" class="icon-btn" aria-label="Menu" aria-haspopup="dialog"><svg class="i" aria-hidden="true"><use href="#i-more"/></svg></button>
 	</header>
 	<div id="banner" class="banner" hidden role="status"></div>
@@ -97,13 +96,16 @@
 		</div>
 		<div id="suggest" class="suggest" hidden role="listbox" aria-label="Commands"></div>
 		<div id="attachments" class="attachments" hidden></div>
+		<section id="draftSheet" class="draft" hidden aria-labelledby="draftTitle"></section>
 		<div id="dictBar" class="dict-bar" hidden aria-live="polite"></div>
 		<div class="compose-box">
 			<button id="attachBtn" class="icon-btn attach" aria-label="Attach image" title="Attach image"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></button>
 			<input id="fileInput" type="file" accept="image/*" multiple hidden>
 			<textarea id="input" rows="1" placeholder="Message pi" enterkeyhint="send" autocomplete="off" aria-label="Message"></textarea>
+			<span id="draftHint" class="draft-hint" hidden></span>
 			<button id="micBtn" class="icon-btn mic" aria-label="Dictate: hold to talk, or tap to start and stop" aria-pressed="false" title="Speak instead of typing: hold to talk, or tap to start and stop"><svg class="i" aria-hidden="true"><use href="#i-mic"/></svg></button>
-			<button id="sendBtn" class="send" aria-label="Send"><svg class="i" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
+			<button id="voiceBtn" class="send voice-go" aria-label="Voice mode" title="Voice mode: talk with pi hands-free" hidden><svg class="i" aria-hidden="true"><use href="#i-wave"/></svg></button>
+			<button id="sendBtn" class="send" aria-label="Send" hidden><svg class="i" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
 		</div>
 	</footer>
 </div>
@@ -154,6 +156,7 @@
 <script src="fleet.js"></script>
 <script src="app.js"></script>
 <script src="voice-core.js"></script>
+<script src="draft.js"></script>
 <script src="voice.js"></script>
 </body>
 </html>

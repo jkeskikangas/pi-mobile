@@ -15,13 +15,15 @@
 	/** Drops a leading wake phrase: "pi, stop" / "hey pi stop" / "ok so stop". */
 	const stripLead = (s) => s.replace(/^(?:(?:hey|ok|okay|so|um|uh|and|alright)\s+)*(?:pi\s+)?/, "").trim();
 
+	// Interrupting the voice never stops pi: "stop" is about the voice (quiet); stopping pi's work needs it said
+	// ("stop pi", "cancel that"), as in the terminal (packages/pi-speech/src/voice-session.ts).
 	const COMMANDS = [
-		["stop", /^(?:stop|stop it|stop that|stop pi|cancel|cancel it|abort|halt|stop working|stop everything)$/],
+		["stopPi", /^(?:stop pi|stop the work|stop working|stop everything|cancel that|cancel it|cancel the request|abort|abort that|abort it)$/],
 		["repeat", /^(?:repeat|repeat that|say (?:that|it) again|again|what|sorry what|come again|pardon)$/],
 		["status", /^(?:status|what's (?:it|pi|he) doing|what are you doing|what is it doing|how's it going|progress|where are we|are you done|is it done)$/],
 		["shorter", /^(?:shorter|be (?:brief|briefer|terse|shorter)|too long|less detail)$/],
 		["more", /^(?:more|tell me more|go on|details|more details|what else|continue|and)$/],
-		["quiet", /^(?:quiet|be quiet|shush|shut up|silence|stop talking|enough)$/],
+		["quiet", /^(?:stop|stop it|stop that|okay stop|ok stop|cancel|halt|quiet|be quiet|shush|hush|shut up|silence|stop talking|enough)$/],
 		["end", /^(?:end voice(?: mode)?|exit voice(?: mode)?|goodbye|bye|that's all|we're done|end call|hang up)$/],
 		["help", /^(?:help|what can i say|what can you do|how does this work|commands)$/],
 		["pushToTalk", /^(?:push to talk|hold to talk|tap to talk|walkie talkie)$/],
@@ -32,7 +34,7 @@
 
 	/** What "what can I say?" answers: a few things, spoken, not a manual. */
 	const HELP =
-		"Just talk to pi like a colleague. You can say: what's it doing; stop; tell me more; say that again; switch to another session. When pi asks something, answer out loud, or tap the card.";
+		"Just talk to pi like a colleague. You can say: what's it doing; tell me more; say that again; switch to another session; stop, to stop me talking; and stop pi, to stop its work. When pi asks something, answer out loud, or tap the card.";
 
 	/**
 	 * A listener's backchannel or a stray sound, not a turn: "mm-hmm", "right", a cough. While pi
@@ -280,9 +282,251 @@
 		return { match: top[0] };
 	}
 
+	/**
+	 * During the undo window ("Deploying to production, say stop to cancel"), what cancels the countdown: "stop"
+	 * and "cancel" (about the voice elsewhere, never pi's work), "stop pi", and any no.
+	 */
+	function cancelsGrace(text) {
+		const cmd = parseCommand(text)?.kind;
+		return cmd === "stopPi" || cmd === "quiet" || /^(no|nope|cancel|wait|hold on|don't|do not|abort|stop)\b/.test(norm(text));
+	}
+
 	/** Commands that change voice settings, handled on the phone. */
 	const SETTINGS = ["pushToTalk", "openMic", "eyesFree", "glance"];
 
-	const api = { HELP, SETTINGS, matchSession, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
+	/**
+	 * Where a long dictation is cut into chunks for the computer to recognise while you talk: at the
+	 * first pause after `minMs` of audio, or at `maxMs` regardless, so a chunk ends between words where
+	 * it can. `feed(rms, frameMs)` is true when the chunk should end after this frame.
+	 */
+	class Chunker {
+		constructor(o = {}) {
+			this.minMs = o.minMs ?? 10_000;
+			this.maxMs = o.maxMs ?? 15_000;
+			this.pauseMs = o.pauseMs ?? 300;
+			this.vad = new Vad({ hangMs: this.pauseMs, minSpeechMs: 120 });
+			this.t = 0;
+			this.ms = 0;
+			this.quietMs = 0;
+		}
+		feed(rms, frameMs) {
+			this.t += frameMs;
+			this.ms += frameMs;
+			const quiet = rms <= this.vad.threshold();
+			this.vad.feed(rms, this.t); // keeps the noise floor current
+			this.quietMs = quiet ? this.quietMs + frameMs : 0;
+			if (this.ms >= this.maxMs || (this.ms >= this.minMs && this.quietMs >= this.pauseMs)) {
+				this.ms = 0;
+				this.quietMs = 0;
+				return true;
+			}
+			return false;
+		}
+	}
+
+	const clock = (ms) => {
+		const s = Math.max(0, Math.floor(ms / 1000));
+		return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+	};
+
+	/** A draft recording's time against its limit: "6:42 / 10:00", and from the warning on, how long is left. */
+	function draftClock(elapsedMs, maxMs = 600_000, warnMs = 540_000) {
+		const left = Math.max(0, Math.ceil((maxMs - elapsedMs) / 1000));
+		return {
+			time: `${clock(elapsedMs)} / ${clock(maxMs)}`,
+			warn: elapsedMs >= warnMs,
+			over: elapsedMs >= maxMs,
+			left: elapsedMs >= warnMs ? `Stops at ${clock(maxMs)}, ${left} s left. Tap ✓ to finish.` : "",
+		};
+	}
+
+	/**
+	 * The phone's half of a draft's chunks (web/draft.js; the computer's half is pi-speech phone-drafts.ts).
+	 * Each piece of audio gets its sequence number when it is cut and is sent on its own, in order, one at a
+	 * time; a failed piece is retried by itself (never merged with newer audio), so a lost reply can't make
+	 * the computer skip anything new: it hears each number once. The last piece goes with `finish` under the
+	 * next unused number.
+	 *
+	 * The caller always keeps the whole recording; it is the fallback. `off`: no draft on this computer (an
+	 * older pi-mobile, or `maxFails` failures in a row before the draft showed): the pieces are dropped and
+	 * the recording is an ordinary dictation. `lost`: the computer lost a draft that is on screen (pi
+	 * restarted, idle too long, too many drafts) or never took the rest of it.
+	 *
+	 * `call(method, params)` reaches the computer; `gone(e)` says an error means it has no such draft;
+	 * `params()` adds elapsedMs/since to each chunk; `shown()` is true once the draft is on screen (its
+	 * pieces are then kept through failures); `onStart(answer)`, `onView(answer)`, `onOff()` report back.
+	 */
+	class DraftUplink {
+		constructor(o) {
+			this.o = { params: () => ({}), shown: () => false, onStart() {}, onView() {}, onOff() {}, maxFails: 3, retryMs: 800, ...o };
+			this.id = null;
+			this.nextCut = 0;
+			this.pieces = [];
+			this.sending = null;
+			this.fails = 0;
+			this.off = false;
+			this.lost = false;
+			this.closed = false;
+			this.finishing = false;
+		}
+		/** Still taking pieces. */
+		get live() {
+			return !this.off && !this.lost && !this.closed;
+		}
+		/** Something reached the computer, or is on its way. */
+		get started() {
+			return !!(this.id || this.sending || this.pieces.length);
+		}
+		/** A piece cut at a pause: numbered now, sent after the ones before it. */
+		add(audio) {
+			if (!this.live || this.finishing) return false;
+			this.pieces.push({ seq: this.nextCut++, audio });
+			void this.flush();
+			return true;
+		}
+		/** Sends what is waiting, in order; stops at the first failure (the next piece cut retries it). */
+		flush() {
+			if (!this.sending)
+				this.sending = (async () => {
+					while (this.pieces.length && this.live && !this.finishing) if (!(await this.step())) break;
+				})().finally(() => (this.sending = null));
+			return this.sending;
+		}
+		/** The first waiting piece (opening the draft first): true once the computer has it. */
+		async step() {
+			const piece = this.pieces[0];
+			if (!piece) return true;
+			try {
+				if (!this.id) {
+					const s = await this.o.call("draftStart", {});
+					// Closed while it opened: nobody will finish it.
+					if (this.closed) {
+						this.o.call("draftClose", { id: s.id, how: "discard" }).catch(() => {});
+						return false;
+					}
+					this.id = s.id;
+					this.o.onStart(s);
+				}
+				const r = await this.o.call("draftChunk", { id: this.id, seq: piece.seq, audio: piece.audio, mime: "audio/wav", ...this.o.params() });
+				if (this.closed) return false;
+				if (this.pieces[0] === piece) this.pieces.shift();
+				this.fails = 0;
+				this.o.onView(r);
+				return true;
+			} catch (e) {
+				if (this.closed || !this.live) return false;
+				if (this.o.gone(e)) this.giveUp(true);
+				else if (++this.fails >= this.o.maxFails && !this.o.shown()) this.giveUp(false);
+				return false;
+			}
+		}
+		/** Stop sending and drop the pieces: the whole recording is the fallback. */
+		giveUp(gone) {
+			const shown = this.o.shown();
+			if (shown) this.lost = true;
+			else this.off = true;
+			this.pieces = [];
+			// A draft the computer still has: put away (kept on disk if it was on screen).
+			if (this.id && !gone) this.o.call("draftClose", { id: this.id, how: shown ? "kept" : "discard" }).catch(() => {});
+			this.o.onOff();
+		}
+		/**
+		 * The recording ended: the waiting pieces (each retried up to `maxFails` times), then `draftFinish`
+		 * with the rest under the next number. Returns { view } (its answer), { none } (no draft here: use
+		 * the whole recording), { lost } (the draft on screen can't be finished: use the whole recording)
+		 * or { closed } (the caller moved on).
+		 */
+		async finish(rest, params = {}) {
+			this.finishing = true;
+			await this.sending;
+			const wait = () => new Promise((r) => setTimeout(r, this.o.retryMs));
+			for (let tries = 0; this.pieces.length && this.live; ) {
+				if (await this.step()) tries = 0;
+				else if (!this.live) break;
+				else if (++tries >= this.o.maxFails) this.giveUp(false);
+				else await wait();
+			}
+			if (this.closed) return { closed: true };
+			if (this.lost) return { lost: true };
+			if (this.off || !this.id) return { none: true };
+			const p = { id: this.id, seq: this.nextCut++, audio: rest || undefined, mime: "audio/wav", ...params };
+			for (let tries = 1; ; tries++) {
+				try {
+					const r = await this.o.call("draftFinish", p);
+					return this.closed ? { closed: true } : { view: r };
+				} catch (e) {
+					if (this.closed) return { closed: true };
+					// Retried under the same number: if the computer heard it, it isn't heard twice.
+					const gone = this.o.gone(e);
+					if (gone || tries >= this.o.maxFails) {
+						this.giveUp(gone);
+						return this.lost ? { lost: true } : { none: true };
+					}
+					await wait();
+				}
+			}
+		}
+		/** The draft is closed or replaced: late answers are ignored. */
+		close() {
+			this.closed = true;
+			this.pieces = [];
+		}
+	}
+
+	/**
+	 * Markdown typed by hand, as the draft's blocks, for showing it until the computer answers. The same
+	 * split as pi-speech draft.ts `markdownBlocks` (the computer keeps these blocks): a heading is one
+	 * block; a paragraph runs to the next blank line; a list item takes its continuation lines; a fenced
+	 * code block runs to its closing fence, blank lines and all. `gap`: a blank line came before it.
+	 */
+	function markdownBlocks(text) {
+		const kindOf = (l) => (/^#{1,6}\s/.test(l) ? "heading" : /^\s*([-*+]|\d+[.)])\s/.test(l) ? "item" : "para");
+		const fenceOf = (l) => /^\s*(`{3,}|~{3,})/.exec(l)?.[1];
+		const closes = (fence, l) => {
+			const m = /^\s*(`{3,}|~{3,})\s*$/.exec(l);
+			return !!m && m[1][0] === fence[0] && m[1].length >= fence.length;
+		};
+		const out = [];
+		let lines = [];
+		let fence;
+		let gap = false;
+		let blank = false;
+		const flush = () => {
+			if (lines.length) out.push({ kind: kindOf(lines[0]), src: lines.join("\n"), gap });
+			lines = [];
+			fence = undefined;
+		};
+		const begin = (line) => {
+			flush();
+			gap = blank && out.length > 0;
+			blank = false;
+			lines = [line];
+		};
+		for (const line of String(text ?? "").replace(/\r\n?/g, "\n").split("\n")) {
+			if (fence) {
+				lines.push(line);
+				if (closes(fence, line)) flush();
+				continue;
+			}
+			if (!line.trim()) {
+				flush();
+				blank = true;
+				continue;
+			}
+			const f = fenceOf(line);
+			if (f) {
+				begin(line);
+				fence = f;
+			} else if (kindOf(line) === "heading") {
+				begin(line);
+				flush();
+			} else if (kindOf(line) === "item" || !lines.length) begin(line);
+			else lines.push(line);
+		}
+		flush();
+		return out;
+	}
+
+	const api = { HELP, SETTINGS, cancelsGrace, matchSession, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, Chunker, DraftUplink, markdownBlocks, draftClock, chunks, EARCONS, norm };
 	globalThis.PiVoiceCore = api;
 })();

@@ -5,6 +5,9 @@
 //
 // Control it on stdin: `work` starts a streaming turn with a running tool, `ask` opens a confirm
 // dialog, `pick` a select, `done` finishes the turn, `quiet` empties the second session.
+// Composer dictation longer than a chunk becomes a draft through the real drafting engine with a
+// scripted recogniser and models (set `window.PiDraftDebug = { minMs: 1500, maxMs: 2500 }` in the
+// page for short chunks). `lose` makes the computer lose every open draft (as when pi restarts).
 // Several machines: `box` starts a second computer (port + 1) and offers it to paired phones, as
 // `/remote add` does; `box off` / `box on` take it away and bring it back.
 
@@ -17,6 +20,8 @@ import { HubLink } from "../../src/link.ts";
 import type { AgentInfo, Item } from "../../src/protocol.ts";
 import { DeviceStore, OfferStore, PushStore } from "../../src/store.ts";
 import { personaList } from "pi-speech/personas";
+import { DRAFT_SYSTEM, RECONCILE_SYSTEM } from "pi-speech/drafting";
+import { PhoneDrafts } from "pi-speech/phone-drafts";
 
 const port = Number(process.argv[2] ?? 7979);
 const dir = mkdtempSync(join(tmpdir(), "pi-mobile-ui-"));
@@ -98,6 +103,15 @@ const items: Item[] = [
 	},
 	{ k: "tool", id: "t3", name: "edit", output: "", diff: "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b", isError: false, truncated: false, ts: now - 579_000 },
 	{ k: "assistant", id: "a3", ts: now - 570_000, stop: "stop", blocks: [{ t: "text", text: md }] },
+	// Extension messages: a long one (a pi-actors delivery, collapsed until tapped) and a short one (plain).
+	{
+		k: "custom",
+		id: "c1",
+		customType: "pi-actors",
+		text: "■ Message from reviewer (msg reviewer:1:1):\nReviewed the totals fix. The change in `calc.py` is right and the regression test covers negative numbers.\n\nTwo things before the PR:\n- `report.py` still rounds each line before summing, so totals can drift by a cent; round once at the end.\n- The changelog entry is missing.\n\nEverything else looks good; no need to wait for me.",
+		ts: now - 560_000,
+	},
+	{ k: "custom", id: "c2", customType: "notes", text: "Saved the review to `notes/totals.md`.", ts: now - 559_000 },
 ];
 
 interface Fake {
@@ -126,6 +140,55 @@ const fakes: Fake[] = [
 ];
 
 const prompts = new Map<string, any[]>([["f-infra", [{ id: "pi1", kind: "confirm", title: "Allow tofu apply?", message: "bash wants to run: tofu apply -auto-approve" }]]]);
+
+// Long dictation: the real drafting engine (pi-speech phone-drafts.ts) with a scripted recogniser (each chunk
+// "hears" the next part of a ramble about upload retries) and scripted models that turn each part into
+// section edits; the finishing check corrects one point, and a change by voice drops one.
+const RAMBLE = [
+	"So I want to rework how photo uploads behave on a bad connection. Uploads should retry by themselves with exponential backoff.",
+	"Cap the retries at five, no wait, make it three. And show the progress of each upload in the list.",
+	"The error message should say how long until the next try. Oh and the docs need a section on offline use.",
+	"Not sure yet whether downloads should get the same cap.",
+	"Also keep the queue when the app restarts.",
+];
+const CHANGES = ["Drop the point about the progress of each upload.", "Add that the retry button is disabled while the phone is offline."];
+let changes = 0;
+const EDITS: [RegExp, object[]][] = [
+	[/rework how photo uploads/, [{ op: "add", section: "Goal", text: "Make photo uploads survive a bad connection." }, { op: "add", section: "Requirements", text: "Retry uploads automatically with exponential backoff" }]],
+	[/Cap the retries/, [{ op: "add", section: "Requirements", text: "Cap retries at 5" }, { op: "add", section: "Requirements", text: "Show the progress of each upload in the list" }]],
+	[/error message/, [{ op: "add", section: "Requirements", text: "The error message says how long until the next try" }, { op: "add", section: "Also mentioned", text: "The docs need a section on offline use" }]],
+	[/downloads/, [{ op: "add", section: "Open questions", text: "Should downloads get the same retry cap?" }]],
+	[/keep the queue/, [{ op: "add", section: "Requirements", text: "Keep the upload queue across app restarts" }]],
+];
+let heardChunks = 0;
+let changing = false;
+const openDrafts = new Set<string>();
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const drafts = new PhoneDrafts({
+	stt: () => ({
+		name: "apple",
+		transcribe: async () => {
+			await wait(300);
+			return { text: changing ? CHANGES[changes++ % CHANGES.length]! : RAMBLE[heardChunks++ % RAMBLE.length]!, provider: "fixture" };
+		},
+	}),
+	vocabulary: async () => ({ project: "api", files: [], recent: [] }),
+	fast: async (system, user) => {
+		await wait(1200);
+		if (system !== DRAFT_SYSTEM) return '{"edits": []}';
+		const speech = /NEW SPEECH[^\n]*:\n([\s\S]*)$/.exec(user)?.[1] ?? "";
+		if (/Drop the point about the progress/.test(speech)) return JSON.stringify({ edits: [{ op: "remove", match: "progress of each upload" }] });
+		if (/retry button is disabled/.test(speech)) return JSON.stringify({ edits: [{ op: "add", section: "Requirements", text: "The retry button is disabled while the phone is offline" }] });
+		const edits = EDITS.filter(([re]) => re.test(speech)).flatMap(([, e]) => e);
+		return JSON.stringify({ kind: "description", shape: "spec", title: "Photo upload retries", edits });
+	},
+	careful: async (system) => {
+		await wait(1500);
+		if (system !== RECONCILE_SYSTEM) return '{"edits": []}';
+		return JSON.stringify({ edits: [{ op: "change", match: "Cap retries at 5", text: "Cap retries at 3", note: "You first said 5, later 3; kept 3." }] });
+	},
+	dir: () => join(dir, "drafts"),
+});
 
 function emit(f: Fake, ev: any): void {
 	f.link?.send({ t: "ev", ev: { ...ev, n: ++f.n } });
@@ -184,6 +247,22 @@ function link(f: Fake, cfg: typeof config | typeof boxConfig, secret: string): v
 					),
 				);
 			}
+			if (m === "draftStart") {
+				heardChunks = 0;
+				return drafts.start(p).then((v) => {
+					openDrafts.add(v.id);
+					return v;
+				});
+			}
+			if (m === "draftChunk") return drafts.chunk(p);
+			if (m === "draftState") return drafts.state(p);
+			if (m === "draftFinish") return drafts.finish(p);
+			if (m === "draftEdit") {
+				changing = true;
+				return drafts.edit(p).finally(() => (changing = false));
+			}
+			if (m === "draftClose") return drafts.close(p);
+			if (m === "distill") return { raw: p.raw, text: p.raw, editor: p.raw, unclear: [], by: "fixture" };
 			if (m === "voiceSession") throw new Error("realtime voice is not set up");
 			if (m === "speak") throw new Error("tts unavailable");
 			if (m === "voices") return { personas: personaList(), sample: false };
@@ -286,6 +365,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 		web.items = [];
 		emit(web, { type: "reset" });
 	}
+	if (cmd === "lose") {
+		for (const id of openDrafts) drafts.close({ id, how: "discard" });
+		openDrafts.clear();
+	}
 	if (cmd === "box") await offerBox();
 	if (cmd === "box again") await offerBox("fx2");
 	if (cmd === "box off") boxOff();
@@ -296,4 +379,4 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 const links = hub.createPairing().links;
 console.log(`pi-mobile UI fixture on port ${port}. Pair:`);
 for (const l of links) console.log(`  ${l.label}: ${l.url}`);
-console.log("stdin: work | ask | pick | done | quiet | pair | box | box again | box off | box on");
+console.log("stdin: work | ask | pick | done | quiet | lose | pair | box | box again | box off | box on");

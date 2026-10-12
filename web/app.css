@@ -40,6 +40,9 @@
 	--r-l: 18px;
 	--r-xl: 24px;
 	--ease: cubic-bezier(.2, .8, .2, 1);
+	/* A dictated change in a draft: the "you" tint holds, then fades over ~3 s (both themes: derived). */
+	--glow: color-mix(in srgb, var(--you) 20%, var(--surface));
+	--ease-fade: cubic-bezier(.65, 0, .35, 1);
 	--mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 	--sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, system-ui, sans-serif;
 	--safe-b: env(safe-area-inset-bottom, 0px);
@@ -168,7 +171,12 @@ button:disabled { opacity: .45; cursor: default; }
 .i.sm { width: 16px; height: 16px; }
 .i.md { width: 18px; height: 18px; }
 
-#app { display: flex; flex-direction: column; height: 100dvh; }
+#app { display: flex; flex-direction: column; height: 100dvh; transition: height var(--kb-ms, 0ms) var(--ease); }
+/* The on-screen keyboard is up (app.js `keyboard`): the app fits above it, so the header stays and the composer
+   sits on the keyboard; the bottom safe-area inset belongs to the screen's edge, which the keyboard covers. */
+html.kb #app { height: calc(100dvh - var(--kb, 0px)); }
+/* The empty session's greeting gives the room to what you're typing (and pi's question, if any). */
+html.kb .empty { display: none; }
 
 /* ── header ───────────────────────────────────────────────────────────────────── */
 header#top { display: flex; align-items: center; gap: 4px; padding: calc(6px + var(--safe-t)) 8px 6px 6px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px); border-bottom: 1px solid var(--border); position: relative; z-index: 4; }
@@ -273,6 +281,17 @@ main#scroller { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit
 .err-line.stopped { background: var(--panel-2); color: var(--text-2); }
 .msg.custom, .msg.summary { font-size: 14px; color: var(--text-2); background: var(--panel-2); border-radius: var(--r-m); padding: 10px 12px; }
 .msg .tag { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; color: var(--muted); margin-bottom: 4px; cursor: pointer; list-style: none; }
+/* An extension's message, collapsed as pi's terminal shows it: source, then two lines; the whole card opens it. */
+details.msg.custom { padding: 0; }
+details.msg.custom > summary { display: block; padding: 10px 12px; min-height: 44px; cursor: pointer; list-style: none; border-radius: var(--r-m); }
+details.msg.custom > summary::-webkit-details-marker { display: none; }
+details.msg.custom > summary:focus-visible { outline-offset: -2px; }
+details.msg.custom .tag .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.msg.custom .tag .chev { width: 16px; height: 16px; flex: none; transition: transform .2s var(--ease); }
+details.msg.custom[open] .tag .chev { transform: rotate(180deg); }
+details.msg.custom .preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; line-height: 1.45; }
+details.msg.custom[open] .preview { display: none; }
+details.msg.custom > .md { padding: 0 12px 10px; overflow-wrap: anywhere; }
 .msg.summary > summary::-webkit-details-marker { display: none; }
 
 /* Markdown */
@@ -376,7 +395,8 @@ pre.diff .h { color: var(--muted); }
 @keyframes rise { from { transform: translateY(12px); opacity: 0; } }
 
 /* ── composer ─────────────────────────────────────────────────────────────────── */
-footer#composer { padding: 6px 10px calc(10px + var(--safe-b)); background: linear-gradient(to bottom, transparent, var(--bg) 14px); }
+footer#composer { padding: 6px 10px calc(10px + var(--safe-b)); background: linear-gradient(to bottom, transparent, var(--bg) 14px); transition: padding-bottom var(--kb-ms, 0ms) var(--ease); }
+html.kb footer#composer { padding-bottom: 8px; }
 footer#composer > * { max-width: var(--measure); margin-inline: auto; }
 .work-bar { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 2px 6px 6px; font-size: 14px; color: var(--text-2); }
 .work-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; font-weight: 550; }
@@ -404,11 +424,24 @@ textarea#input::placeholder { color: var(--muted); white-space: nowrap; overflow
 .send .i { stroke-width: 2.4; width: 20px; height: 20px; }
 .send.ready { background: var(--accent); color: var(--accent-text); }
 .send:active { transform: scale(.94); }
-.attachments { display: flex; gap: 8px; margin-bottom: 8px; overflow-x: auto; padding: 4px 2px; }
+/* Voice mode, where Send goes once there's something to send: the composer's primary button while it is empty. */
+.send.voice-go { background: var(--accent); color: var(--accent-text); }
+.send.voice-go .i { stroke-width: 2.2; }
+/* While dictating, the recorder's ✓ and ✕ are the actions: voice mode hides (its place kept, so the mic doesn't move
+   under the finger), and can't end the dictation by accident. */
+.compose-box:has(.mic.rec) .voice-go { visibility: hidden; }
+/* The composer's 40 px buttons answer a 44 px touch (the box's padding has the room). */
+.compose-box .icon-btn, .compose-box .send { position: relative; }
+.compose-box .icon-btn::before, .compose-box .send::before { content: ""; position: absolute; inset: -2px; border-radius: 50%; }
+/* The strip scrolls sideways, so it clips: its padding leaves room for each remove button's disc. */
+.attachments { display: flex; gap: 12px; margin-bottom: 8px; overflow-x: auto; padding: 10px 10px 4px 2px; }
 .attachments .att { position: relative; flex: none; }
 .attachments img { height: 64px; border-radius: var(--r-m); display: block; border: 1px solid var(--border); }
-.attachments button { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%; background: var(--text); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-1); }
-.attachments button .i { width: 14px; height: 14px; stroke-width: 2.6; }
+/* 44 px target over the thumbnail's top-right corner; the 24 px disc sits in the target's corner. */
+.attachments .att-x { position: absolute; top: -8px; right: -8px; width: 44px; height: 44px; display: flex; align-items: flex-start; justify-content: flex-end; border-radius: var(--r-m); }
+.attachments .att-x-face { width: 24px; height: 24px; border-radius: 50%; background: var(--text); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-1); }
+.attachments .att-x .i { width: 14px; height: 14px; stroke-width: 2.6; }
+.attachments .att-x:focus-visible { outline-offset: -2px; }
 .suggest { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-l); margin-bottom: 8px; max-height: 32dvh; overflow-y: auto; box-shadow: var(--shadow-2); padding: 4px; }
 .suggest button { display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; min-height: 44px; padding: 10px 12px; border-radius: var(--r-m); font-size: 14px; }
 .suggest button:active, .suggest button:focus-visible { background: var(--panel-2); }
@@ -513,6 +546,51 @@ textarea#input::placeholder { color: var(--muted); white-space: nowrap; overflow
 .rec-done { background: var(--you); color: var(--accent-text); }
 .rec-x svg, .rec-done svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 @media (max-width: 380px) { .dict-bar .rec-hint { display: none; } }
+.dict-bar .rec-time { white-space: nowrap; }
+.dict-bar .rec-time.warn { color: var(--warn); }
+/* While a draft forms, the sheet and the composer say what is going on; the time needs the room. */
+.dict-bar.drafting .rec-hint { display: none; }
+
+/* The draft sheet: a long dictation forming in the composer (draft.js). It rests on the page like the
+   composer; what dictation just changed takes the "you" tint and fades over ~3 s. Without motion (or in
+   forced colours) a changed block gets a mark in its left margin instead, until you touch the draft. */
+.draft { margin: 0 0 8px; padding: 12px 16px 12px; border-radius: var(--r-xl); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-1); animation: rise .25s var(--ease); }
+.draft-head { display: flex; align-items: flex-start; gap: 10px; }
+.draft-head .grow { flex: 1; min-width: 0; }
+.draft-eyebrow { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .02em; color: var(--accent-ink); }
+.draft-title { margin: 2px 0 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; line-height: 1.3; overflow-wrap: anywhere; }
+.draft-state { display: inline-flex; align-items: center; gap: 6px; margin: 0; min-height: 22px; font-size: 13px; font-weight: 600; color: var(--text-2); white-space: nowrap; flex: none; }
+.draft-state .spinner { width: 14px; height: 14px; display: none; }
+.draft-live { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--you); color: var(--you); display: none; flex: none; }
+.draft-live::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor; opacity: 0; animation: ring 1.8s var(--ease) infinite; }
+.draft[data-ui="forming"] .draft-live { display: inline-block; }
+.draft[data-ui="forming"] .draft-state { color: var(--you); }
+.draft[data-ui="checking"] .draft-state .spinner, .draft[data-ui="changing"] .draft-state .spinner { display: inline-block; }
+/* The body scrolls (and so clips): it reaches 10px past the text on each side, room for the blocks' tint and margin mark. */
+.draft-body { margin: 10px -10px 0; max-height: min(34dvh, 420px); overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px; border-block: 1px solid var(--border); }
+.draft-body:focus-visible { outline-offset: 2px; }
+.draft-block { margin: 0 -8px; padding: 3px 8px 3px 5px; border-left: 3px solid transparent; border-radius: var(--r-s); transition: background-color 3s var(--ease-fade), color .3s var(--ease); }
+.draft-block > * { margin: 0 !important; }
+.draft-block.heading:not(:first-child) { margin-top: 12px; }
+.draft-block.para + .draft-block.para, .draft-block.heading + .draft-block { margin-top: 2px; }
+.draft-body h1, .draft-body h2, .draft-body h3, .draft-body h4 { font-size: 16px; font-weight: 650; }
+.draft-body ul, .draft-body ol { padding-left: 22px; }
+.draft-block.glow { background: var(--glow); transition: none; }
+.draft-block.removed { color: var(--muted); text-decoration: line-through; }
+.draft-block.marked { border-left-color: var(--you); border-radius: 0 var(--r-s) var(--r-s) 0; }
+.draft-text { display: block; width: 100%; min-height: 36dvh; margin-top: 10px; padding: 12px 14px; border-radius: var(--r-m); border: 1px solid var(--border-strong); background: var(--bg); font-size: 16px; line-height: 1.5; color: var(--text); resize: vertical; }
+.draft-text:focus { outline: none; border-color: var(--accent); }
+.draft-hearing { display: flex; gap: 8px; margin: 8px 0 0; min-height: 20px; font-size: 14px; line-height: 20px; color: var(--muted); }
+.draft-hearing-label { font-weight: 650; color: var(--accent-ink); flex: none; }
+.draft-hearing.quiet { visibility: hidden; }
+.draft-hearing-words { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.draft-note { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-2); }
+.draft-note.warn { color: var(--warn); font-weight: 600; }
+.draft-actions { display: flex; gap: 8px; margin-top: 10px; }
+.draft-actions .pill { height: 44px; padding: 0 16px; }
+#composer.drafting #input, #composer.drafting .attach { display: none; }
+.draft-hint { flex: 1; min-width: 0; align-self: center; padding: 9px 10px; font-size: 14px; line-height: 22px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (forced-colors: active) { .draft { border: 1px solid CanvasText; } .draft-block { border-left-color: Canvas; } .draft-block.marked { border-left-color: Highlight; } .draft-actions .pill { border: 1px solid CanvasText; } }
 
 /* Voice mode: light or dark with the app, so its cards, buttons and segmented controls are the app's
    own components. Only the state glow is voice-specific, in the same vivid colours in both themes. */
@@ -597,5 +675,5 @@ body.voice-on .toasts { z-index: 70; }
 .scan-hint { margin: 12px 4px 0; min-height: 40px; font-size: 15px; font-weight: 550; text-align: center; color: var(--text-2); }
 @media (forced-colors: active) { .scan-frame { border-color: CanvasText; } }
 @media (min-height: 760px) { .v-btn-face { width: 72px; height: 72px; } }
-@media (prefers-reduced-motion: reduce) { .mic.rec::after, .dict-bar[data-kind="busy"] .grow::before { animation: none !important; } .voice { transition: none; animation: none; } }
+@media (prefers-reduced-motion: reduce) { .mic.rec::after, .dict-bar[data-kind="busy"] .grow::before, .draft-live::after { animation: none !important; } .voice { transition: none; animation: none; } }
 @media (prefers-contrast: more) { .voice { --muted: #d4d6db; --border-strong: rgba(255, 255, 255, .45); } }

@@ -4,7 +4,8 @@
 //   apple-stt file <audio-file> [--words a,b,c] [--locale en-US]
 //       → {"text": "…", "locale": "en_US"}
 //   apple-stt stream [--rate 16000] [--words …] [--locale …]   (s16le mono PCM on stdin)
-//       → JSON lines: {"partial": "…"} while speaking, {"final": "…"} per settled segment,
+//       → JSON lines: {"volatile": "…"} while speaking (only the words not yet settled, so lines
+//         stay short over a long recording), {"final": "…"} per settled segment (at pauses),
 //         {"done": true, "text": "…"} after stdin closes
 //   apple-stt check [--locale …]  → {"ok": true, "locale": "…"} (installs the model if needed)
 
@@ -99,7 +100,7 @@ func runStream(_ o: Options) async throws {
 				finals += t
 				emit(["final": t.trimmingCharacters(in: .whitespaces)])
 			} else {
-				emit(["partial": (finals + t).trimmingCharacters(in: .whitespaces)])
+				emit(["volatile": t.trimmingCharacters(in: .whitespaces)])
 			}
 		}
 		return finals
@@ -109,33 +110,39 @@ func runStream(_ o: Options) async throws {
 
 	let stdin = FileHandle.standardInput
 	var pending = Data()
+	// Each pass drains its own autorelease pool: without it the helper grew 12-17 MB a minute over a
+	// long dictation (stdin Data and audio buffers are autoreleased and the loop never returns).
 	while true {
-		let chunk = stdin.availableData
-		if chunk.isEmpty { break }
-		pending.append(chunk)
-		let frames = pending.count / 2
-		if frames < 1600 { continue }
-		let bytes = frames * 2
-		guard let inBuf = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: AVAudioFrameCount(frames)) else { continue }
-		inBuf.frameLength = AVAudioFrameCount(frames)
-		pending.withUnsafeBytes { raw in
-			memcpy(inBuf.int16ChannelData![0], raw.baseAddress!, bytes)
-		}
-		pending.removeFirst(bytes)
-		let capacity = AVAudioFrameCount(Double(frames) * target.sampleRate / source.sampleRate) + 32
-		guard let outBuf = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { continue }
-		var fed = false
-		var err: NSError?
-		converter.convert(to: outBuf, error: &err) { _, status in
-			if fed {
-				status.pointee = .noDataNow
-				return nil
+		let more: Bool = autoreleasepool {
+			let chunk = stdin.availableData
+			if chunk.isEmpty { return false }
+			pending.append(chunk)
+			let frames = pending.count / 2
+			if frames < 1600 { return true }
+			let bytes = frames * 2
+			guard let inBuf = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: AVAudioFrameCount(frames)) else { return true }
+			inBuf.frameLength = AVAudioFrameCount(frames)
+			pending.withUnsafeBytes { raw in
+				memcpy(inBuf.int16ChannelData![0], raw.baseAddress!, bytes)
 			}
-			fed = true
-			status.pointee = .haveData
-			return inBuf
+			pending.removeFirst(bytes)
+			let capacity = AVAudioFrameCount(Double(frames) * target.sampleRate / source.sampleRate) + 32
+			guard let outBuf = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return true }
+			var fed = false
+			var err: NSError?
+			converter.convert(to: outBuf, error: &err) { _, status in
+				if fed {
+					status.pointee = .noDataNow
+					return nil
+				}
+				fed = true
+				status.pointee = .haveData
+				return inBuf
+			}
+			if err == nil && outBuf.frameLength > 0 { continuation.yield(AnalyzerInput(buffer: outBuf)) }
+			return true
 		}
-		if err == nil && outBuf.frameLength > 0 { continuation.yield(AnalyzerInput(buffer: outBuf)) }
+		if !more { break }
 	}
 	continuation.finish()
 	try await analyzer.finalizeAndFinishThroughEndOfInput()

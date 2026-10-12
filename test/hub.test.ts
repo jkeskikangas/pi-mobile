@@ -4,7 +4,8 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { Hub } from "../src/hub.ts";
+import { MAX_RECORDING } from "pi-speech/phone-drafts";
+import { Hub, MAX_BODY } from "../src/hub.ts";
 import { HubLink, closeProcessHub, processHub } from "../src/link.ts";
 import { type AgentInfo, PROTOCOL } from "../src/protocol.ts";
 import { DeviceStore, PushStore } from "../src/store.ts";
@@ -94,6 +95,29 @@ test("pairing, encrypted rpc, routing to the linked pi, and streaming with repla
 		// Revocation takes effect immediately.
 		await phone.rpc("revoke", { ids: [phone.d] });
 		await assert.rejects(phone.rpc("hub"), /401/);
+	} finally {
+		link.stop();
+		hub.close();
+	}
+});
+
+test("the largest recording pi-speech takes (a draft's last piece, a transcribe) fits the request limit once sealed", async () => {
+	const { hub, link, calls } = await setup();
+	try {
+		const phone = new Phone();
+		assert.equal((await phone.pair(hub.createPairing().links[0].url)).status, 200);
+		// As the phone sends it: base64 audio in the request, inside the agent call, sealed and base64url'd again.
+		const audio = Buffer.alloc(MAX_RECORDING, 7).toString("base64");
+		const p = { id: "x".repeat(12), seq: 99, audio, mime: "audio/wav", elapsedMs: 600_000, since: 1000, draft: true, check: true };
+		const body = phone.body("agent", { agent: "A", m: "draftFinish", p, k: "k".repeat(22) });
+		assert.ok(body.length < MAX_BODY - 2 * 1024 * 1024, `${body.length} bytes leaves room under ${MAX_BODY}`);
+		const res = await phone.raw(body);
+		assert.equal(res.status, 200);
+		assert.equal(calls.at(-1).p.audio.length, audio.length, "it reaches pi whole");
+		// Past the limit the hub stops reading.
+		const over = await phone.raw("x".repeat(MAX_BODY + 1));
+		assert.equal(over.status, 500);
+		assert.match(await over.text(), /request too large/);
 	} finally {
 		link.stop();
 		hub.close();

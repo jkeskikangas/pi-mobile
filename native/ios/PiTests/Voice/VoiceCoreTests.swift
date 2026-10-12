@@ -14,7 +14,8 @@ final class VoiceCoreTests: XCTestCase {
 
     func testDecisions() throws {
         let core = try VoiceCore.bundled()
-        XCTAssertEqual(core.parseCommand("hey pi, stop")?.kind, "stop")
+        XCTAssertEqual(core.parseCommand("hey pi, stop")?.kind, "quiet", "stop is about the voice, never pi's work")
+        XCTAssertEqual(core.parseCommand("stop pi")?.kind, "stopPi")
         XCTAssertNil(core.parseCommand("stop the build after the tests run please"))
         let deploy: JSON = ["id": "p", "kind": "confirm", "title": "Deploy to production?"]
         XCTAssertTrue(core.isDestructive(deploy))

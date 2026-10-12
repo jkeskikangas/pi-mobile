@@ -20,6 +20,7 @@ struct WebShell: UIViewRepresentable {
         ucc.addScriptMessageHandler(context.coordinator, contentWorld: .page, name: "piNative")
 
         let web = WKWebView(frame: .zero, configuration: config)
+        FormAccessoryBar.hide(in: web) // no "^ v ✓" bar: the composer sits on the keyboard
         web.navigationDelegate = context.coordinator
         web.uiDelegate = context.coordinator
         web.allowsLinkPreview = false
@@ -48,6 +49,7 @@ struct WebShell: UIViewRepresentable {
                 _ = web?.evaluateJavaScript("try{for(const[k,v]of Object.entries(\(json)))localStorage.setItem(k,v)}catch{};window.PiNative?.voiceClosed?.()")
             }
         }
+        context.coordinator.observeKeyboard(web)
         context.coordinator.load(web)
         return web
     }
@@ -91,6 +93,10 @@ struct WebShell: UIViewRepresentable {
 
     static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) {
         web.configuration.userContentController.removeAllScriptMessageHandlers()
+        for o in [coordinator.voiceClosed, coordinator.textSize, coordinator.keyboard].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(o)
+        }
+        coordinator.voiceClosed = nil; coordinator.textSize = nil; coordinator.keyboard = nil
         Dictation.shared.cancel() // the page that owned the take is gone
     }
 
@@ -102,6 +108,8 @@ struct WebShell: UIViewRepresentable {
         var voiceClosed: NSObjectProtocol?
         /// Observer for text size changes (page zoom).
         var textSize: NSObjectProtocol?
+        /// Observer for the keyboard's frame (BRIDGE.md `keyboard(…)`).
+        var keyboard: NSObjectProtocol?
 
         init(_ parent: WebShell) {
             self.parent = parent
@@ -109,6 +117,30 @@ struct WebShell: UIViewRepresentable {
         }
 
         var origin: URL? { parent.machine.url }
+
+        /// Tells the page how much of the web view the keyboard covers, as the keyboard starts to move, in CSS px
+        /// (BRIDGE.md `keyboard(…)`). The page can't learn this in time itself: `env(safe-area-inset-bottom)` stays
+        /// 34 px with the keyboard up, and `visualViewport` reports the change only after the animation.
+        func observeKeyboard(_ web: WKWebView) {
+            keyboard = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak web] n in
+                let end = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                let duration = n.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+                MainActor.assumeIsolated {
+                    guard let web, let end, web.window != nil else { return }
+                    let js = Self.keyboardScript(web: web, keyboard: end, duration: duration, zoom: WebShell.currentZoom)
+                    _ = web.evaluateJavaScript(js)
+                }
+            }
+        }
+
+        /// `window.PiNative?.keyboard?.({ height, duration })`: `height` is the part of the web view under the
+        /// keyboard (screen coordinates) in CSS px at page zoom `zoom`, 0 when it's hidden or floating above nothing.
+        static func keyboardScript(web: UIView, keyboard: CGRect, duration: Double, zoom: CGFloat) -> String {
+            let local = web.convert(keyboard, from: nil)
+            let covered = local.intersects(web.bounds) ? max(0, web.bounds.maxY - local.minY) : 0
+            let height = Int((covered / max(zoom, 0.1)).rounded())
+            return "window.PiNative?.keyboard?.({height:\(height),duration:\(Int((duration * 1000).rounded()))})"
+        }
 
         func load(_ web: WKWebView) {
             guard let url = origin.map({ $0.appending(path: "") }) else { return parent.phase = .offline("That computer's address isn't valid. Pair it again.") }
@@ -162,6 +194,7 @@ struct WebShell: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            FormAccessoryBar.hide(in: webView) // no-op unless WebKit replaced its content view
             parent.phase = .ready
             PushCenter.shared.pageLoaded { [weak webView] s in webView?.evaluateJavaScript(s) }
         }

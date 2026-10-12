@@ -113,8 +113,22 @@ before(async () => {
 });
 
 after(async () => {
+	// Shutting down drops the phone's drafts (their model calls and timers end with the session).
+	const { PhoneDrafts } = await import("pi-speech/phone-drafts");
+	const open = phone ? await call("draftStart").catch(() => undefined) : undefined;
+	const dispose = PhoneDrafts.prototype.dispose;
+	const left: number[] = [];
+	PhoneDrafts.prototype.dispose = function (this: InstanceType<typeof PhoneDrafts>) {
+		dispose.call(this);
+		left.push(this.size);
+	};
 	phone?.close();
-	await h?.fire("session_shutdown", { reason: "quit" });
+	try {
+		await h?.fire("session_shutdown", { reason: "quit" });
+	} finally {
+		PhoneDrafts.prototype.dispose = dispose;
+	}
+	if (open) assert.deepEqual(left, [0], "session_shutdown disposes the phone's drafts");
 	assert.equal(processHub(), undefined, "quitting pi closes the hub it hosts");
 	rmSync(dir, { recursive: true, force: true });
 });
@@ -310,6 +324,19 @@ test("voice: status by ear, spoken brief, and the agent knows its user is listen
 	await call("voiceState", { on: false });
 	assert.equal(await voiceNote(), undefined);
 	await assert.rejects(call("voiceSession", { sdp: "nope" }), /bad offer/);
+});
+
+test("voice: long dictation as a draft is routed to the voice host, with a size limit per chunk", async () => {
+	const s = await call("draftStart");
+	assert.equal(typeof s.id, "string");
+	assert.deepEqual([s.phase, s.isDraft, s.version, s.maxMs, s.warnMs], ["listening", false, 0, 600_000, 540_000]);
+	// Over 4 MB of audio in one chunk is refused before any recognition.
+	await assert.rejects(call("draftChunk", { id: s.id, seq: 0, audio: "A".repeat(6 * 1024 * 1024), mime: "audio/wav" }), /chunk too large/);
+	await assert.rejects(call("draftChunk", { id: s.id, seq: 0 }), /no audio/);
+	assert.equal((await call("draftState", { id: s.id, since: 0 })).id, s.id);
+	await assert.rejects(call("draftEdit", { id: s.id, markdown: "- x" }), /still forming/);
+	assert.deepEqual(await call("draftClose", { id: s.id, how: "discard" }), { ok: true, transcriptKept: false });
+	await assert.rejects(call("draftFinish", { id: s.id }), /no longer open/);
 });
 
 test("terminal notifications are mirrored to the phone", async () => {

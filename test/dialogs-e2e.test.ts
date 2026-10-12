@@ -60,11 +60,16 @@ before(async () => {
 	for (const p of phones) await p.stream(undefined, agent);
 });
 
-after(() => {
+after(async () => {
 	for (const p of phones) p.close();
-	pi?.kill();
+	// pi writes into its agent dir while it shuts down: wait for it to exit before removing the dir.
+	if (pi && pi.exitCode === null && pi.signalCode === null) {
+		const exited = new Promise((r) => pi.once("exit", r));
+		pi.kill();
+		await Promise.race([exited, new Promise((r) => setTimeout(r, 5000).unref())]);
+	}
 	hub?.close();
-	rmSync(dir, { recursive: true, force: true });
+	rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const answer = (p: Phone, id: string, value: unknown) => p.rpc("agent", { agent, m: "answer", p: { id, value } });

@@ -211,6 +211,31 @@ final class VoiceEngineTests: XCTestCase {
         XCTAssertTrue(hub.calls("abort").isEmpty, "stop cancels the confirmation, not pi's work")
     }
 
+    func testWhatCancelsTheUndoWindow() async {
+        await open()
+        for t in ["stop", "stop, don't deploy", "Stop it.", "stop pi", "cancel", "cancel that", "no", "nope, not yet",
+                  "wait", "hold on", "don't", "do not deploy", "abort"] {
+            XCTAssertTrue(engine.cancelsGrace(t), t)
+        }
+        for t in ["yes", "go ahead", "mm-hmm", "deploy it"] {
+            XCTAssertFalse(engine.cancelsGrace(t), t)
+        }
+    }
+
+    func testStopPrefixWithinGraceAnswersNo() async {
+        await open()
+        say("deploy the app to production")
+        hub.event("m1", ["type": "prompt", "agent": "a1", "prompt": deployPrompt()])
+        await settle()
+        XCTAssertNotNil(engine.question?.grace)
+        clock.advance(1)
+        say("stop, don't deploy")
+        await settle()
+        XCTAssertEqual(hub.calls("answer").first?.p, ["id": "p1", "value": false])
+        XCTAssertNil(engine.question?.grace)
+        XCTAssertTrue(hub.calls("abort").isEmpty, "stop cancels the confirmation, not pi's work")
+    }
+
     func testBareYeahToDestructivePromptIsRefused() async throws {
         await open()
         hub.event("m1", ["type": "prompt", "agent": "a1", "prompt": deployPrompt()])

@@ -6,16 +6,22 @@
 // PLAYWRIGHT=/path/to/node_modules/playwright/index.mjs if playwright is not resolvable from here.
 // See docs/voice.md → Verification for the setup (isolated agent dir, demo repo, pi in tmux).
 
+import { assertNoSound, NO_SOUND } from "../ui/no-sound.mjs";
+
 const { chromium } = await import(process.env.PLAYWRIGHT || "playwright");
 const [mode, url, wav, secs = "60", attention = "eyes-busy"] = process.argv.slice(2);
 if (!mode || !url || !wav) throw new Error("usage: browser.mjs dictate|voice <pair-url> <speech.wav> [seconds] [eyes-busy|glance]");
 
 const browser = await chromium.launch({
-	args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${wav}`, "--autoplay-policy=no-user-gesture-required"],
+	args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${wav}`, "--autoplay-policy=no-user-gesture-required", "--mute-audio"],
 });
-const page = await (await browser.newContext({ permissions: ["microphone"], viewport: { width: 390, height: 844 } })).newPage();
+const ctx = await browser.newContext({ permissions: ["microphone"], viewport: { width: 390, height: 844 } });
+// No speech or audio may reach whoever runs this: --mute-audio doesn't cover speechSynthesis on macOS.
+await ctx.addInitScript({ content: NO_SOUND });
+const page = await ctx.newPage();
 page.on("pageerror", (e) => console.log("pageerror:", e.message));
 await page.goto(url);
+await assertNoSound(page);
 await page.waitForSelector("#composer:not([hidden])", { timeout: 15000 });
 const t0 = Date.now();
 const at = () => ((Date.now() - t0) / 1000).toFixed(1);

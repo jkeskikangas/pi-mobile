@@ -159,18 +159,36 @@ export function digestText(d: RunDigest): string {
 
 export type Attention = "eyes-busy" | "glance";
 
-export const BRIEF_SYSTEM = (mode: Attention) => `You turn a coding agent's report into what a voice assistant says aloud to the developer. ${
-	mode === "eyes-busy"
-		? "The developer is driving, running, cycling or cooking: they cannot look at a screen and are only half listening."
-		: "The developer is listening on their phone and may glance at the screen."
-} The full written report stays in their transcript for later.
+/** Where the brief is heard: the phone (voice mode on the move) or the terminal (`/voice`, headphones at the desk). */
+export type BriefSurface = "phone" | "terminal";
+
+const AUDIENCE: Record<BriefSurface, Record<Attention, string>> = {
+	phone: {
+		"eyes-busy": "The developer is driving, running, cycling or cooking: they cannot look at a screen and are only half listening.",
+		glance: "The developer is listening on their phone and may glance at the screen.",
+	},
+	terminal: {
+		"eyes-busy": "The developer is at their computer with headphones on but cannot look at the screen right now (eyes-free): what you write is all they get until they look.",
+		glance: "The developer is at their computer with headphones on and reads the agent's full answer on screen: this one sentence is what they hear, the voice saying how it went and whether they are needed.",
+	},
+};
+
+const LENGTH: Record<BriefSurface, Record<Attention, string>> = {
+	phone: { "eyes-busy": "At most 2 short sentences, about 30 words in total.", glance: "At most 3 short sentences, about 50 words in total." },
+	terminal: {
+		"eyes-busy": "At most 3 short sentences, about 45 words in total.",
+		glance: "Exactly one sentence, about 15 words: the outcome, or the question they need to answer.",
+	},
+};
+
+export const BRIEF_SYSTEM = (mode: Attention, surface: BriefSurface = "phone") => `You turn a coding agent's report into what a voice assistant says aloud to the developer. ${AUDIENCE[surface][mode]} The full written report stays in their transcript for later.
 
 Talk the way two engineers talk on a walk: about behaviour, design, decisions, risks and what is left, not about code. Say what the work does or changes for the system or its users ("login now rejects expired tokens"), not which functions, files, variables, commands or tools were involved.
 
 Rules for the spoken brief:
 - Lead with the outcome: done, partly done, blocked, failed, or a decision they need to make.
 - A caveat that changes what they should do next (something irreversible, a risk to production, data or security, an assumption the work rests on) is always said, even past the length limit below; it never goes into MORE.
-- ${mode === "eyes-busy" ? "At most 2 short sentences, about 30 words in total." : "At most 3 short sentences, about 50 words in total."} One idea per sentence. Plain spoken language; contractions are fine.
+- ${LENGTH[surface][mode]} One idea per sentence. Plain spoken language; contractions are fine.
 - No identifiers, file names, paths, commands, test names, tool names, code, symbols, URLs or markdown. Name a part of the system by what it is ("the authentication module", "the phone app"). Round numbers.
 - Tool activity is not news. Mention it only when it matters: a significant action (production, data, deployment, pushing, deleting, external services, money) or a failure that changes the outcome.
 - If the agent asks the developer something, end with that question, answerable with yes, no or a short phrase, with at most two options. If it is a design decision, give the trade-off in a few words.
@@ -196,28 +214,40 @@ export function parseBrief(out: string): Brief {
 }
 
 /** The spoken brief of the latest run; deterministic fallback when no model is reachable. */
-export async function brief(d: RunDigest, mode: Attention, complete?: Complete, signal?: AbortSignal): Promise<Brief & { by: "model" | "heuristic" }> {
+export async function brief(
+	d: RunDigest,
+	mode: Attention,
+	complete?: Complete,
+	signal?: AbortSignal,
+	surface: BriefSurface = "phone",
+): Promise<Brief & { by: "model" | "heuristic" }> {
 	if (complete) {
 		try {
-			const b = parseBrief(await complete(BRIEF_SYSTEM(mode), digestText(d), { signal, maxTokens: 400 }));
+			const b = parseBrief(await complete(BRIEF_SYSTEM(mode, surface), digestText(d), { signal, maxTokens: 400 }));
 			if (b.speech) return { ...b, by: "model" };
 		} catch (e) {
 			if (signal?.aborted) throw e;
 		}
 	}
-	return { ...heuristicBrief(d, mode), by: "heuristic" };
+	return { ...heuristicBrief(d, mode, surface), by: "heuristic" };
 }
 
-export function heuristicBrief(d: RunDigest, mode: Attention): Brief {
+export function heuristicBrief(d: RunDigest, mode: Attention, surface: BriefSurface = "phone"): Brief {
 	const parts: string[] = [];
 	if (d.aborted) parts.push("Stopped.");
 	const failed = d.commands.filter((c) => !c.ok);
-	const first = firstSentences(speakable(d.final), mode === "eyes-busy" ? 1 : 2);
+	// The terminal at the desk says one sentence; everything else is on the screen.
+	const sentences = surface === "terminal" ? (mode === "eyes-busy" ? 2 : 1) : mode === "eyes-busy" ? 1 : 2;
+	const first = firstSentences(speakable(d.final), sentences);
 	if (first) parts.push(first);
 	else if (d.edits.length) parts.push(`Changed ${countWord(d.edits.length, "file")}.`);
 	if (failed.length && !/fail|error/i.test(first)) parts.push(`${countWord(failed.length, "command")} failed.`);
 	const question = lastQuestion(d.final);
-	if (question && !parts.join(" ").includes(question)) parts.push(question);
+	if (question && !parts.join(" ").includes(question)) {
+		// One sentence at the desk: the question pi needs answered beats the outcome.
+		if (surface === "terminal" && mode !== "eyes-busy") parts.length = 0;
+		parts.push(question);
+	}
 	const more: string[] = [];
 	if (d.edits.length) more.push("the changed files");
 	if (failed.length) more.push("what failed");
@@ -309,6 +339,19 @@ function speakCode(code: string): string {
 }
 
 // ── the agent's side ────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Appended to the agent's system prompt while the developer uses voice mode in this terminal (`/voice`). */
+export function terminalVoiceNote(mode: Attention): string {
+	return `
+
+# Voice session
+The user is talking to this session by voice through headphones at this computer${
+		mode === "eyes-busy" ? " and cannot look at the screen right now" : "; they read your replies on screen as usual"
+	}. A separate voice layer says one spoken sentence about each of your replies.
+- Messages they spoke are speech transcripts, so expect recognition errors; typed parts are exact. They talk about intent and behaviour: map what they describe onto the code yourself.
+- Start your final message with the outcome in one plain sentence (what now works, what changed, what is left), then details as usual. When you need a decision, end with one question answerable with yes, no or a short phrase.
+- Before anything irreversible or outward-facing (production systems or data, deploying, pushing, deleting, force operations, sending messages, spending money), stop and ask for explicit confirmation that names the action.`;
+}
 
 /** Appended to the agent's system prompt while someone follows the session by voice. */
 export function agentVoiceNote(mode: Attention): string {

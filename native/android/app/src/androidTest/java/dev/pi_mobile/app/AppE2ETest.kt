@@ -48,7 +48,7 @@ class AppE2ETest {
     }
 
     @Test fun webVoiceDictationAndNotifications() {
-        val voice = needLabel("Voice mode: talk with pi hands-free", 30_000, "web UI did not load")
+        val voice = needLabel("Voice mode", 30_000, "web UI did not load")
         shot("01-web")
 
         // Voice: consent first (piReset cleared any earlier OK), then the microphone, then the native screen. The
@@ -62,7 +62,7 @@ class AppE2ETest {
         need(By.text(Pattern.compile("(?is).*basic voice.*")), 8_000, "no basic voice note")
         shot("02-voice-basic")
         end.click()
-        needLabel("Voice mode: talk with pi hands-free", 10_000, "End did not return to the web UI")
+        needLabel("Voice mode", 10_000, "End did not return to the web UI")
         check(find("End voice mode") == null) { "the voice screen is still up" }
         shot("03-after-voice")
 

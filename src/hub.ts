@@ -59,7 +59,11 @@ const RING = 20_000;
 const PRESENCE_MS = 2 * 60_000;
 /** Events every phone gets about every session; the rest only for the session it is looking at. */
 const GLOBAL_EVENTS = new Set(["info", "gone", "prompt", "prompt_end"]);
-const MAX_BODY = 25 * 1024 * 1024;
+/**
+ * The largest request: a 20 MB recording (pi-speech's limit for `transcribe` and a draft's last piece)
+ * goes as base64 in the JSON (4/3), sealed and base64url'd again (4/3), about 35.6 MB, plus room.
+ */
+export const MAX_BODY = 40 * 1024 * 1024;
 const PAIRING_TTL = 10 * 60_000;
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",

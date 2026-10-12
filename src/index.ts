@@ -26,6 +26,7 @@ import { qrLines } from "./qr.ts";
 import { type Config, configPath, linkSecret, loadConfig, saveConfig, stateDir } from "./store.ts";
 import { loadVoiceConfig, speechDir } from "pi-speech/config";
 import { registerDictation } from "pi-speech/dictation";
+import { registerVoiceMode } from "pi-speech/voice-mode";
 import { VoiceHost } from "pi-speech/host";
 import { registryComplete } from "pi-speech/model";
 import { agentVoiceNote } from "pi-speech/speech";
@@ -84,10 +85,12 @@ export default function piMobile(pi: ExtensionAPI): void {
 	pi.registerFlag("remote", { type: "boolean", description: "Share this session with your phone (pi-mobile)" });
 	registerHerdrBlocked(pi);
 
-	// Voice (pi-speech): dictation in this terminal (alt+m, /dictate), and the host side of the phone's voice mode.
+	// Voice (pi-speech): dictation and voice mode in this terminal (alt+m, /dictate; /voice, alt+v), and the
+	// host side of the phone's voice mode.
 	const complete = registryComplete(() => ctx!, () => loadVoiceConfig().model);
 	const voice = new VoiceHost({ ctx: () => ctx!, config: () => loadVoiceConfig(), stateDir: speechDir, complete });
 	registerDictation(pi, complete);
+	registerVoiceMode(pi, complete);
 	pi.on("before_agent_start", async (e) => {
 		const mode = voice.listeningMode();
 		if (!mode) return;
@@ -169,6 +172,8 @@ export default function piMobile(pi: ExtensionAPI): void {
 	});
 	pi.on("session_shutdown", async (e) => {
 		stop();
+		// Drafts dictated from the phone: their timers and in-flight updates end with the session.
+		voice.drafts.dispose();
 		offInput?.();
 		offInput = undefined;
 		if (watching) unwatchFile(configPath(), sync);

@@ -15,6 +15,35 @@ interface ModelLike {
 /** Text completion: `(system, user) → text`. Injectable so tests and alternative hosts need no model. */
 export type Complete = (system: string, user: string, opts?: { signal?: AbortSignal; maxTokens?: number }) => Promise<string>;
 
+function textOf(msg: any): string {
+	return ((msg.content ?? []) as any[])
+		.filter((b) => b.type === "text")
+		.map((b) => b.text)
+		.join("")
+		.trim();
+}
+
+/**
+ * A `Complete` on the session's own model (the one the developer chose for the work), for the few
+ * calls where quality beats speed, such as checking a finished draft against the whole transcript.
+ */
+export function sessionComplete(ctx: () => ExtensionContext): Complete {
+	return async (system, user, opts) => {
+		const c = ctx();
+		const model = c.model as any;
+		if (!model) throw new Error("no session model");
+		const stream = (c.modelRegistry as any).streamSimple(
+			model,
+			{ systemPrompt: system, messages: [{ role: "user", content: [{ type: "text", text: user }], timestamp: Date.now() }] },
+			{ reasoning: "minimal", maxTokens: opts?.maxTokens ?? 4000, signal: opts?.signal, cacheRetention: "none" },
+		);
+		const msg = await stream.result();
+		if (msg.stopReason === "aborted" || opts?.signal?.aborted) throw new Error("aborted");
+		if (msg.stopReason === "error") throw new Error(msg.errorMessage || "model error");
+		return textOf(msg);
+	};
+}
+
 /**
  * Voice model candidates, best first: an explicit `provider/id` preference, fast models from the
  * session's provider, other fast models, then the session's own model (which is known to work).
@@ -70,11 +99,7 @@ export function registryComplete(ctx: () => ExtensionContext, preferred?: () => 
 				if (msg.stopReason === "aborted" || opts?.signal?.aborted) throw new Error("aborted");
 				if (msg.stopReason === "error") throw Object.assign(new Error(msg.errorMessage || "voice model error"), { model: true });
 				good = key(model);
-				return (msg.content as any[])
-					.filter((b) => b.type === "text")
-					.map((b) => b.text)
-					.join("")
-					.trim();
+				return textOf(msg);
 			} catch (e: any) {
 				if (opts?.signal?.aborted) throw e;
 				lastError = e;

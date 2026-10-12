@@ -96,6 +96,7 @@ struct NativeBridge {
           window.PiNative.version = 1;
           window.PiNative.scan = true;
           window.PiNative.consent = true;
+          window.PiNative.keyboardEvents = true;
         })();
         """
     }

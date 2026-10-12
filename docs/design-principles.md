@@ -33,11 +33,12 @@ If a change only works with full attention and two hands, it is wrong for this a
 
 ## 3. Dictation in the composer
 
-- The mic sits next to Send. **Hold to talk, release to finish** (walkie-talkie); a quick tap toggles and you finish with ✓. Enter or Space toggles from the keyboard. No long-press menu or text selection on the button.
+- The mic sits next to the composer's last button: **voice mode** (blue waveform circle) while the composer is empty, **Send** once there's text, an image or a draft, in the same spot, so the two never show together (as in Claude's app). The mic stays. **Hold to talk, release to finish** (walkie-talkie); a quick tap toggles and you finish with ✓. Enter or Space toggles from the keyboard. No long-press menu or text selection on the button.
 - While recording, `#dictBar` becomes the recorder, in "you" blue like voice mode listening: cancel ✕, a live waveform, a timer, a one-line hint, done ✓. It is built once and animated per frame; never rebuild DOM on a timer. Distilling shows pi's violet spinner.
 - The result lands in the input **for review**; the phone never sends a dictation by itself. Chips: **raw** (toggles to **distilled**) and **undo**, with one status line ("Distilled from your speech — check it, then send").
 - Busy and error states say what is happening and what to do ("Didn't catch anything. Try again a little closer to the mic.").
 - What the user changes before sending teaches the personal dictionary (`docs/voice.md`); keep the send path calling `learn`.
+- **A long dictation becomes a draft** (`designs/voice-modalities.md`, "Long-form"; `web/draft.js`). Nobody picks a mode: after about 30 s, or sooner when it describes rather than asks, the composer grows into the draft sheet above the recorder. The draft forms while you talk, rendered (never Markdown syntax), what dictation just changed takes the "you" tint and fades over ~3 s (a margin mark without motion), the latest words wait on a dim Hearing line, the recorder shows the time against the 10-minute limit and turns amber a minute before it. Pauses never end it. ✓ finishes (the draft is checked once against everything said); then the mic dictates a change, **Edit as text** opens the Markdown, Send sends the draft, **Keep as text** puts it in the message box (after what is there now). ✕ while talking keeps it as text: nothing said is lost. The sheet is the composer, shared by all sessions: it stays when you switch, and Send sends to the session on screen, with the composer's images. When the computer loses the draft (pi restarted), the sheet says so and ✓ turns the whole recording, which the phone keeps, into an ordinary dictation.
 
 ## 4. The voice screen
 

@@ -1,7 +1,9 @@
 // Speech recognition on the computer running pi. Two providers:
 //   apple  — Apple SpeechAnalyzer through a small Swift helper, compiled once into the state dir.
 //            On-device, free, streaming partials, contextual strings. macOS 26+ with Xcode tools.
-//   openai — gpt-4o-transcribe with OPENAI_API_KEY (any OS), vocabulary passed as a prompt.
+//   openai — gpt-4o-transcribe with OPENAI_API_KEY (any OS), vocabulary passed as a prompt. Live, it
+//            transcribes the recording in pieces of about a minute cut at pauses (piecewiseLive), so a
+//            long dictation gets settled text (and a draft, and a transcript on disk) while you talk.
 
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -27,7 +29,12 @@ export interface LiveTranscription {
 	/** Ends input; resolves with the full text. */
 	end(): Promise<Transcript>;
 	cancel(): void;
+	/** Everything heard so far (settled segments plus the one still being recognised). */
 	onPartial: (text: string) => void;
+	/** A segment that will not change any more (providers that stream only), at pauses. */
+	onFinal?: (segment: string) => void;
+	/** The words heard after the last settled segment, which may still change (providers that stream only). */
+	onVolatile?: (tail: string) => void;
 }
 
 export interface SttProvider {
@@ -244,9 +251,15 @@ export function appleProvider(stateDir: string, locale?: string): SttProvider {
 					child = spawn(bin, ["stream", "--rate", String(rate), ...common(hints)], { stdio: ["pipe", "pipe", "ignore"] });
 					child.stdin!.on("error", () => {});
 					parseLines(child, (o) => {
-						if (typeof o.partial === "string") live.onPartial(o.partial);
+						// The helper sends only the unsettled words; everything heard is the settled text plus those.
+						if (typeof o.volatile === "string") {
+							live.onVolatile?.(o.volatile);
+							live.onPartial(`${finals} ${o.volatile}`.trim());
+						} else if (typeof o.partial === "string") live.onPartial(o.partial);
 						else if (typeof o.final === "string") {
 							finals = `${finals} ${o.final}`.trim();
+							if (o.final.trim()) live.onFinal?.(o.final.trim());
+							live.onVolatile?.("");
 							live.onPartial(finals);
 						} else if (o.done) resolveDone({ text: String(o.text ?? finals), provider: "apple" });
 						else if (o.error) failure = String(o.error);
@@ -284,19 +297,122 @@ export function openaiProvider(apiKey: string, fetchImpl: typeof fetch = fetch, 
 			// On near-silent audio the transcriber can return its prompt as the transcript; that is no speech.
 			return { text: /Software development dictation\. Names:/i.test(text) ? "" : text, provider: "openai" };
 		},
-		// No streaming over plain HTTP: collect PCM and transcribe on end.
+		// No streaming over plain HTTP: pieces of about a minute, cut at pauses, each transcribed as it ends.
 		live(rate, hints) {
-			const chunks: Buffer[] = [];
-			const ctrl = new AbortController();
-			return {
-				onPartial: () => {},
-				write: (pcm) => chunks.push(pcm),
-				end: () => provider.transcribe(pcmToWav(Buffer.concat(chunks), rate), "audio/wav", hints, ctrl.signal),
-				cancel: () => ctrl.abort(),
-			};
+			return piecewiseLive(async (wav, signal) => (await provider.transcribe(wav, "audio/wav", hints, signal)).text, rate, "openai");
 		},
 	};
 	return provider;
+}
+
+/** A piece is cut at the first pause after this much audio… */
+export const PIECE_MIN_MS = 50_000;
+/** …or, with no pause, at the quietest moment of its last PIECE_SEARCH_MS once it is this long. */
+export const PIECE_MAX_MS = 75_000;
+const PIECE_SEARCH_MS = 15_000;
+/** This much audio below VOICE_LEVEL is a pause. */
+const PIECE_PAUSE_MS = 700;
+/** Peak level of speech (as dictation's level meter counts it). */
+const VOICE_LEVEL = 0.04;
+/** A piece that never gets above this (about -46 dBFS) is silence: it isn't sent. */
+const QUIET_PIECE = 0.005;
+
+/** Peak level of an s16le chunk, 0..1. */
+function peakOf(pcm: Buffer): number {
+	let peak = 0;
+	for (let i = 0; i + 1 < pcm.length; i += 2) {
+		const v = Math.abs(pcm.readInt16LE(i));
+		if (v > peak) peak = v;
+	}
+	return peak / 32768;
+}
+
+/**
+ * Live recognition with a recogniser that only transcribes whole recordings: the PCM is cut into
+ * pieces of about a minute at pauses (PIECE_MIN_MS..PIECE_MAX_MS), each transcribed as soon as it
+ * ends (concurrently, delivered in order). Each piece's text is a final (`onFinal`) and everything so
+ * far a partial; `end()` transcribes the rest and resolves with all of it. A piece that fails is tried
+ * once more; if it fails again, `end()` rejects (the pieces before it were already delivered).
+ */
+export function piecewiseLive(
+	transcribe: (wav: Buffer, signal: AbortSignal) => Promise<string>,
+	rate: number,
+	provider: string,
+	opts: { minMs?: number; maxMs?: number } = {},
+): LiveTranscription {
+	const minMs = opts.minMs ?? PIECE_MIN_MS;
+	const maxMs = opts.maxMs ?? PIECE_MAX_MS;
+	const perMs = (rate * 2) / 1000;
+	const ctrl = new AbortController();
+	let chunks: { pcm: Buffer; level: number }[] = [];
+	let bytes = 0;
+	let quiet = 0;
+	let ended = false;
+	let chain: Promise<void> = Promise.resolve();
+	const finals: string[] = [];
+	let failure: unknown;
+	const attempt = async (wav: Buffer): Promise<string> => {
+		try {
+			return await transcribe(wav, ctrl.signal);
+		} catch (e) {
+			if (ctrl.signal.aborted) throw e;
+			await new Promise((r) => setTimeout(r, 1000));
+			return transcribe(wav, ctrl.signal);
+		}
+	};
+	/** Sends chunks[0..n) as one piece; the rest starts the next one. */
+	const cut = (n: number) => {
+		const piece = chunks.slice(0, n);
+		chunks = chunks.slice(n);
+		bytes = chunks.reduce((s, c) => s + c.pcm.length, 0);
+		quiet = 0;
+		if (!piece.some((c) => c.level >= QUIET_PIECE)) return;
+		const job = attempt(pcmToWav(Buffer.concat(piece.map((c) => c.pcm)), rate));
+		job.catch(() => {});
+		chain = chain.then(async () => {
+			try {
+				const text = (await job).replace(/\s+/g, " ").trim();
+				if (!text || ctrl.signal.aborted) return;
+				finals.push(text);
+				live.onFinal?.(text);
+				live.onPartial(finals.join(" "));
+			} catch (e) {
+				failure ??= e;
+			}
+		});
+	};
+	const live: LiveTranscription = {
+		onPartial: () => {},
+		write(pcm) {
+			if (ended || ctrl.signal.aborted || !pcm.length) return;
+			const level = peakOf(pcm);
+			chunks.push({ pcm, level });
+			bytes += pcm.length;
+			quiet = level < VOICE_LEVEL ? quiet + pcm.length : 0;
+			const ms = bytes / perMs;
+			if (ms >= minMs && quiet >= PIECE_PAUSE_MS * perMs) return cut(chunks.length);
+			if (ms < maxMs) return;
+			// No pause: cut after the quietest chunk of the last stretch (the latest of equals).
+			let best = chunks.length - 1;
+			for (let i = chunks.length - 1, at = bytes; i >= 0 && at >= (maxMs - PIECE_SEARCH_MS) * perMs; at -= chunks[i]!.pcm.length, i--)
+				if (chunks[i]!.level < chunks[best]!.level) best = i;
+			cut(best + 1);
+		},
+		async end() {
+			if (!ended) {
+				ended = true;
+				cut(chunks.length);
+			}
+			await chain;
+			if (ctrl.signal.aborted) throw new Error("cancelled");
+			if (failure) throw failure instanceof Error ? failure : new Error(String(failure));
+			return { text: finals.join(" "), provider };
+		},
+		cancel() {
+			ctrl.abort();
+		},
+	};
+	return live;
 }
 
 /** The configured provider, or the first usable one: Apple on macOS, else OpenAI with a key. */

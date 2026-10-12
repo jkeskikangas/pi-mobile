@@ -1150,9 +1150,7 @@ final class VoiceEngine {
     }
 
     func cancelsGrace(_ text: String) -> Bool {
-        guard let core else { return false }
-        let cmd = core.parseCommand(text)?.kind
-        return cmd == "stop" || cmd == "quiet" || core.norm(text).range(of: #"^(no|nope|cancel|wait|hold on|don't|do not|abort)\b"#, options: .regularExpression) != nil
+        core?.cancelsGrace(text) ?? false // voice-core.js decides, as on the web
     }
 
     /// You asked for this irreversible action by name: go ahead after a few seconds unless you say stop.
@@ -1530,8 +1528,9 @@ final class VoiceEngine {
                 respond()
             }
             let cmd = core.parseCommand(text)?.kind
-            // Instant local stop, before the model has even answered; its own stop_pi is then a no-op.
-            if cmd == "stop" && statusOf[cur] == "working" { Task { try? await sessionCall("abort", [:]) } }
+            // Instant local "stop pi", before the model has even answered; its own stop_pi is then a no-op.
+            // A bare "stop" is about the voice (voice-core.js "quiet"): interrupting the voice never stops pi.
+            if cmd == "stopPi" && statusOf[cur] == "working" { Task { try? await sessionCall("abort", [:]) } }
             if cmd == "end" { _ = deps.scheduler.after(1.2) { [weak self] in self?.stop() } }
             if !echo, let cmd, core.settings.contains(cmd), let s = VoiceSetting(rawValue: cmd) { applySetting(s) }
         case "response.created":
@@ -1721,10 +1720,10 @@ final class VoiceEngine {
             if grace != nil && cancelsGrace(text) { return cancelGrace() }
             if cmd == "end" { return stop() }
             if cmd == "help" { return speak(core.help) }
-            if cmd == "stop" {
+            if cmd == "stopPi" {
                 _ = try await tool("stop_pi", [:])
                 try alive(g)
-                return speak("Stopped.")
+                return speak("Stopped pi.")
             }
             if cmd == "quiet" { return setState(listenState()) }
             if cmd == "repeat" { return speak(lastSpoken.isEmpty ? "I haven't said anything yet." : lastSpoken) }

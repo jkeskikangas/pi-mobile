@@ -2,8 +2,8 @@
 // sleeps (your other computers still answer). Payloads arrive encrypted to this browser (RFC 8291).
 "use strict";
 
-const SHELL = "pi-shell-v2";
-const FILES = ["./", "app.css", "app.js", "fleet.js", "voice-core.js", "voice.js", "nacl.js", "icon.svg", "manifest.json"];
+const SHELL = "pi-shell-v3";
+const FILES = ["./", "app.css", "app.js", "fleet.js", "voice-core.js", "draft.js", "voice.js", "nacl.js", "icon.svg", "manifest.json"];
 
 self.addEventListener("install", (e) => {
 	e.waitUntil(

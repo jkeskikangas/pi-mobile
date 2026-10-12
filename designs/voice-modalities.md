@@ -165,12 +165,14 @@ Later phases: the draft editor and drafts in the phone composer; the monologue h
 The voice runs where the AirPods are: the laptop. pi runs on the laptop or on a remote box.
 
 ```
-AirPods ── laptop voice process (pi-speech)
+AirPods ── laptop voice process (pi-speech, in the local pi)
              │  GPT-Live with client delegation, or today's realtime model
-             ├─ local pi: in process (pi-speech is a pi extension)
-             ├─ remote pi via pi-mobile's machine link (structured events, dialogs)  ← preferred
-             └─ remote pi via herdr CLI (prompt / wait / read)                       ← fallback
+             ├─ this pi: in process (pi-speech is a pi extension)
+             └─ other sessions via herdr's CLI: other panes here and saved SSH machines
+                (herdr [--machine m] agent list / prompt / wait / read / send-keys)
 ```
+
+Decided 2026-10-12: the voice always runs in the local pi on the laptop; other sessions, local or remote, are reached through herdr's CLI (`packages/pi-speech/src/herdr-targets.ts`). pi-mobile's machine link is not used for this: the laptop is not a client of remote hubs. A pi on this computer is read from its session file (exact answer, edits, commands); others from their screen. Questions on another screen are answered with keys only for select and yes/no dialogs, and only after re-reading that the same question is still there; anything else needs the screen. A prompt is never resent: a herdr timeout does not prove nothing arrived.
 
 | pi side | Voice model event (GPT-Live) |
 |---|---|
@@ -209,7 +211,7 @@ Transport: WebRTC from Node with `werift` (pure TypeScript, no native build; ~8 
 
 1. GPT-Live with the ChatGPT sign-in: the endpoint accepts the call (`?intent=quicksilver&architecture=avas`, `OpenAI-Alpha: quicksilver=v2`, `model: gpt-live-1-codex`, `delegation: {type: "client"}`) and connects, then closes with "Voice session access denied." Likely gated to Codex's own clients or by plan; not pursued further. GPT-Live therefore needs an API key.
 2. ~~Can an extension show a marked spoken segment inside pi's editor?~~ Yes: `ctx.ui.setEditorComponent` with `CustomEditor` replaces the editor while keeping pi's shortcuts; the full-screen draft view is a `ctx.ui.custom()` overlay sized to the terminal minus the footer (to confirm in the prototype that the footer stays visible and pi's own redraws don't fight it).
-3. Remote sessions: how does a remote pi's editor show a parked request, given the voice runs on the laptop? Through the machine link's editor commands, or the laptop keeps the parked text and pastes on Enter.
+3. ~~Remote sessions: how does a remote pi's editor show a parked request, given the voice runs on the laptop?~~ The laptop keeps it: while the voice talks to another session, a parked request waits in the local editor (the hint and status line say "Enter sends to api @devbox") and goes to that session with `herdr agent prompt` on Enter or "send". Nothing is typed into the other session's editor before then.
 4. Typing-pause length and the parking word list are starting values to tune.
 
 ## How we'll know it works

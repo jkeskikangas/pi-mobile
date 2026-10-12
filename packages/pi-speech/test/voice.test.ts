@@ -226,6 +226,10 @@ test("realtime session: voice layer instructions, tools, semantic turn detection
 	assert.match(i, /never say you don't know or can't look something up when pi could answer it/);
 	assert.match(i, /Answer yourself only from this conversation or for voice controls/);
 	assert.match(VOICE_TOOLS[0].description, /current information, the web, a file or a command/);
+	// Interrupting the voice never stops pi, on the phone too: "stop" is about the voice.
+	assert.match(i, /Interrupting you never stops pi\. "Stop", "stop talking", "shush" are about you: stop and say nothing\. Only an explicit "stop pi", "cancel that", "stop the work" or "abort" calls stop_pi/);
+	assert.doesNotMatch(i, /"Stop", "cancel", "hold on" about pi's work/);
+	assert.match(VOICE_TOOLS.find((t) => t.name === "stop_pi")!.description, /Only when the developer explicitly says so: 'stop pi', 'cancel that', 'stop the work', 'abort'\. Never for 'stop' alone/);
 });
 
 test("realtime call: ChatGPT sign-in posts JSON to the Codex endpoint, an API key posts multipart", async () => {

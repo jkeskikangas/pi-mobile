@@ -86,6 +86,9 @@ final class VoiceCore {
     // MARK: PiVoiceCore
     func norm(_ s: String) -> String { call("norm", [s])?.toString() ?? "" }
 
+    /// Whether something said during the undo window cancels it ("stop", "no", "wait", "stop pi", …).
+    func cancelsGrace(_ text: String) -> Bool { call("cancelsGrace", [text])?.toBool() ?? false }
+
     func parseCommand(_ text: String) -> Command? {
         guard let r = call("parseCommand", [text]), r.isObject, let k = r.forProperty("kind")?.toString() else { return nil }
         return Command(kind: k)
