@@ -1,6 +1,6 @@
 {
   "name": "pi-mobile",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Continue every pi session from your phone: end-to-end encrypted, no server needed, answer any extension's dialogs, lock-screen notifications. Works in the browser, or with the native iPhone and Android apps.",
   "keywords": [
     "pi-package",
