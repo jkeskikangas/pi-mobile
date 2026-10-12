@@ -80,7 +80,9 @@ class LiveFleet(
             changed.add(m.id)
             jobs.remove(m.id)?.cancel()
             paired[m.id] = m
-            clients[m.id] = connect(m)
+            // A damaged key or a refused origin: no client; its calls say it isn't paired.
+            val client = runCatching { connect(m) }.getOrNull()
+            if (client == null) clients.remove(m.id) else clients[m.id] = client
             if (out != null) open(m.id)
         }
         for (m in list) paired[m.id] = m
