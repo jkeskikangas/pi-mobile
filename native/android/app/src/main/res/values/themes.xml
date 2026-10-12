@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The web UI's background token, bg in web/app.css (light): the window behind the web view, so nothing flashes white while it loads. -->
+    <color name="pi_background">#F7F7F5</color>
+
+    <!-- Minimal app theme; the Compose screens bring their own colour scheme (ui/Theme). A light parent tells the
+         web view prefers-color-scheme: light (values-night has the dark one). -->
+    <style name="Theme.Pi" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/pi_background</item>
+        <item name="android:colorBackground">@color/pi_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS only (plans/native-android.md A5, the iOS app's ATS rules). Plain HTTP only to this phone itself, so the
+     emulator reaches the `npm run ui` fixture hub through `adb reverse`. OriginPolicy refuses the rest with a sentence. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>
