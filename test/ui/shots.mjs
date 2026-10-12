@@ -10,7 +10,8 @@
 // every voice-mode state, settings, push to talk), picker (the voice picker from the menu and voice mode),
 // machines (a second computer offered, added, listed, offline and back), scan (Add a computer's QR scan
 // sheet: a live camera reading a code that isn't pi's, through BarcodeDetector and through the vendored
-// jsQR, then camera access off and no camera).
+// jsQR, then camera access off and no camera), next (likely next messages as chips: files ready, a draft,
+// long press and Shift+Enter to edit, tap to send, hidden while typing, cleared, picked from a notification).
 // Needs Chrome or Chromium: CHROME=/path/to/chrome when it isn't in the usual place. Exits 1 on any axe
 // violation, page error or failed step; report.json in the output folder lists them.
 
@@ -27,7 +28,7 @@ const { values: opt } = parseArgs({
 		out: { type: "string", default: "shots" },
 		width: { type: "string", default: "390,320" },
 		theme: { type: "string", default: "light,dark" },
-		only: { type: "string", default: "app,voice,picker,machines,scan" },
+		only: { type: "string", default: "app,voice,picker,machines,scan,next" },
 		port: { type: "string", default: "7979" },
 		forced: { type: "boolean", default: false },
 		reduced: { type: "boolean", default: false },
@@ -461,6 +462,105 @@ async function session(theme, width, flow) {
 				await openScan();
 				await shot("s5-scan-starting");
 				await closeSheet();
+			});
+		}
+
+		if (flow === "next") {
+			await ready();
+			await openApi();
+			const chips = () => page.evaluate(() => (document.querySelector("#nextChips").hidden ? [] : [...document.querySelectorAll("#nextChips .next-chip")].map((b) => b.textContent)));
+			const shown = () => page.waitForFunction(() => !document.querySelector("#nextChips").hidden, { timeout: 5000 });
+			const gone = () => page.waitForFunction(() => document.querySelector("#nextChips").hidden, { timeout: 5000 });
+			const inputValue = () => page.evaluate(() => document.querySelector("#input").value);
+			const clearInput = () =>
+				page.evaluate(() => {
+					const i = document.querySelector("#input");
+					i.value = "";
+					i.dispatchEvent(new Event("input"));
+					i.blur();
+				});
+			const first = "Open the PR and link TUL-512";
+			const second = "Also round the totals to cents";
+			await step("chips", async () => {
+				await say("next");
+				await shown();
+				await shot("n1-chips");
+				const c = await chips();
+				report.checks[`${tag} next chips`] = c;
+				if (c.length !== 3 || !c[0].includes("files ready")) throw new Error(`chips: ${JSON.stringify(c)}`);
+			});
+			await step("draft", async () => {
+				await say("next draft");
+				await page.waitForFunction(() => document.querySelector("#nextChips .next-meta")?.textContent === "3 files · tests pass", { timeout: 5000 });
+				await shot("n2-chips-draft");
+			});
+			await step("long press edits", async () => {
+				const h = await page.waitForFunction((t) => [...document.querySelectorAll("#nextChips .next-chip")].find((b) => b.textContent.includes(t)) || null, { timeout: 5000 }, second);
+				const box = await h.asElement().boundingBox();
+				await page.touchscreen.touchStart(box.x + box.width / 2, box.y + box.height / 2);
+				await sleep(700);
+				await page.touchscreen.touchEnd();
+				await sleep(400);
+				const v = await inputValue();
+				report.checks[`${tag} long press puts the chip in the composer`] = v;
+				if (v !== second) throw new Error(`composer after a long press: ${JSON.stringify(v)}`);
+				if ((await chips()).length) throw new Error("chips still shown while the composer has text");
+				await shot("n3-long-press-edit");
+				await clearInput();
+				await shown();
+			});
+			await step("keyboard edits", async () => {
+				await page.focus("#nextChips .next-chip");
+				await page.keyboard.down("Shift");
+				await page.keyboard.press("Enter");
+				await page.keyboard.up("Shift");
+				await sleep(300);
+				const v = await inputValue();
+				report.checks[`${tag} Shift+Enter puts the chip in the composer`] = v;
+				if (v !== first) throw new Error(`composer after Shift+Enter: ${JSON.stringify(v)}`);
+				await clearInput();
+				await shown();
+			});
+			await step("typing hides them", async () => {
+				await page.type("#input", "x");
+				await gone();
+				await clearInput();
+				await shown();
+			});
+			await step("tap sends", async () => {
+				const before = buf.length;
+				await tap("#nextChips .next-chip", first);
+				await gone();
+				await page.waitForFunction((t) => [...document.querySelectorAll("#transcript .msg.user")].some((m) => m.textContent.includes(t)), { timeout: 5000 }, first);
+				const sent = buf.slice(before).match(/send f-api .*/g) ?? [];
+				report.checks[`${tag} a tap sends the chip`] = sent;
+				if (sent.length !== 1 || sent[0] !== `send f-api ${JSON.stringify(first)}`) throw new Error(`sent: ${JSON.stringify(sent)}`);
+				if (await inputValue()) throw new Error("the composer kept the text after sending");
+				await shot("n4-sent");
+			});
+			await step("cleared", async () => {
+				await say("next");
+				await shown();
+				await say("next clear");
+				await gone();
+			});
+			await step("a run hides them", async () => {
+				await say("next");
+				await shown();
+				await say("work");
+				await gone();
+				await say("done");
+			});
+			await step("from the notification's Send", async () => {
+				// What the service worker opens after Send on a "finished" notification with a draft: that session, the chip picked.
+				await say("next draft");
+				const id = await page.evaluate(() => JSON.parse(document.querySelector("#nextChips").dataset.key)[1].id);
+				await page.goto(`${new URL(link).origin}/?agent=f-api&next=${id}&text=${encodeURIComponent(first)}`);
+				await page.waitForFunction(() => document.querySelector("#nextChips .next-chip.picked"), { timeout: 15000 });
+				const picked = await page.evaluate(() => ({ text: document.activeElement?.querySelector?.(".next-text")?.textContent, meta: document.querySelector(".next-chip.picked .next-meta")?.textContent }));
+				report.checks[`${tag} Send on the notification picks the chip`] = picked;
+				if (picked.text !== first || picked.meta !== "3 files · tests pass") throw new Error(`picked: ${JSON.stringify(picked)}`);
+				await shot("n5-from-notification");
 			});
 		}
 

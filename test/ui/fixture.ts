@@ -5,6 +5,7 @@
 //
 // Control it on stdin: `work` starts a streaming turn with a running tool, `ask` opens a confirm
 // dialog, `pick` a select, `done` finishes the turn, `quiet` empties the second session.
+// `next` offers likely next messages in api (`next draft` adds a prepared draft, `next clear` drops them).
 // Several machines: `box` starts a second computer (port + 1) and offers it to paired phones, as
 // `/remote add` does; `box off` / `box on` take it away and bring it back.
 
@@ -105,6 +106,8 @@ interface Fake {
 	items: Item[];
 	link?: HubLink;
 	n: number;
+	/** The current next-message suggestion (pi-next-turn's, forwarded by the bridge). */
+	suggestion?: any;
 }
 
 const fakes: Fake[] = [
@@ -137,7 +140,7 @@ function link(f: Fake, cfg: typeof config | typeof boxConfig, secret: string): v
 		secret,
 		info: () => f.info,
 		onRequest: (m, p) => {
-			if (m === "snapshot") return { n: f.n, info: f.info, items: f.items, start: 0, total: f.items.length, tools: [], prompts: prompts.get(f.info.agent) ?? [] };
+			if (m === "snapshot") return { n: f.n, info: f.info, items: f.items, start: 0, total: f.items.length, tools: [], prompts: prompts.get(f.info.agent) ?? [], suggestion: f.suggestion };
 			if (m === "models")
 				return {
 					current: f.info.model,
@@ -195,6 +198,9 @@ function link(f: Fake, cfg: typeof config | typeof boxConfig, secret: string): v
 				return img;
 			}
 			if (m === "send") {
+				// Logged so the screenshot checks can see exactly what a suggestion chip sent.
+				console.log(`send ${f.info.agent} ${JSON.stringify(p.text)}`);
+				clearSuggestion(f);
 				const id = `u${Date.now()}`;
 				if (p.images?.length) images.set(id, p.images);
 				f.items.push({ k: "user", id, text: p.text, images: p.images?.length ?? 0, ts: Date.now() });
@@ -245,7 +251,31 @@ async function offerBox(prefix = "fx"): Promise<void> {
 }
 
 const [api, web] = fakes;
+
+// Next-message suggestions, as the bridge forwards pi-next-turn's (src/suggest.ts).
+let nextN = 0;
+function suggest(f: Fake, draft: boolean): void {
+	if (!draft || !f.suggestion) nextN++;
+	f.suggestion = {
+		id: `nx${nextN}`,
+		candidates: [
+			{ text: "Open the PR and link TUL-512", p: 0.82 },
+			{ text: "Also round the totals to cents", p: 0.11 },
+			{ text: "Run the full test suite again before we ship this change to everyone", p: 0.04 },
+		],
+		readAhead: "ready",
+		...(draft ? { draft: { files: 3, insertions: 41, deletions: 7, checks: "pass" } } : {}),
+	};
+	emit(f, { type: "suggestion", ...f.suggestion });
+}
+function clearSuggestion(f: Fake): void {
+	if (!f.suggestion) return;
+	emit(f, { type: "suggestion_clear", id: f.suggestion.id });
+	f.suggestion = undefined;
+}
+
 async function work(): Promise<void> {
+	clearSuggestion(api);
 	api.info = { ...api.info, status: "working", since: Date.now() - 4000 };
 	emit(api, { type: "info", info: api.info });
 	emit(api, { type: "item", item: { k: "user", id: "u9", text: "Yes, open a PR and link the ticket.", images: 0, ts: Date.now() } });
@@ -282,6 +312,9 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 		api.info = { ...api.info, status: "idle" };
 		emit(api, { type: "info", info: api.info });
 	}
+	if (cmd === "next") suggest(api, false);
+	if (cmd === "next draft") suggest(api, true);
+	if (cmd === "next clear") clearSuggestion(api);
 	if (cmd === "quiet") {
 		web.items = [];
 		emit(web, { type: "reset" });
@@ -296,4 +329,4 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 const links = hub.createPairing().links;
 console.log(`pi-mobile UI fixture on port ${port}. Pair:`);
 for (const l of links) console.log(`  ${l.label}: ${l.url}`);
-console.log("stdin: work | ask | pick | done | quiet | pair | box | box again | box off | box on");
+console.log("stdin: work | ask | pick | done | quiet | next | next draft | next clear | pair | box | box again | box off | box on");

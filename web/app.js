@@ -69,6 +69,8 @@
 		push: { key: null, on: false },
 		offers: [], // machines offered by another of your computers, waiting for "Add"
 		accepted: undefined, // an offer already accepted from its notification
+		next: new Map(), // agent -> what you will likely send next (a `suggestion` event), shown as chips
+		nextPick: null, // { id, text }: the suggestion whose notification's Send opened the app
 		pushKeys: new Map(), // machine -> the push key it signs with
 		notifyOn: new Map(), // machine -> it holds this browser's push subscription (hub `pushOn`)
 		notifyWhy: new Map(), // machine -> why sharing the subscription with it failed
@@ -330,6 +332,8 @@
 			view.total = snap.total;
 			S.agents.set(agent, snap.info);
 			S.prompts.set(agent, new Map(snap.prompts.map((p) => [p.id, p])));
+			if (snap.suggestion) S.next.set(agent, snap.suggestion);
+			else S.next.delete(agent);
 			const frag = document.createDocumentFragment();
 			for (const item of snap.items) frag.appendChild(renderItem(item));
 			$("transcript").replaceChildren(frag);
@@ -443,6 +447,14 @@
 				return;
 			case "notice":
 				toast(ev.text, ev.level);
+				return;
+			case "suggestion":
+				S.next.set(view.agent, { id: ev.id, candidates: ev.candidates, readAhead: ev.readAhead, draft: ev.draft });
+				renderNext();
+				return;
+			case "suggestion_clear":
+				if (S.next.get(view.agent)?.id === ev.id) S.next.delete(view.agent);
+				renderNext();
 				return;
 			case "stream_start":
 				showEmpty("");
@@ -1257,6 +1269,107 @@
 
 	function updateSend() {
 		$("sendBtn").classList.toggle("ready", !!($("input").value.trim() || S.attachments.length));
+		renderNext();
+	}
+
+	// ── next-message chips ───────────────────────────────────────────────────────────────────
+	// What you will likely send next (pi-next-turn on the computer, when installed): up to three chips
+	// above an empty composer while pi is idle. A tap sends it as if typed; a long press (or Shift+Enter)
+	// puts it in the composer to edit first.
+
+	/** "3 files · tests pass" (src/suggest.ts `draftSummary` says the same on the lock screen). */
+	function draftLine(d) {
+		const files = `${d.files} file${d.files === 1 ? "" : "s"}`;
+		return d.checks === "pass" ? `${files} · tests pass` : d.checks === "fail" ? `${files} · tests fail` : files;
+	}
+
+	function renderNext() {
+		const box = $("nextChips");
+		const s = S.next.get(S.current);
+		const info = S.agents.get(S.current);
+		const show = !!s && !!S.view && !S.view.loading && info?.status === "idle" && !S.prompts.get(S.current)?.size && !$("input").value.trim() && !S.attachments.length;
+		if (!show) {
+			box.hidden = true;
+			box.replaceChildren();
+			delete box.dataset.key;
+			return;
+		}
+		// Rebuilt only when it changed, so focus stays on a chip.
+		const key = JSON.stringify([S.current, s]);
+		if (box.dataset.key === key && !box.hidden) return;
+		box.dataset.key = key;
+		const pick = S.nextPick?.id === s.id ? S.nextPick : null;
+		S.nextPick = null;
+		const meta = s.draft ? draftLine(s.draft) : s.readAhead === "ready" ? "files ready" : "";
+		const chips = s.candidates.slice(0, 3).map((c, i) => nextChip(c.text, i === 0 ? meta : ""));
+		box.replaceChildren(...chips);
+		box.hidden = false;
+		if (pick) {
+			// From the notification's Send: the chip it named, ready for one tap.
+			const i = Math.max(0, s.candidates.findIndex((c) => c.text === pick.text));
+			chips[i]?.classList.add("picked");
+			chips[i]?.focus({ preventScroll: true });
+		}
+	}
+
+	function nextChip(text, meta) {
+		const b = el("button", "next-chip");
+		b.type = "button";
+		b.append(el("span", "next-text", text));
+		if (meta) b.append(el("span", "next-meta", meta));
+		b.setAttribute("aria-label", `Send: ${text}${meta ? `. ${meta}` : ""}`);
+		b.setAttribute("aria-describedby", "nextHint");
+		let timer = 0;
+		let long = false;
+		const cancel = () => clearTimeout(timer);
+		b.addEventListener("pointerdown", () => {
+			long = false;
+			cancel();
+			timer = setTimeout(() => {
+				long = true;
+				navigator.vibrate?.(12);
+				editNext(text);
+			}, 450);
+		});
+		for (const ev of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(ev, cancel);
+		// A long press elsewhere (Android, a mouse's right button, the keyboard's menu key).
+		b.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			cancel();
+			if (!long) editNext(text);
+			long = true;
+		});
+		b.addEventListener("keydown", (e) => {
+			if (e.shiftKey && (e.key === "Enter" || e.key === " ")) {
+				e.preventDefault();
+				editNext(text);
+			}
+		});
+		b.addEventListener("click", () => {
+			if (long) {
+				long = false;
+				return;
+			}
+			sendNext(text);
+		});
+		return b;
+	}
+
+	/** Exactly as if you had typed it and pressed Send. */
+	function sendNext(text) {
+		if ($("sendBtn").disabled) return;
+		const input = $("input");
+		input.value = text;
+		autosize();
+		send();
+	}
+
+	function editNext(text) {
+		const input = $("input");
+		input.value = text;
+		autosize();
+		input.focus();
+		input.setSelectionRange(text.length, text.length);
 	}
 
 	/** After any change to the composer text, including dictation filling it in. */
@@ -1275,6 +1388,8 @@
 		$("sendBtn").disabled = true;
 		try {
 			const r = await call("send", { text, images, mode: S.mode });
+			// You said what comes next: the suggestion no longer applies (the computer clears it too).
+			S.next.delete(S.current);
 			input.value = "";
 			S.attachments = [];
 			renderAttachments();
@@ -2518,6 +2633,8 @@
 		const query = new URLSearchParams(location.search);
 		const fromPush = query.get("agent");
 		if (fromPush) store.set(AGENT_KEY, fromPush);
+		// Send on a "finished" notification: that session, its suggestion chip ready for one tap.
+		if (fromPush && query.get("next")) S.nextPick = { id: query.get("next"), text: query.get("text") || "" };
 		// "Add" on an offer's notification: accepted as soon as the offer arrives on the stream.
 		if (query.get("accept")) S.accepted = query.get("accept");
 		if (location.search) history.replaceState(null, "", location.pathname + location.hash);
@@ -2536,7 +2653,13 @@
 				})
 				.catch(() => {});
 			navigator.serviceWorker.addEventListener("message", (e) => {
-				if (e.data?.type === "open") openAgent(e.data.agent);
+				if (e.data?.type === "open") {
+					if (e.data.next) S.nextPick = { id: e.data.next, text: e.data.text || "" };
+					if (e.data.agent === S.current) {
+						delete $("nextChips").dataset.key;
+						renderNext();
+					} else openAgent(e.data.agent);
+				}
 				else if (e.data?.type === "accept") acceptOffer(e.data.offer);
 			});
 		}

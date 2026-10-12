@@ -54,6 +54,8 @@ self.addEventListener("push", (event) => {
 		data = event.data ? event.data.json() : {};
 	} catch {}
 	const offer = data.kind === "add" ? data.offer : undefined;
+	// "finished" with a likely next message (`next`, src/suggest.ts): Send opens that session with it ready.
+	const next = !offer && data.next && typeof data.next.id === "string" ? { id: data.next.id, text: String(data.next.text || "") } : undefined;
 	// One notification per session (per computer): a newer one replaces the older.
 	event.waitUntil(
 		self.registration.showNotification(data.title || "pi", {
@@ -62,25 +64,32 @@ self.addEventListener("push", (event) => {
 			renotify: true,
 			icon: "icon.svg",
 			// Android shows the button; iPhone shows none and a tap opens the app's Add sheet.
-			actions: offer ? [{ action: "add", title: "Add" }] : [],
-			data: { agent: data.agent, offer },
+			actions: offer ? [{ action: "add", title: "Add" }] : next ? [{ action: "send", title: "Send" }] : [],
+			data: { agent: data.agent, offer, next },
 		}),
 	);
 });
 
 self.addEventListener("notificationclick", (event) => {
 	event.notification.close();
-	const { agent, offer } = event.notification.data || {};
+	const { agent, offer, next } = event.notification.data || {};
 	// "Add" can't add here: the machine list lives in the page's storage. The page adds it, no second tap.
 	const accept = event.action === "add" && offer ? offer : undefined;
-	const query = accept ? `?accept=${encodeURIComponent(accept)}` : agent ? `?agent=${encodeURIComponent(agent)}` : "";
+	// "Send" can't send here either (the keys live in the page's storage), and must not send unseen: the
+	// page opens that session with the suggestion's chip (and a draft's summary) picked, one tap to send.
+	const pick = event.action === "send" && agent && next ? next : undefined;
+	const query = accept
+		? `?accept=${encodeURIComponent(accept)}`
+		: agent
+			? `?agent=${encodeURIComponent(agent)}${pick ? `&next=${encodeURIComponent(pick.id)}&text=${encodeURIComponent(pick.text)}` : ""}`
+			: "";
 	const url = new URL(`./${query}`, self.registration.scope).href;
 	event.waitUntil(
 		(async () => {
 			const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
 			for (const w of wins) {
 				if (accept) w.postMessage({ type: "accept", offer: accept });
-				else if (agent) w.postMessage({ type: "open", agent });
+				else if (agent) w.postMessage({ type: "open", agent, ...(pick ? { next: pick.id, text: pick.text } : {}) });
 				return w.focus();
 			}
 			return self.clients.openWindow(url);
