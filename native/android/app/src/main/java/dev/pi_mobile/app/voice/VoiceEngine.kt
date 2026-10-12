@@ -305,6 +305,25 @@ class VoiceEngine(private val scope: CoroutineScope, deps: VoiceDeps? = null) {
         }
     }
 
+    /**
+     * A persona's sample when no call can say it (the voice sheet while connecting or after the mic failed):
+     * the computer's voice for it, else the phone's closest (the web's `playSample`).
+     */
+    fun playSample(id: String) {
+        val deps = deps ?: return
+        val p = settings.personas.firstOrNull { it.id == id }
+        val io = basicIO ?: deps.makeBasic().also { basicIO = it }
+        io.silence()
+        val g = gen
+        scope.launch {
+            val r = catching { speechCall("speak", obj("text" to sampleLine(p), "persona" to id)) }.getOrNull()
+            if (g != gen) return@launch
+            val audio = r["audio"].string?.let { catching { Base64.getDecoder().decode(it) }.getOrNull() }
+            if (audio != null && catching { io.play(audio, r["mime"].string ?: "audio/mpeg") {} }.isSuccess) return@launch
+            io.speakLocal(listOf(sampleLine(p)), p, p?.rate ?: 1.0) {}
+        }
+    }
+
     /** "Push to talk", "open mic", "eyes free", "I can glance": settings by voice or the sheet. */
     fun applySetting(setting: VoiceSetting) {
         when (setting) {

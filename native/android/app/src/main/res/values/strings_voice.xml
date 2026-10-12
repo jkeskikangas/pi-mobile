@@ -2,9 +2,6 @@
 <resources>
     <string name="voice_channel_name">Voice mode</string>
     <string name="voice_channel_description">Shows while you talk to pi, with Mute and End.</string>
-    <string name="voice_mute">Mute</string>
-    <string name="voice_unmute">Unmute</string>
-    <string name="voice_end">End</string>
     <string name="voice_tile_label">Talk to pi</string>
     <string name="voice_shortcut_short">Talk to pi</string>
     <string name="voice_shortcut_long">Talk to pi in voice mode</string>
