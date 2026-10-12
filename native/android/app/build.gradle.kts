@@ -80,7 +80,11 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        unitTests.all { it.systemProperty("pi.repo", rootProject.file("../..").absolutePath) }
+        unitTests.all {
+            it.systemProperty("pi.repo", rootProject.file("../..").absolutePath)
+            // scripts/integration.sh: the fixture hub's pairing link for FixtureHubIntegrationTest.
+            prop("piPairLink").takeIf { l -> l.isNotEmpty() }?.let { l -> it.systemProperty("PI_PAIR_LINK", l) }
+        }
     }
 
     packaging {
