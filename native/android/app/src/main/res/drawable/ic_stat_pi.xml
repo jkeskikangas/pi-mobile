@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The pi glyph of web/icon.svg without its tile, white: status-bar icons are drawn from alpha only. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="320"
+    android:viewportHeight="320">
+    <group
+        android:translateX="-96"
+        android:translateY="-110">
+        <path
+            android:pathData="M140,176h232M196,176v188M316,176v120c0,40 16,68 56,68"
+            android:strokeWidth="44"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000" />
+    </group>
+</vector>
