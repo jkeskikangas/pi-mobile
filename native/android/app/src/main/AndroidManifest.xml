@@ -47,10 +47,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- The launcher's "Talk to pi" shortcut (plans/native-android.md A11). -->
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/voice_shortcuts" />
         </activity>
         <!-- The app's own notifications open MainActivity through this alias. Not exported: no other app can start
              it, so only intents through it may name a session to open or answer by voice (LaunchRequest). -->

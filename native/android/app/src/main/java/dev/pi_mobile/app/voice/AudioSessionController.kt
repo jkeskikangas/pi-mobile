@@ -13,10 +13,13 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import dev.pi_mobile.app.core.Prefs
 
 /**
  * The audio session (plans D5, D8, A9): communication mode, the route (headset first, never the earpiece),
@@ -40,7 +43,8 @@ class AudioSessionController(context: Context) : VoiceAudioSession {
     /** Focus was lost for a while (a call, the assistant): regaining it resumes. */
     private var lostTransiently = false
     private var media: MediaSession? = null
-    private var lastNetwork: Network? = null
+    /** The kind of network in use (Wi-Fi, mobile…), as iOS's path monitor keys it. */
+    private var lastNetworkKind: String? = null
 
     override val route: String
         get() = if (Build.VERSION.SDK_INT >= 31) audio.communicationDevice?.let(::nameOf) ?: "" else legacyRoute()
@@ -56,10 +60,11 @@ class AudioSessionController(context: Context) : VoiceAudioSession {
         }
         focus = request
         lostTransiently = false
-        if (active) return
-        previousMode = audio.mode
+        // Every activate (also resuming after a call, which may have changed both), like iOS's setConfiguration.
+        if (!active) previousMode = audio.mode
         audio.mode = AudioManager.MODE_IN_COMMUNICATION
         routeAudio()
+        if (active) return
         audio.registerAudioDeviceCallback(devices, main)
         if (Build.VERSION.SDK_INT >= 28) {
             ContextCompat.registerReceiver(app, muteReceiver, IntentFilter(AudioManager.ACTION_MICROPHONE_MUTE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
@@ -75,8 +80,9 @@ class AudioSessionController(context: Context) : VoiceAudioSession {
         audio.unregisterAudioDeviceCallback(devices)
         if (Build.VERSION.SDK_INT >= 28) app.unregisterReceiver(muteReceiver)
         connectivity.unregisterNetworkCallback(network)
-        lastNetwork = null
+        lastNetworkKind = null
         disableRemote()
+        clearStaleMute(app)
         if (Build.VERSION.SDK_INT >= 31) audio.clearCommunicationDevice() else {
             @Suppress("DEPRECATION")
             if (audio.isBluetoothScoOn) {
@@ -93,8 +99,13 @@ class AudioSessionController(context: Context) : VoiceAudioSession {
 
     override val isInputMuted: Boolean get() = audio.isMicrophoneMute
 
+    /**
+     * The mute is the phone's, not pi's (every app's microphone): pi notes that it set it, so the mute is lifted
+     * when voice mode ends, and at the next start after a crash ([clearStaleMute]).
+     */
     override fun setInputMuted(muted: Boolean) {
         audio.isMicrophoneMute = muted
+        app.getSharedPreferences(Prefs.FILE, Context.MODE_PRIVATE).edit { putBoolean(MUTED_BY_PI, muted) }
     }
 
     // Focus: the Android counterpart of AVAudioSession interruptions.
@@ -215,20 +226,47 @@ class AudioSessionController(context: Context) : VoiceAudioSession {
 
     /** After the first network, a different default network (Wi-Fi ↔ mobile) → [onNetworkChange]. */
     private val network = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(n: Network) {
+        override fun onCapabilitiesChanged(n: Network, caps: NetworkCapabilities) {
             if (!active) return
-            val last = lastNetwork
-            lastNetwork = n
-            if (last != null && last != n) onNetworkChange?.invoke()
+            val kind = NetworkKinds.kind(caps::hasTransport)
+            val last = lastNetworkKind
+            lastNetworkKind = kind
+            if (NetworkKinds.changed(last, kind)) onNetworkChange?.invoke()
         }
     }
 
     companion object {
+        private const val MUTED_BY_PI = "pi-voice-muted-mic"
+
+        /** Lifts the phone-wide microphone mute if pi set it and voice mode is gone (ended, crashed, killed). */
+        fun clearStaleMute(context: Context) {
+            val sp = context.getSharedPreferences(Prefs.FILE, Context.MODE_PRIVATE)
+            if (!sp.getBoolean(MUTED_BY_PI, false)) return
+            context.getSystemService(AudioManager::class.java).isMicrophoneMute = false
+            sp.edit { putBoolean(MUTED_BY_PI, false) }
+        }
+
         val VOICE: AudioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
     }
+}
+
+/**
+ * Which network change counts (unit tested): only a different kind (Wi-Fi ↔ mobile), like iOS's path monitor;
+ * another Wi-Fi, or the same one coming back with new capabilities, doesn't redial the call.
+ */
+object NetworkKinds {
+    fun kind(hasTransport: (Int) -> Boolean): String = when {
+        hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+        hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+        hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+        else -> "other"
+    }
+
+    /** After the first network, a different kind. */
+    fun changed(last: String?, now: String): Boolean = last != null && last != now
 }
 
 /** Which output a voice call uses, as pure functions of `AudioDeviceInfo` types (unit tested). */

@@ -90,6 +90,8 @@ private const val HOLD_MILLIS = 350L
  *
  * @param levels the current mic and pi levels; read while the orb draws (pass a snapshot-state read so
  *   level changes redraw the orb without recomposing the screen).
+ * @param locked shown over the lock screen: the question is read-only and the switcher and settings ask to
+ *   unlock first ([unlock] runs its block once the phone is unlocked).
  */
 @Composable
 fun VoiceScreen(
@@ -97,6 +99,8 @@ fun VoiceScreen(
     actions: VoiceActions,
     modifier: Modifier = Modifier,
     levels: () -> VoiceLevels = { VoiceLevels() },
+    locked: Boolean = false,
+    unlock: (then: () -> Unit) -> Unit = { it() },
 ) {
     val colors = PiTheme.colors
     val reduced = rememberReducedMotion()
@@ -140,7 +144,8 @@ fun VoiceScreen(
                 .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Header(model, onSessions = { showSessions = true }, onSettings = { showSettings = true })
+            // Over the lock screen the switcher and settings ask to unlock first.
+            Header(model, onSessions = { unlock { showSessions = true } }, onSettings = { unlock { showSettings = true } })
             Stage(
                 model, actions, haptics, levels,
                 compact = question != null && largeText,
@@ -155,7 +160,8 @@ fun VoiceScreen(
             ) {
                 Captions(model.heard, model.said, hidePi = question != null, Modifier.heightIn(min = if (question == null) 88.dp else 0.dp))
                 AnimatedContent(
-                    targetState = question,
+                    // Locked: the question only (answer it by voice); its buttons wait for an unlock.
+                    targetState = if (locked) question?.copy(options = emptyList(), grace = null) else question,
                     contentKey = { it?.id },
                     transitionSpec = {
                         if (reduced) fadeIn(tween(150)) togetherWith fadeOut(tween(150))
@@ -187,8 +193,8 @@ fun VoiceScreen(
             Controls(model.muted, onMute = actions::toggleMute, onEnd = actions::end)
         }
     }
-    if (showSessions) VoiceSessionSheet(model, actions, onDismiss = { showSessions = false })
-    if (showSettings) VoiceSettingsSheet(model, actions, onDismiss = { showSettings = false })
+    if (showSessions && !locked) VoiceSessionSheet(model, actions, onDismiss = { showSessions = false })
+    if (showSettings && !locked) VoiceSettingsSheet(model, actions, onDismiss = { showSettings = false })
 }
 
 @Composable

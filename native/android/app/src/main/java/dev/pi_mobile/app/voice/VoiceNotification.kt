@@ -86,7 +86,7 @@ object VoiceNotification {
 
     fun build(context: Context, c: VoiceNotificationContent): Notification {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val open = PendingIntent.getActivity(context, 0, VoiceHost.openIntent(context), flags)
+        val open = PendingIntent.getActivity(context, 0, VoiceHost.showIntent(context), flags)
         val mute = PendingIntent.getService(context, 1, VoiceService.intent(context, VoiceService.ACTION_MUTE), flags)
         val end = PendingIntent.getService(context, 2, VoiceService.intent(context, VoiceService.ACTION_END), flags)
         return NotificationCompat.Builder(context, CHANNEL)

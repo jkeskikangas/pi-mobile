@@ -1,7 +1,9 @@
 package dev.pi_mobile.app.voice
 
 import android.media.AudioDeviceInfo
+import android.net.NetworkCapabilities
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -45,6 +47,35 @@ class VoicePlatformTest {
         assertEquals(0.32, l.pi, 1e-9)
         l.reset()
         assertEquals(0.0, l.mic + l.pi + l.micRaw, 0.0)
+    }
+
+    @Test fun onlyADifferentKindOfNetworkCounts() {
+        val wifi = NetworkKinds.kind { it == NetworkCapabilities.TRANSPORT_WIFI }
+        val cellular = NetworkKinds.kind { it == NetworkCapabilities.TRANSPORT_CELLULAR }
+        val vpnOverWifi = NetworkKinds.kind { it == NetworkCapabilities.TRANSPORT_WIFI || it == NetworkCapabilities.TRANSPORT_VPN }
+        assertEquals(listOf("wifi", "cellular", "wifi"), listOf(wifi, cellular, vpnOverWifi))
+        assertFalse(NetworkKinds.changed(null, wifi)) // the first network
+        assertFalse(NetworkKinds.changed(wifi, vpnOverWifi)) // another Wi-Fi, a VPN, new capabilities
+        assertTrue(NetworkKinds.changed(wifi, cellular))
+        assertEquals("other", NetworkKinds.kind { false })
+    }
+
+    @Test fun earconsQueueInsteadOfCuttingEachOtherOff() {
+        val clock = ManualScheduler()
+        val started = mutableListOf<Pair<String, Double>>()
+        val q = Earcons.EarconQueue(clock, { if (it == "long") 0.3 else 0.1 }) { started.add(it to clock.t) }
+        q.play("long")
+        q.play("a")
+        q.play("b")
+        assertEquals(listOf("long" to 0.0), started)
+        clock.advance(0.3)
+        assertEquals(listOf("long", "a"), started.map { it.first })
+        clock.advance(0.2)
+        assertEquals(listOf("long" to 0.0, "a" to 0.3, "b" to 0.4), started.map { it.first to Math.round(it.second * 10) / 10.0 })
+        q.play("c")
+        q.clear()
+        q.play("d")
+        assertEquals("d", started.last().first) // stop() forgets what was waiting
     }
 
     @Test fun earconsRenderStepsWithFades() {

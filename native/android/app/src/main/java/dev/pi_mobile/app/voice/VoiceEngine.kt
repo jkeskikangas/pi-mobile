@@ -370,7 +370,6 @@ class VoiceEngine(private val scope: CoroutineScope, deps: VoiceDeps? = null) {
         const val BARGE_MS = 800.0
         /** Turns shorter than this (server-measured) wait for their words. */
         const val SHORT_TURN_MS = 1300.0
-        const val HOLD_MS = 350.0
 
         fun sampleLine(p: VoicePersona?) = "This is ${p?.name ?: "pi"}. The tests pass, and the change is ready for you to review."
 
