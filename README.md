@@ -78,12 +78,6 @@ Either way, Apple sees only a generic "pi" alert; the session name and text trav
 
 ### Android app
 
-<p align="center">
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/android-pairing-dark.webp"><img src="docs/img/android-pairing-light.webp" width="220" alt="The Android app's first screen: pair with your computer by running /remote and scanning the code, or paste the link"></picture>&nbsp;&nbsp;
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/android-voice-dark.webp"><img src="docs/img/android-voice-light.webp" width="220" alt="Android voice mode going ahead with an action you asked for: a countdown bar with Cancel and Do it now, Mute and End below"></picture>&nbsp;&nbsp;
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/android-settings-dark.webp"><img src="docs/img/android-settings-light.webp" width="220" alt="Android voice settings: eyes-free or can glance, open mic or push to talk, the voice, and Stop sharing my voice"></picture>
-</p>
-
 An optional native Android app (`native/android`) does what the iPhone app does: the same web UI, scan to pair, voice mode that keeps going with the screen off (a foreground service whose ongoing notification has Mute and End; on a locked phone the voice screen offers only those until you unlock), native dictation, Take photo in attachments, a Quick Settings tile and a launcher shortcut to start voice hands-free, and notifications through the same [push relay](relay/README.md) via Firebase Cloud Messaging, sealed to your phone's device key and opened on the phone, with **Answer by voice** when pi asks. It isn't on Google Play yet: build it with Gradle (`native/android/README.md` has the setup; push needs a Firebase project). It is checked on the emulator only so far (debug and the minified release build); the device checklist is in that README. Like the iPhone app it connects over HTTPS only.
 
 ## Voice
