@@ -112,11 +112,33 @@ export default function piMobile(pi: ExtensionAPI): void {
 		ctx.ui.setStatus("remote", t.fg("success", "/remote") + viewers(t, s.clients));
 	};
 
+	// Next-prompt suggestions (pi-next-turn, when installed), through pi.events only: no dependency on it.
+	// Listening from load on, so its `next-turn:ready` on session_start is heard whichever loads first.
+	let nextTurn = false;
+	let offNext: (() => void)[] = [];
+	const listenNext = () => {
+		if (offNext.length || !pi.events) return;
+		offNext = [
+			pi.events.on("next-turn:ready", () => {
+				nextTurn = true;
+			}),
+			pi.events.on("next-turn:prediction", (d) => {
+				nextTurn = true;
+				bridge?.predict(d);
+			}),
+			pi.events.on("next-turn:clear", (d: any) => {
+				if (typeof d?.id === "string") bridge?.clearSuggestion(d.id);
+			}),
+		];
+	};
+	listenNext();
+
 	const start = (c: ExtensionContext) => {
 		if (bridge) return bridge;
 		let lastError = "";
 		const b = new Bridge(pi, c, loadConfig, linkSecret());
 		b.voice = voice;
+		b.nextTurn = () => nextTurn;
 		b.onState = (s) => {
 			footer(s);
 			if (s.kind === "error" && s.message !== lastError) {
@@ -151,6 +173,9 @@ export default function piMobile(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_e, c) => {
 		ctx = c;
+		listenNext();
+		bridge?.setContext(c);
+		bridge?.sessionChanged();
 		sync();
 		// Keystrokes here mean you are at the computer; the hub holds phone notifications meanwhile.
 		offInput?.();
@@ -169,6 +194,8 @@ export default function piMobile(pi: ExtensionAPI): void {
 	});
 	pi.on("session_shutdown", async (e) => {
 		stop();
+		for (const off of offNext) if (typeof off === "function") off();
+		offNext = [];
 		offInput?.();
 		offInput = undefined;
 		if (watching) unwatchFile(configPath(), sync);

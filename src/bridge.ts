@@ -24,6 +24,7 @@ import {
 	toolTitle,
 } from "./protocol.ts";
 import type { Config } from "./store.ts";
+import { confident, draftSummary, finishedBody, parsePrediction, type Suggestion } from "./suggest.ts";
 import { inHerdr, spawnPi } from "./herdr.ts";
 import type { VoiceHost } from "pi-speech/host";
 import { countWord, describeActivity, firstSentences, speakable } from "pi-speech/speech";
@@ -86,7 +87,11 @@ export class Bridge {
 	private runStartedAt = 0;
 	private infoTimer?: NodeJS.Timeout;
 	private keyCounter = 0;
+	private suggestion?: Suggestion & { session: string };
+	private nextWaiters = new Set<() => void>();
 	private readonly pi: ExtensionAPI;
+	/** A next-prompt engine announced itself (`next-turn:ready`): worth a short wait before "finished". */
+	nextTurn: () => boolean = () => false;
 	voice?: VoiceHost;
 	onState: (s: LinkState) => void = () => {};
 	onMessage: (msg: any) => void = () => {};
@@ -134,6 +139,7 @@ export class Bridge {
 		clearTimeout(this.streamTimer);
 		clearTimeout(this.infoTimer);
 		for (const t of this.tools.values()) clearTimeout(t.timer);
+		for (const w of [...this.nextWaiters]) w();
 		this.link.stop();
 	}
 
@@ -143,10 +149,10 @@ export class Bridge {
 	}
 
 	/** Asks the hub to notify subscribed phones, including locked ones. */
-	private attention(event: string, body: string, urgent: boolean): void {
+	private attention(event: string, body: string, urgent: boolean, next?: { id: string; text: string; draft?: string }): void {
 		const name = this.info().name;
 		const short = name.length > 40 ? `${name.slice(0, 39)}…` : name;
-		this.link.send({ t: "attention", title: `${short} ${event}`, body, urgent });
+		this.link.send({ t: "attention", title: `${short} ${event}`, body, urgent, ...(next ? { next } : {}) });
 	}
 
 	private lastPresence = 0;
@@ -220,6 +226,7 @@ export class Bridge {
 	}
 
 	reset(): void {
+		this.clearSuggestion();
 		this.streamKey = undefined;
 		this.partial = undefined;
 		this.tools.clear();
@@ -230,6 +237,8 @@ export class Bridge {
 	// ── pi lifecycle → events ──────────────────────────────────────────────────────
 
 	agentStart(): void {
+		this.clearSuggestion();
+		for (const w of [...this.nextWaiters]) w();
 		this.status = "working";
 		this.runStartedAt = Date.now();
 		this.pushInfo();
@@ -240,11 +249,65 @@ export class Bridge {
 		this.flushStream();
 		this.pushInfo();
 		const took = Date.now() - this.runStartedAt;
-		if (!aborted && this.runStartedAt && took > 20_000) {
-			const last = this.lastAssistantText();
-			this.attention("finished", last || "pi is idle.", false);
-		}
+		if (!aborted && this.runStartedAt && took > 20_000) void this.finished(this.lastAssistantText());
 		this.runStartedAt = 0;
+	}
+
+	/** "finished" on the lock screen, with "Next: …?" when a confident suggestion comes within 3 s. */
+	private async finished(last: string): Promise<void> {
+		await this.waitForNext(3000);
+		const s = this.suggestion;
+		const top = confident(s);
+		const next = s && top ? { id: s.id, text: top.text, ...(s.draft ? { draft: draftSummary(s.draft) } : {}) } : undefined;
+		this.attention("finished", finishedBody(last, s), false, next);
+	}
+
+	/** Resolves when a confident suggestion is here, a run starts, or after `ms`; at once without an engine. */
+	private waitForNext(ms: number): Promise<void> {
+		if (confident(this.suggestion) || !this.nextTurn()) return Promise.resolve();
+		return new Promise((resolve) => {
+			const done = () => {
+				clearTimeout(timer);
+				this.nextWaiters.delete(done);
+				resolve();
+			};
+			const timer = setTimeout(done, ms);
+			this.nextWaiters.add(done);
+		});
+	}
+
+	// ── next-prompt suggestions (src/suggest.ts) ───────────────────────────────────
+
+	/** `next-turn:prediction`: forwarded to phones; one with the same id replaces it. */
+	predict(data: unknown): void {
+		const parsed = parsePrediction(data);
+		if (!parsed) return;
+		const { sessionId, ...s } = parsed;
+		const session = safe(() => this.ctx.sessionManager.getSessionId()) ?? "";
+		if (sessionId && session && sessionId !== session) return;
+		if (this.suggestion && this.suggestion.id !== s.id) this.clearSuggestion();
+		this.suggestion = { ...s, session };
+		this.emit({ type: "suggestion", ...s });
+		if (confident(s)) for (const w of [...this.nextWaiters]) w();
+	}
+
+	/** `next-turn:clear` (that id), a new run or a reset (any): the suggestion no longer applies. */
+	clearSuggestion(id?: string): void {
+		const s = this.suggestion;
+		if (!s || (id !== undefined && id !== s.id)) return;
+		this.suggestion = undefined;
+		this.emit({ type: "suggestion_clear", id: s.id });
+	}
+
+	/** After /new, /resume or /fork: a suggestion made for another session goes. */
+	sessionChanged(): void {
+		if (this.suggestion && this.suggestion.session !== (safe(() => this.ctx.sessionManager.getSessionId()) ?? "")) this.clearSuggestion();
+	}
+
+	private currentSuggestion(): Suggestion | undefined {
+		if (!this.suggestion) return undefined;
+		const { session: _session, ...s } = this.suggestion;
+		return s;
 	}
 
 	private lastAssistantText(): string {
@@ -509,6 +572,7 @@ export class Bridge {
 			streaming,
 			tools: [...this.tools.values()].map((t) => ({ id: t.id, name: t.name, title: t.title, output: t.output })),
 			prompts: [...this.prompts.values()].map((o) => o.prompt),
+			suggestion: this.currentSuggestion(),
 		};
 	}
 

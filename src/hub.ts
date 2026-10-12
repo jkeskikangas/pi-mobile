@@ -369,9 +369,15 @@ export class Hub {
 	 * Lock-screen notification to every subscribed device. The payload is encrypted to each browser
 	 * (RFC 8291), so the push service sees neither the session name nor the text.
 	 */
-	private async attention(agent: string, msg: { title?: string; body?: string; urgent?: boolean }): Promise<void> {
+	private async attention(agent: string, msg: { title?: string; body?: string; urgent?: boolean; next?: any }): Promise<void> {
 		if (Date.now() - this.lastPresence < PRESENCE_MS) return; // you are at a terminal here
-		const payload = { title: String(msg.title ?? "pi"), body: String(msg.body ?? ""), agent, machine: this.machine.id };
+		// `next`: a likely next message (src/suggest.ts), for the notification's Send action.
+		const n = msg.next;
+		const next =
+			n && typeof n.id === "string" && typeof n.text === "string"
+				? { id: n.id.slice(0, 100), text: n.text.slice(0, 300), ...(typeof n.draft === "string" ? { draft: n.draft.slice(0, 100) } : {}) }
+				: undefined;
+		const payload = { title: String(msg.title ?? "pi"), body: String(msg.body ?? ""), agent, machine: this.machine.id, ...(next ? { next } : {}) };
 		await Promise.all<unknown>([
 			...this.push.entries().map(async ([id, sub]) => {
 				if (!this.devices.get(id)) return this.push.set(id, undefined);

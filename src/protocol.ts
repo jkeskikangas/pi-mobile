@@ -69,7 +69,17 @@ export type AgentEvent =
 	| { type: "tool_end"; id: string; isError: boolean }
 	| { type: "prompt"; prompt: Prompt }
 	| { type: "prompt_end"; id: string; by: "terminal" | "remote" | "timeout"; value?: unknown }
-	| { type: "notice"; level: "info" | "warning" | "error"; text: string };
+	| { type: "notice"; level: "info" | "warning" | "error"; text: string }
+	// What you will likely send next (from pi-next-turn, when installed; see src/suggest.ts). A newer one
+	// with the same id replaces it; the snapshot's `suggestion` carries the current one.
+	| {
+			type: "suggestion";
+			id: string;
+			candidates: { text: string; p: number }[];
+			readAhead: "none" | "running" | "ready";
+			draft?: { files: number; insertions: number; deletions: number; checks?: "pass" | "fail" | "none" };
+	  }
+	| { type: "suggestion_clear"; id: string };
 
 /** `n`: the bridge's per-process event counter (absent on hub-generated events). */
 export type HubEvent = AgentEvent & { agent: string; seq: number; n?: number };
