@@ -52,9 +52,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -381,7 +381,8 @@ private fun Captions(heard: VoiceCaption, said: VoiceCaption, hidePi: Boolean, m
 private fun Controls(muted: Boolean, onMute: () -> Unit, onEnd: () -> Unit) {
     val colors = PiTheme.colors
     // 72 dp on tall phones (the web's `min-height: 760px`), 68 dp otherwise.
-    val face = if (LocalConfiguration.current.screenHeightDp >= 760) 72.dp else 68.dp
+    val tall = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() } >= 760.dp
+    val face = if (tall) 72.dp else 68.dp
     val muteLabel = stringResource(R.string.voice_mute)
     val endLabel = stringResource(R.string.voice_end_label)
     Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(56.dp, Alignment.CenterHorizontally)) {

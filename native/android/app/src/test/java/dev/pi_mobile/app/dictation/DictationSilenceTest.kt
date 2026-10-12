@@ -49,6 +49,12 @@ class DictationSilenceTest {
         assertTrue(AudioRecorder.silenceMessage(-120.0, stillMuted = false)!!.contains("only silence"))
     }
 
+    @Test fun aTooShortTakeGoesToThePageAsIs() {
+        assertNull("the page says too short", AudioRecorder.takeProblem(300, AudioRecorder.SILENT_DB, stillMuted = false))
+        assertTrue(AudioRecorder.takeProblem(1_500, AudioRecorder.SILENT_DB, stillMuted = false)!!.contains("only silence"))
+        assertNull(AudioRecorder.takeProblem(1_500, -30.0, stillMuted = false))
+    }
+
     @Test fun maxAmplitudeMapsToDecibelsAndLevels() {
         assertEquals(AudioRecorder.SILENT_DB, AudioRecorder.decibels(0), 0.0)
         assertEquals(0.0, AudioRecorder.decibels(32_767), 1e-9)

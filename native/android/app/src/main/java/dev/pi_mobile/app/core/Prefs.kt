@@ -2,6 +2,7 @@ package dev.pi_mobile.app.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 
 /**
  * App settings in plain SharedPreferences (nothing secret: keys live in [MachineStore]). Keys match the
@@ -22,7 +23,7 @@ class Prefs(private val sp: SharedPreferences) {
     /** Ignores keys outside [VOICE_KEYS], so the page can't fill the file with arbitrary data. */
     fun setVoice(key: String, value: String?) {
         if (key !in VOICE_KEYS) return
-        sp.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+        put(key, value)
     }
 
     /** Every voice preference that is set, for the setup script. */
@@ -40,12 +41,12 @@ class Prefs(private val sp: SharedPreferences) {
     /** The consent version the user agreed to (AIConsent compares it with its current version); null = never or revoked. */
     var aiConsent: Int?
         get() = if (sp.contains(AI_CONSENT)) sp.getInt(AI_CONSENT, 0) else null
-        set(v) = sp.edit().apply { if (v == null) remove(AI_CONSENT) else putInt(AI_CONSENT, v) }.apply()
+        set(v) = sp.edit { if (v == null) remove(AI_CONSENT) else putInt(AI_CONSENT, v) }
 
     /** The user turned notifications on in the app. */
     var notificationsOn: Boolean
         get() = sp.getBoolean(PUSH_ON, false)
-        set(v) = sp.edit().putBoolean(PUSH_ON, v).apply()
+        set(v) = sp.edit { putBoolean(PUSH_ON, v) }
 
     /** The current FCM token. */
     var pushToken: String?
@@ -55,21 +56,21 @@ class Prefs(private val sp: SharedPreferences) {
     /** The relay's capability, valid only for the token it was issued for (a new token needs a new one). */
     var relayCap: String?
         get() = sp.getString(RELAY_CAP, null)?.takeIf { sp.getString(RELAY_CAP_TOKEN, null) == pushToken }
-        set(v) = sp.edit().apply {
+        set(v) = sp.edit {
             if (v == null) remove(RELAY_CAP).remove(RELAY_CAP_TOKEN) else putString(RELAY_CAP, v).putString(RELAY_CAP_TOKEN, pushToken)
-        }.apply()
+        }
 
     /** `entry id|device id|token` already sent: a new computer or a new token registers again. */
     var pushRegistered: Set<String>
         get() = sp.getStringSet(PUSH_REGISTERED, null)?.toSet() ?: emptySet()
-        set(v) = sp.edit().putStringSet(PUSH_REGISTERED, v).apply()
+        set(v) = sp.edit { putStringSet(PUSH_REGISTERED, v) }
 
     /** No automatic relay registration before this (epoch ms): 501 pauses hours, other failures minutes. */
     var relayPausedUntilMs: Long?
         get() = if (sp.contains(RELAY_PAUSED)) sp.getLong(RELAY_PAUSED, 0) else null
-        set(v) = sp.edit().apply { if (v == null) remove(RELAY_PAUSED) else putLong(RELAY_PAUSED, v) }.apply()
+        set(v) = sp.edit { if (v == null) remove(RELAY_PAUSED) else putLong(RELAY_PAUSED, v) }
 
-    private fun put(key: String, value: String?) = sp.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+    private fun put(key: String, value: String?) = sp.edit { if (value == null) remove(key) else putString(key, value) }
 
     companion object {
         const val FILE = "pi-prefs"

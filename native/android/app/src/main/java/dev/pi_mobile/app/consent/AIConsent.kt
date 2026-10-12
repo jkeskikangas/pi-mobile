@@ -2,6 +2,7 @@ package dev.pi_mobile.app.consent
 
 import android.content.SharedPreferences
 import androidx.annotation.MainThread
+import androidx.core.content.edit
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,9 +46,9 @@ class AIConsent(
 
     val granted: Boolean get() = prefs.getInt(KEY, 0) == VERSION
 
-    fun grant() = prefs.edit().putInt(KEY, VERSION).apply()
+    fun grant() = prefs.edit { putInt(KEY, VERSION) }
 
-    fun revoke() = prefs.edit().remove(KEY).apply()
+    fun revoke() = prefs.edit { remove(KEY) }
 
     /**
      * Returns once the user has agreed; throws [Declined] (Not now) or [NeedsApp] (not in front).

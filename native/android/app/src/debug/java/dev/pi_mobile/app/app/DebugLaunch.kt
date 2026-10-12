@@ -5,7 +5,8 @@ import android.content.Intent
 /**
  * Debug-build launch extras, the counterparts of the iOS app's launch arguments (screenshots and end-to-end runs
  * without a camera), e.g. `adb shell am start -n dev.pi_mobile.app/.app.MainActivity --ez piReset true --es piPairLink
- * 'http://127.0.0.1:7995/#p=…'`. MainActivity reads them only when BuildConfig.DEBUG.
+ * 'http://127.0.0.1:7995/#p=…'`. Debug builds only: release builds compile src/release's DebugLaunch, which never
+ * reads an intent, so no other app can reset or pair a release install.
  *
  * @property reset forget every computer and the voice consent first (`-PiReset`).
  * @property pairLink pair with this link at launch (`-PiPairLink <url>`).

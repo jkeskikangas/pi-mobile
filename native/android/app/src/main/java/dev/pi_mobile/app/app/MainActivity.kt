@@ -1,6 +1,8 @@
 package dev.pi_mobile.app.app
 
+import android.Manifest
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -31,14 +33,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
-import dev.pi_mobile.app.BuildConfig
 import dev.pi_mobile.app.consent.ConsentHost
 import dev.pi_mobile.app.core.Machine
 import dev.pi_mobile.app.core.PairingLink
 import dev.pi_mobile.app.pairing.PairingScreen
 import dev.pi_mobile.app.pairing.ScanOutcome
 import dev.pi_mobile.app.pairing.ScannerSheet
+import dev.pi_mobile.app.shell.PermissionResult
 import dev.pi_mobile.app.shell.ScanResult
 import dev.pi_mobile.app.shell.ShellPhase
 import dev.pi_mobile.app.shell.ShellScreen
@@ -49,12 +53,14 @@ import dev.pi_mobile.app.voiceui.VoiceRoute
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
+import java.util.UUID
 
 /**
  * The one activity: the pairing screen until a computer is paired, then the web shell. Also receives notification
  * taps, "Answer by voice", the tile and the launcher shortcut ([LaunchRequest], run once resumed).
  */
-class MainActivity : ComponentActivity(), WebShell.Host {
+class MainActivity : ComponentActivity(), WebShell.Host, SettingsOffer {
     private val app get() = application as PiApplication
 
     /** The page on screen, for voice mode's `voiceClosed`. */
@@ -75,12 +81,19 @@ class MainActivity : ComponentActivity(), WebShell.Host {
         imagesDone = null
     }
 
+    /** Where the camera writes the photo it takes for the composer (a FileProvider uri in the cache). */
+    private var photo: Uri? = null
+    private val takePhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        imagesDone?.invoke(photo?.takeIf { ok }?.let { arrayOf(it) })
+        imagesDone = null
+        photo = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         app.permissions.attach(this)
         app.notificationPermission.attach(this)
-        app.dictation.onDenied = { offerMicrophoneSettings() }
         if (savedInstanceState == null) handle(intent)
         setContent { Root() }
     }
@@ -89,12 +102,18 @@ class MainActivity : ComponentActivity(), WebShell.Host {
     override fun onStart() {
         super.onStart()
         app.inFront = true
+        app.settingsOffer = this
         app.pushCenter.refresh()
     }
 
-    /** The consent sheet can only be asked while the activity is on screen (AIConsent's canAsk). */
+    /**
+     * The consent sheet and Settings offers need the activity on screen (AIConsent's canAsk), and a dictation take
+     * can't keep the microphone in the background (Dictation.appStopped).
+     */
     override fun onStop() {
         app.inFront = false
+        if (app.settingsOffer === this) app.settingsOffer = null
+        app.dictation.appStopped()
         super.onStop()
     }
 
@@ -105,7 +124,6 @@ class MainActivity : ComponentActivity(), WebShell.Host {
 
     override fun onDestroy() {
         app.permissions.detach(this)
-        app.dictation.onDenied = {}
         super.onDestroy()
     }
 
@@ -117,15 +135,45 @@ class MainActivity : ComponentActivity(), WebShell.Host {
         }
     }
 
+    /** Like the iOS web view's file input: take a photo with the camera, or choose from the photo picker. */
     override fun chooseImages(multiple: Boolean, done: (Array<Uri>?) -> Unit) {
         imagesDone?.invoke(null) // a chooser the page gave up on
         imagesDone = done
+        AlertDialog.Builder(this)
+            .setItems(arrayOf("Take photo", if (multiple) "Choose photos" else "Choose photo")) { _, which ->
+                if (which == 0) lifecycleScope.launch { capture() } else pick(multiple)
+            }
+            .setOnCancelListener { imagesDone?.invoke(null); imagesDone = null }
+            .show()
+    }
+
+    private fun pick(multiple: Boolean) {
         val request = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
         if (multiple) pickImages.launch(request) else pickImage.launch(request)
     }
 
+    /** The camera app writes into a cache file this app shares with it; the app declares CAMERA, so it must hold it. */
+    private suspend fun capture() {
+        if (app.permissions.request(Manifest.permission.CAMERA) != PermissionResult.GRANTED) {
+            Toast.makeText(this, "Camera access is off. Turn it on in Settings, or choose a photo.", Toast.LENGTH_LONG).show()
+            imagesDone?.invoke(null)
+            imagesDone = null
+            return
+        }
+        val dir = File(cacheDir, "camera").apply { mkdirs() }
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", File(dir, "photo-${UUID.randomUUID()}.jpg"))
+        photo = uri
+        try {
+            takePhoto.launch(uri)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "No camera app on this phone.", Toast.LENGTH_LONG).show()
+            imagesDone?.invoke(null)
+            imagesDone = null
+        }
+    }
+
     private fun handle(intent: Intent?) {
-        if (BuildConfig.DEBUG) DebugLaunch.from(intent)?.let { debug(it) }
+        DebugLaunch.from(intent)?.let { debug(it) }
         if (intent == null) return
         // Run once the activity is resumed: voice mode may need the consent sheet, which can only be asked then.
         LaunchRequest.of(intent)?.let { pendingLaunch = it }
@@ -137,8 +185,12 @@ class MainActivity : ComponentActivity(), WebShell.Host {
         pendingLaunch = null
         when (request) {
             is LaunchRequest.Focus -> pendingFocus.value = request.machine to request.agent
-            is LaunchRequest.Voice -> lifecycleScope.launch {
-                talk(request.agent, request.entry)?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() }
+            is LaunchRequest.Voice -> {
+                request.notification?.let { (tag, id) -> NotificationManagerCompat.from(this).cancel(tag, id) }
+                request.focus?.let { pendingFocus.value = it.machine to it.agent }
+                if (request.starts) lifecycleScope.launch {
+                    talk(request.agent, request.entry)?.let { Toast.makeText(this@MainActivity, request.failure(it), Toast.LENGTH_LONG).show() }
+                }
             }
         }
     }
@@ -157,14 +209,25 @@ class MainActivity : ComponentActivity(), WebShell.Host {
     }
 
     /** The microphone is blocked ("Don't allow" twice, or policy): only Settings can turn it back on. */
-    private fun offerMicrophoneSettings() {
+    override fun microphone(forVoice: Boolean) = offer(
+        "Microphone is off",
+        if (forVoice) "Allow pi to use the microphone in Settings to talk in voice mode." else "Allow pi to use the microphone in Settings to dictate.",
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)),
+    )
+
+    /** Notifications are off for pi and the system won't ask again: its notification settings. */
+    override fun notifications() = offer(
+        "Notifications are off",
+        "Allow notifications for pi in Settings to hear when pi finishes or needs you.",
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
+    )
+
+    private fun offer(title: String, message: String, settings: Intent) {
         AlertDialog.Builder(this)
-            .setTitle("Microphone is off")
-            .setMessage("Allow pi to use the microphone in Settings to dictate.")
+            .setTitle(title)
+            .setMessage(message)
             .setNegativeButton("Not now", null)
-            .setPositiveButton("Open Settings") { _, _ ->
-                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
-            }
+            .setPositiveButton("Open Settings") { _, _ -> startActivity(settings) }
             .show()
     }
 

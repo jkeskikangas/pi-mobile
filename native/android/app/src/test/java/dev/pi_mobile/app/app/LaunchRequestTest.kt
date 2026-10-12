@@ -23,17 +23,36 @@ class LaunchRequestTest {
     private fun Intent.session() = putExtra("agent", "a1").putExtra("entry", "e-mac").putExtra("machine", "m-mac")
 
     @Test fun onlyTheAppsOwnNotificationsNameASession() {
-        assertEquals(LaunchRequest.Voice("a1", "e-mac"), LaunchRequest.of(ours().session().putExtra("voice", true)))
+        assertEquals(LaunchRequest.Voice("a1", "e-mac", "m-mac"), LaunchRequest.of(ours().session().putExtra("voice", true)))
         assertEquals(LaunchRequest.Focus("m-mac", "a1"), LaunchRequest.of(ours().session()))
         // Another app (or the public shortcut) can open voice mode, but voice mode picks the session.
-        assertEquals(LaunchRequest.Voice(null, null), LaunchRequest.of(public().session().putExtra("voice", true)))
+        assertEquals(LaunchRequest.Voice(), LaunchRequest.of(public().session().putExtra("voice", true)))
         assertNull("no focus from outside", LaunchRequest.of(public().session()))
         assertNull(LaunchRequest.of(public()))
     }
 
     @Test fun theShortcutsStringExtraOpensVoice() {
-        assertEquals(LaunchRequest.Voice(null, null), LaunchRequest.of(public().putExtra("voice", "true")))
+        assertEquals(LaunchRequest.Voice(), LaunchRequest.of(public().putExtra("voice", "true")))
         assertNull(LaunchRequest.of(public().putExtra("voice", "no")))
+    }
+
+    /** As iOS PushCenter.opened: open the session, start voice only with its entry, dismiss the notification. */
+    @Test fun answerByVoiceOpensTheSessionThenVoice() {
+        val answer = LaunchRequest.of(ours().session().putExtra("voice", true).putExtra("notification-tag", "m-mac:a1").putExtra("notification-id", 7))
+            as LaunchRequest.Voice
+        assertEquals(LaunchRequest.Focus("m-mac", "a1"), answer.focus)
+        assertEquals(true, answer.starts)
+        assertEquals("m-mac:a1" to 7, answer.notification)
+        assertEquals("Voice mode didn't start: No pi session is reachable.", answer.failure("No pi session is reachable."))
+
+        val noEntry = LaunchRequest.of(ours().putExtra("agent", "a1").putExtra("voice", true)) as LaunchRequest.Voice
+        assertEquals("only the page opens the session", false, noEntry.starts)
+        assertEquals(LaunchRequest.Focus("", "a1"), noEntry.focus)
+
+        val picked = LaunchRequest.Voice()
+        assertEquals(true, picked.starts)
+        assertNull(picked.focus)
+        assertEquals("Microphone access is off.", picked.failure("Microphone access is off."))
     }
 
     /** Cold start from the shortcut, the tile or "Answer by voice": the consent sheet comes up instead of NeedsApp. */

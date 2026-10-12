@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CompletableDeferred
 
 /** The outcome of a runtime permission request. */
@@ -51,6 +53,17 @@ class Permissions(private val context: Context) {
             pending = null
         }
 
+        init {
+            activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
+                override fun onDestroy(owner: LifecycleOwner) {
+                    // Recreated mid-dialog (dark mode, font size): the answer goes to the new activity's launcher, so
+                    // this wait ends as "no" instead of leaving the bridge call hanging.
+                    pending?.second?.complete(false)
+                    pending = null
+                }
+            })
+        }
+
         suspend fun request(permission: String): PermissionResult {
             // One system dialog at a time: a caller for the same permission shares its answer, another one waits.
             while (true) {
@@ -66,6 +79,7 @@ class Permissions(private val context: Context) {
 
         private fun result(permission: String, ok: Boolean): PermissionResult {
             if (ok) return PermissionResult.GRANTED
+            if (activity.isDestroyed) return PermissionResult.DENIED
             // After a denial the rationale flag is true while the dialog may still be shown again; false means the
             // system no longer shows it.
             return if (activity.shouldShowRequestPermissionRationale(permission)) PermissionResult.DENIED else PermissionResult.BLOCKED

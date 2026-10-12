@@ -1,6 +1,7 @@
-package dev.pi_mobile.app
+package dev.pi_mobile.app.app
 
 import android.content.Context
+import dev.pi_mobile.app.BuildConfig
 import dev.pi_mobile.app.core.EmptyObject
 import dev.pi_mobile.app.core.HubClient
 import dev.pi_mobile.app.core.Machine

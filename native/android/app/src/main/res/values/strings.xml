@@ -88,7 +88,6 @@
     <string name="voice_you_said">You said: %1$s</string>
     <string name="voice_pi_said">pi: %1$s</string>
     <string name="voice_pi_asks">pi asks</string>
-    <string name="voice_pi_asks_title">pi asks: %1$s</string>
     <string name="voice_going_ahead">Going ahead</string>
     <string name="voice_going_ahead_in">Going ahead in %1$d s, as you asked. Say “stop” or tap Cancel.</string>
     <string name="voice_say_answer">Say your answer.</string>

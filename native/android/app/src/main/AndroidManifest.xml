@@ -59,6 +59,17 @@
             android:exported="false"
             android:targetActivity=".app.MainActivity" />
 
+        <!-- "Take photo" for the composer's attachments (MainActivity.capture). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Voice mode keeps listening with the screen off (A8); started only from visible UI. -->
         <service
             android:name=".voice.VoiceService"

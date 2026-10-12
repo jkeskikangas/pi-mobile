@@ -1,6 +1,8 @@
 package dev.pi_mobile.app
 
 import android.content.Intent
+import android.graphics.Rect
+import android.view.accessibility.AccessibilityWindowInfo
 import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -71,7 +73,7 @@ class AppE2ETest {
         needLabel("Finish dictation", 3_000, "not recording").click()
         need(By.text(Pattern.compile("(?s).*round them to cents.*")), 10_000, "no transcription in the composer")
         shot("05-dictation-done")
-        device.pressBack() // the transcription focuses the composer: put the keyboard away
+        hideKeyboard() // the transcription focuses the composer
 
         // Hold to talk: a long press on the mic.
         val mic = needLabel(MIC, 5_000, "mic not reachable after the first take")
@@ -79,7 +81,19 @@ class AppE2ETest {
         device.swipe(c.x, c.y, c.x, c.y, HOLD_STEPS)
         Thread.sleep(2_500) // the fixture answers transcribe after 1.2 s
         shot("06-hold-done")
-        device.pressBack()
+        hideKeyboard()
+
+        // The composer: it sits above the keyboard (the web view shrinks with it), takes non-ASCII text, and sends.
+        needRes("input", 5_000, "no composer").click()
+        val keyboard = imeBounds(5_000) ?: failWith("no keyboard after tapping the composer")
+        val input = needRes("input", 2_000, "composer gone")
+        check(input.visibleBounds.bottom <= keyboard.top) { "composer under the keyboard: ${input.visibleBounds} vs keyboard $keyboard" }
+        shot("06b-keyboard")
+        input.text = SENT
+        needLabel("Send", 3_000, "no Send button").click()
+        need(By.text(SENT), 10_000, "the sent message isn't in the transcript")
+        shot("06c-sent")
+        hideKeyboard()
 
         // The menu's Notifications row comes from the app (push.status: no Firebase in this build), and voice
         // sharing, allowed above, can be stopped.
@@ -127,6 +141,24 @@ class AppE2ETest {
         return failWith(why)
     }
 
+    private fun needRes(id: String, timeoutMs: Long, why: String): UiObject2 = need(By.res(id), timeoutMs, why)
+
+    /** Back puts the keyboard away; without one it would leave the app, so only when it is up. */
+    private fun hideKeyboard() {
+        if (imeBounds(1_000) != null) device.pressBack()
+    }
+
+    /** Where the keyboard is on screen, once it is up. */
+    private fun imeBounds(timeoutMs: Long): Rect? {
+        val until = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < until) {
+            instrumentation.uiAutomation.windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                ?.let { w -> return Rect().also { w.getBoundsInScreen(it) }.takeIf { !it.isEmpty } }
+            Thread.sleep(200)
+        }
+        return null
+    }
+
     /** Fails with a screenshot and the window hierarchy next to the shots. */
     private fun failWith(why: String): Nothing {
         shot("failed")
@@ -141,6 +173,9 @@ class AppE2ETest {
 
     private companion object {
         const val MIC = "Dictate: hold to talk, or tap to start and stop"
+
+        /** Typed into the composer and sent: non-ASCII on purpose. */
+        const val SENT = "Hyvää yötä, pi"
 
         /** About 1.6 s: UiDevice.swipe takes ~5 ms per step. */
         const val HOLD_STEPS = 320

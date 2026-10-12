@@ -4,31 +4,31 @@ import android.Manifest
 import android.app.Application
 import android.webkit.WebView
 import dev.pi_mobile.app.BuildConfig
-import dev.pi_mobile.app.PushCenter
+import dev.pi_mobile.app.consent.AIConsent
+import dev.pi_mobile.app.consent.ConsentPrompter
 import dev.pi_mobile.app.core.HubClient
 import dev.pi_mobile.app.core.KeystoreMachineStore
 import dev.pi_mobile.app.core.Prefs
 import dev.pi_mobile.app.dictation.AudioRecorder
 import dev.pi_mobile.app.dictation.Dictation
-import dev.pi_mobile.app.shell.BridgeError
-import dev.pi_mobile.app.consent.AIConsent
-import dev.pi_mobile.app.consent.ConsentPrompter
+import dev.pi_mobile.app.push.FirebaseSetup
+import dev.pi_mobile.app.push.Notifications
+import dev.pi_mobile.app.push.PushController
+import dev.pi_mobile.app.push.SystemNotificationPermission
 import dev.pi_mobile.app.shell.NativeBridge
 import dev.pi_mobile.app.shell.NetworkWatch
 import dev.pi_mobile.app.shell.Permissions
-import dev.pi_mobile.app.push.FirebaseSetup
-import dev.pi_mobile.app.push.SystemNotificationPermission
-import dev.pi_mobile.app.shell.PermissionResult
 import dev.pi_mobile.app.shell.ScanCenter
-import dev.pi_mobile.app.voice.VoiceHost
 import dev.pi_mobile.app.shell.VoiceStarter
+import dev.pi_mobile.app.voice.VoiceHost
 import kotlinx.coroutines.MainScope
+import kotlinx.serialization.json.JsonElement
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
- * The process: one [AppModel] and the app-scoped services the shell, the bridge and (later) the voice service and
- * notifications share. Everything here outlives an activity: a dictation take or a scan belongs to the page, which
+ * The process: one [AppModel] and the app-scoped services the shell, the bridge, voice mode and notifications
+ * share. Everything here outlives an activity: a dictation take or a scan belongs to the page, which
  * the activity may recreate. It is also [PushCenter.Host], so FCM callbacks find the one PushCenter.
  */
 class PiApplication : Application(), PushCenter.Host {
@@ -57,16 +57,30 @@ class PiApplication : Application(), PushCenter.Host {
     /** MainActivity is started: the consent sheet can be shown. */
     @Volatile var inFront = false
 
-    /** Native voice mode for the bridge, notifications and the offline screen (over voice/VoiceHost). */
-    val voice: VoiceStarter = object : VoiceStarter {
-        override suspend fun start(agent: String?, machine: String?) {
-            // The OK first, then the microphone: the sheet explains what the permission is for.
-            aiConsent.ensure(AIConsent.Purpose.VOICE)
-            if (permissions.request(Manifest.permission.RECORD_AUDIO) != PermissionResult.GRANTED) throw BridgeError(VoiceHost.MIC_OFF)
-            VoiceHost.shared.start(agent, machine?.ifEmpty { null })
-        }
+    /** The activity on screen offers Settings when a permission is blocked; null in the background. */
+    var settingsOffer: SettingsOffer? = null
 
-        override fun stop() = VoiceHost.shared.end()
+    /** Native voice mode for the bridge, notifications and the offline screen. */
+    val voice: VoiceStarter = AppVoice(
+        consent = { aiConsent.ensure(AIConsent.Purpose.VOICE) },
+        microphone = { permissions.request(Manifest.permission.RECORD_AUDIO) },
+        blocked = { settingsOffer?.microphone(forVoice = true) },
+        open = { agent, machine -> VoiceHost.shared.start(agent, machine) },
+        end = { VoiceHost.shared.end() },
+    )
+
+    /**
+     * The bridge's push: PushCenter, plus the Settings offer when notifications are off and the system won't ask
+     * again ("Notifications are off for pi. Turn them on in Settings.").
+     */
+    private val push: PushController = object : PushController {
+        override suspend fun status() = pushCenter.status()
+        override suspend fun enable(on: Boolean): JsonElement = try {
+            pushCenter.enable(on)
+        } catch (e: Exception) {
+            if (on && notificationPermission.state() == "denied") settingsOffer?.notifications()
+            throw e
+        }
     }
 
     override fun onCreate() {
@@ -78,11 +92,14 @@ class PiApplication : Application(), PushCenter.Host {
         aiConsent = AIConsent(getSharedPreferences(Prefs.FILE, MODE_PRIVATE), consentPrompter::ask) { inFront }
         dictation = Dictation(AudioRecorder(this, permissions), MainScope()).apply {
             consent = { aiConsent.ensure(AIConsent.Purpose.DICTATION) }
+            onDenied = { settingsOffer?.microphone(forVoice = false) }
         }
         scanner = ScanCenter()
         network = NetworkWatch(this)
         // Before FCM can deliver anything; without a Firebase configuration push reports available: false.
         FirebaseSetup.init(this)
+        // At start, not at the first push: the user sees (and can tune) pi's channels in Settings right away.
+        Notifications.createChannels(this)
         notificationPermission = SystemNotificationPermission(this)
         pushCenter = PushCenter.create(
             this, notificationPermission,
@@ -108,5 +125,5 @@ class PiApplication : Application(), PushCenter.Host {
     }
 
     /** The bridge for a page served by [primaryOrigin]. */
-    fun bridge(primaryOrigin: String) = NativeBridge(model, primaryOrigin, dictation, voice, pushCenter, aiConsent, scanner)
+    fun bridge(primaryOrigin: String) = NativeBridge(model, primaryOrigin, dictation, voice, push, aiConsent, scanner)
 }

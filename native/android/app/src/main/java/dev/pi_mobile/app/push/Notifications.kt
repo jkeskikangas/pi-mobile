@@ -37,6 +37,10 @@ object Notifications {
     /** true: "Answer by voice" was tapped. */
     const val EXTRA_VOICE = "voice"
 
+    /** The notification's tag and id, so "Answer by voice" can dismiss it. */
+    const val EXTRA_TAG = "notification-tag"
+    const val EXTRA_ID = "notification-id"
+
     /** The tag for notifications nothing could open (no session to group them by). */
     private const val GENERIC_TAG = "pi"
     private const val SUMMARY_ID = 0
@@ -126,6 +130,8 @@ object Notifications {
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         shown.opened?.takeIf { it.agent.isNotEmpty() }?.let { o ->
             intent.putExtra(EXTRA_MACHINE, o.machine).putExtra(EXTRA_AGENT, o.agent).putExtra(EXTRA_ENTRY, o.entry)
+                // An action button doesn't dismiss its notification: the app does, by tag and id.
+                .putExtra(EXTRA_TAG, shown.group ?: GENERIC_TAG).putExtra(EXTRA_ID, id)
             if (voice) intent.putExtra(EXTRA_VOICE, true)
         }
         val code = if (voice) id or VOICE_BIT else id

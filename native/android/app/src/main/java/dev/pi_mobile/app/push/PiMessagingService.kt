@@ -2,7 +2,7 @@ package dev.pi_mobile.app.push
 
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import dev.pi_mobile.app.PushCenter
+import dev.pi_mobile.app.app.PushCenter
 import dev.pi_mobile.app.core.KeystoreMachineStore
 import dev.pi_mobile.app.core.Prefs
 import dev.pi_mobile.app.core.PushContent
@@ -19,7 +19,7 @@ class PiMessagingService : FirebaseMessagingService() {
     }
 
     override fun onNewToken(token: String) {
-        // Without the app's PushCenter (not wired yet) the next launch asks for the token anyway.
+        // PiApplication holds the one PushCenter; computers holding a cap for the old token get a new one.
         (application as? PushCenter.Host)?.pushCenter?.tokenChanged(token)
     }
 

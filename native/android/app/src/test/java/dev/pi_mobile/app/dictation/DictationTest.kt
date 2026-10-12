@@ -109,12 +109,34 @@ class DictationTest {
         val offered = mutableListOf<String>()
         d.onDenied = { offered += it }
         f.startError = DictationError(AudioRecorder.DENIED, settings = true)
-        try { d.start(); fail() } catch (e: DictationError) { assertEquals("Microphone access is off. Turn it on in Settings.", e.message) }
+        try { d.start(); fail() } catch (e: DictationError) { assertEquals("the page prefixes \"Microphone: \"", "access is off. Turn it on in Settings.", e.message) }
         assertEquals(listOf(AudioRecorder.DENIED), offered)
         assertEquals(Dictation.State.IDLE, d.state)
         f.startError = DictationError(AudioRecorder.DENIED) // just denied in the system dialog: no extra prompt
         runCatching { d.start() }
         assertEquals(1, offered.size)
+    }
+
+    @Test fun leavingTheScreenEndsTheTake() = runTest {
+        val d = make()
+        val sent = mutableListOf<String>()
+        d.js = { sent += it }
+        d.appStopped() // idle: nothing to tell
+        assertEquals(emptyList<String>(), sent)
+        d.start()
+        d.appStopped()
+        assertEquals(listOf("window.PiNative?.dictationEnded?.(\"Dictation stopped: pi left the screen.\")"), sent)
+        assertEquals(1, f.cancels)
+        assertEquals(Dictation.State.IDLE, d.state)
+        // A start still pending when the app left releases the microphone once it resolves.
+        f.holdStart = true
+        val s = async { d.start() }
+        runCurrent()
+        d.appStopped()
+        f.gate!!.complete(Unit)
+        s.await()
+        assertEquals(2, f.cancels)
+        assertEquals(Dictation.State.IDLE, d.state)
     }
 
     @Test fun revokingConsentDropsTheTakeAndThePageUi() = runTest {

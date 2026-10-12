@@ -4,7 +4,7 @@ import kotlinx.serialization.json.JsonElement
 
 /**
  * What the web's Notifications row asks of native code (BRIDGE.md `push.status`, `push.enable`). Lives here
- * rather than in the shell so the bridge depends on push, not the other way round; [dev.pi_mobile.app.PushCenter]
+ * rather than in the shell so the bridge depends on push, not the other way round; [dev.pi_mobile.app.app.PushCenter]
  * implements it.
  */
 interface PushController {

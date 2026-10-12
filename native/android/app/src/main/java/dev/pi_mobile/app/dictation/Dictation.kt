@@ -143,6 +143,20 @@ class Dictation(private val recorder: DictationRecorder, private val scope: Coro
         if (active) js(ended("Voice sharing is off."))
     }
 
+    /**
+     * The app left the screen. iOS keeps a take recording in the background (its audio background mode); Android
+     * silences the microphone of an app in the background unless a foreground service holds it, and dictation has
+     * none, so the take ends here with a sentence rather than being cut off silently.
+     */
+    fun appStopped() {
+        val was = state
+        if (was == State.IDLE) return
+        take += 1
+        state = State.IDLE
+        if (was == State.RECORDING || was == State.STOPPING) recorder.cancel()
+        js(ended(BACKGROUND))
+    }
+
     private fun systemEnded(message: String) {
         if (state == State.IDLE) return
         take += 1
@@ -151,4 +165,8 @@ class Dictation(private val recorder: DictationRecorder, private val scope: Coro
     }
 
     private fun ended(message: String) = "window.PiNative?.dictationEnded?.(${JsonPrimitive(message)})"
+
+    companion object {
+        const val BACKGROUND = "Dictation stopped: pi left the screen."
+    }
 }

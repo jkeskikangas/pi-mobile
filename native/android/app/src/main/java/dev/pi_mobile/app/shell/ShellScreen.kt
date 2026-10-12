@@ -148,7 +148,7 @@ private fun LoadingView(name: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
     ) {
-        PiMark(64.dp)
+        PiMark(size = 64.dp)
         AnimatedVisibility(slow, enter = fadeIn(tween(200))) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 CircularProgressIndicator(color = PiTheme.colors.muted, strokeWidth = 2.5.dp, modifier = Modifier.size(24.dp))

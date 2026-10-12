@@ -1,4 +1,4 @@
-package dev.pi_mobile.app
+package dev.pi_mobile.app.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
@@ -319,6 +319,10 @@ class PushRelayTest {
         assertEquals("granted", NotificationPermission.state(notificationsEnabled = true, runtimePermission = false, asked = true))
         assertEquals("default", NotificationPermission.state(notificationsEnabled = false, runtimePermission = true, asked = false))
         assertEquals("denied", NotificationPermission.state(notificationsEnabled = false, runtimePermission = true, asked = true))
+        assertEquals(
+            "one no: Android 13+ still shows the dialog a second time",
+            "default", NotificationPermission.state(notificationsEnabled = false, runtimePermission = true, asked = true, rationale = true),
+        )
         assertEquals("pre-33: only the Settings switch", "denied", NotificationPermission.state(notificationsEnabled = false, runtimePermission = false, asked = false))
     }
 

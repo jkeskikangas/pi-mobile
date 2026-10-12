@@ -50,7 +50,7 @@ object PiLinks {
  * Drawn from the launcher foreground so the mark and the icon can't drift apart. Decorative.
  */
 @Composable
-fun PiMark(size: Dp = 72.dp, modifier: Modifier = Modifier) {
+fun PiMark(modifier: Modifier = Modifier, size: Dp = 72.dp) {
     val colors = PiTheme.colors
     val shape = RoundedCornerShape(size * 0.28f)
     Box(

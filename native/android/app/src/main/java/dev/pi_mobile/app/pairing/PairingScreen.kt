@@ -191,7 +191,7 @@ internal fun PairingContent(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Column(Modifier.widthIn(max = 520.dp).padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    PiMark(76.dp)
+                    PiMark(size = 76.dp)
                     Spacer(Modifier.size(28.dp))
                     Text(
                         stringResource(R.string.pairing_title),

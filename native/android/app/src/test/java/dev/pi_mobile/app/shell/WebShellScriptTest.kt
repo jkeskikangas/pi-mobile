@@ -19,6 +19,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Collections
 
 /**
  * The document-start script (BRIDGE.md → Setup) and the `webkit.messageHandlers.piNative` shim, run in QuickJS with a
@@ -31,7 +32,7 @@ class WebShellScriptTest {
     private val b = Machine(id = "b", machine = "mx-b", name = "Mac b", origin = "https://b.ts.net", d = "d-b", k = key, added = 1.0)
 
     /** What native received, in order. */
-    private val received = mutableListOf<JsonObject>()
+    private val received: MutableList<JsonObject> = Collections.synchronizedList(mutableListOf())
 
     @After fun close() = js.close()
 
@@ -124,7 +125,9 @@ class WebShellScriptTest {
             """{"granted":{"granted":true},"none":null,"err":"true: Microphone access is off. Turn it on in Settings.","both":[{"granted":true},null]}""",
             out,
         )
-        assertEquals(listOf("consent.status", "dictation.cancel", "dictation.start", "consent.status", "dictation.cancel"), received.map { it["type"].string })
+        val types = received.map { it["type"].string }
+        assertEquals(listOf("consent.status", "dictation.cancel", "dictation.start"), types.take(3))
+        assertEquals("the concurrent pair, in either order", setOf("consent.status", "dictation.cancel"), types.drop(3).toSet())
     }
 
     @Test fun withoutTheListenerPostMessageRejects() {

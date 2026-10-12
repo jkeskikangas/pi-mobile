@@ -12,6 +12,7 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import dev.pi_mobile.app.shell.PermissionResult
 import dev.pi_mobile.app.shell.Permissions
@@ -71,6 +72,7 @@ class AudioRecorder(
 
     /** The loudest [MediaRecorder.getMaxAmplitude] of this take (0 = digital silence). */
     private var peak = 0
+    private var startedAt = 0L
 
     private val meter = object : Runnable {
         override fun run() {
@@ -147,6 +149,7 @@ class AudioRecorder(
         recorder = r
         file = out
         peak = 0
+        startedAt = SystemClock.elapsedRealtime()
         audio.registerAudioDeviceCallback(devices, main)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) audio.registerAudioRecordingCallback(silenced, main)
         main.post(meter)
@@ -157,19 +160,21 @@ class AudioRecorder(
         val out = file!!
         peak = max(peak, try { r.maxAmplitude } catch (_: IllegalStateException) { 0 })
         val muted = inputMute.isInputMuted
-        // stop() throws when no audio frame was written (a tap shorter than the encoder's first frame).
+        val duration = SystemClock.elapsedRealtime() - startedAt
+        // stop() throws when no audio frame was written (a tap shorter than the encoder's first frame): that take is
+        // empty, and the page says "too short" for it as for any take under 600 ms.
         val stopped = try { r.stop(); true } catch (_: RuntimeException) { false }
         r.release()
         recorder = null
         file = null
         teardown()
         val data = withContext(Dispatchers.IO) {
-            try { if (stopped) out.readBytes() else null } catch (_: Exception) { null } finally { out.delete() }
+            try { if (stopped) out.readBytes() else ByteArray(0) } catch (_: Exception) { null } finally { out.delete() }
         } ?: throw DictationError("the recording couldn't be read.")
         val db = decibels(peak)
-        Log.d(TAG, "peak ${db.toInt()} dB, ${data.size} bytes, muted $muted")
+        Log.d(TAG, "${duration} ms, peak ${db.toInt()} dB, ${data.size} bytes, muted $muted")
         // Never send silence to be transcribed into nothing: say why instead.
-        silenceMessage(db, muted)?.let { throw DictationError(it) }
+        takeProblem(duration, db, muted)?.let { throw DictationError(it) }
         return data
     }
 
@@ -218,7 +223,11 @@ class AudioRecorder(
          */
         private const val CREST = 3.0
 
-        const val DENIED = "Microphone access is off. Turn it on in Settings."
+        /** After the page's "Microphone: " (BRIDGE.md `dictation.start`), as iOS words it. */
+        const val DENIED = "access is off. Turn it on in Settings."
+
+        /** The page treats shorter takes as "too short" itself (BRIDGE.md `dictation.stop`). */
+        const val MIN_TAKE_MS = 600L
         private const val TAKEN = "Dictation stopped: another app or a call took the microphone."
 
         /** The page's level 0–1 (linear) for a [MediaRecorder.getMaxAmplitude] reading. */
@@ -235,6 +244,13 @@ class AudioRecorder(
             if (stillMuted) return "the microphone is muted for pi. Unmute it (your headset or voice mode) and try again."
             return "the microphone recorded only silence. Check that Microphone access is on in Quick Settings and that no other app or call is using it, then try again."
         }
+
+        /**
+         * What to say instead of sending a finished take, else null. A take too short for the page goes through as is
+         * (the page says "too short"); a longer one that was only silence is named.
+         */
+        fun takeProblem(durationMs: Long, peakDb: Double, stillMuted: Boolean): String? =
+            if (durationMs < MIN_TAKE_MS) null else silenceMessage(peakDb, stillMuted)
 
         /** Unmutes the app-wide input mute for a take; returns whether it is still muted afterwards. */
         fun unmuteForTake(m: InputMute): Boolean {

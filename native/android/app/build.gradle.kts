@@ -68,9 +68,22 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfigs.findByName("upload")?.let { signingConfig = it }
+            // R8 shrinks and obfuscates; proguard-rules.pro keeps what JNI and reflection reach (WebRTC, QuickJS).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // -PpiReleaseDebugSigned: a release build signed with the debug key, to try the shrunk app on an emulator.
+            // Never uploaded: Play refuses debug-signed apps.
+            signingConfig = signingConfigs.findByName("upload")
+                ?: signingConfigs.getByName("debug").takeIf { prop("piReleaseDebugSigned").isNotEmpty() }
         }
+    }
+
+    lint {
+        warningsAsErrors = true
+        // Versions are pinned on purpose (README → Toolchain) and "a newer version exists" changes daily, so those
+        // checks would fail builds that didn't change; everything else is an error.
+        disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion")
     }
 
     compileOptions {

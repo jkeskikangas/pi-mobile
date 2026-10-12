@@ -3,6 +3,7 @@ package dev.pi_mobile.app.core
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import kotlinx.serialization.builtins.ListSerializer
@@ -86,6 +87,8 @@ open class EncryptedMachineStore(private val prefs: SharedPreferences, private v
         }
     }
 
+    // Not the KTX edit {}: it drops commit()'s result, and a failed write must be reported.
+    @SuppressLint("UseKtx")
     override fun save(list: List<Machine>) {
         val ok = try {
             val edit = prefs.edit()
@@ -104,7 +107,7 @@ open class EncryptedMachineStore(private val prefs: SharedPreferences, private v
     }
 
     override fun clear() {
-        prefs.edit().remove(KEY).commit()
+        prefs.edit(commit = true) { remove(KEY) }
     }
 
     companion object {
