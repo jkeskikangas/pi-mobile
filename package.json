@@ -54,9 +54,6 @@
     "qrcode": "^1.5.4",
     "tweetnacl": "^1.0.3"
   },
-  "bundleDependencies": [
-    "pi-speech"
-  ],
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*"
