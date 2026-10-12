@@ -39,7 +39,6 @@ import dev.pi_mobile.app.core.PairingLink
 import dev.pi_mobile.app.pairing.PairingScreen
 import dev.pi_mobile.app.pairing.ScanOutcome
 import dev.pi_mobile.app.pairing.ScannerSheet
-import dev.pi_mobile.app.push.Notifications
 import dev.pi_mobile.app.shell.ScanResult
 import dev.pi_mobile.app.shell.ShellPhase
 import dev.pi_mobile.app.shell.ShellScreen
@@ -53,14 +52,16 @@ import kotlinx.coroutines.launch
 
 /**
  * The one activity: the pairing screen until a computer is paired, then the web shell. Also receives notification
- * taps (push/Notifications' extras, → [onNewIntent]): agent + machine open that session in the page
- * (BRIDGE.md `focus`); with voice they start voice mode on it ("Answer by voice") on the list entry.
+ * taps, "Answer by voice", the tile and the launcher shortcut ([LaunchRequest], run once resumed).
  */
 class MainActivity : ComponentActivity(), WebShell.Host {
     private val app get() = application as PiApplication
 
     /** The page on screen, for voice mode's `voiceClosed`. */
     private var shell: WebShell? = null
+
+    /** What the last intent asked for, run in [onResume]. */
+    private var pendingLaunch: LaunchRequest? = null
 
     /** A notification tap waiting for the shell: hub machine id and session id. */
     private val pendingFocus = MutableStateFlow<Pair<String, String>?>(null)
@@ -126,17 +127,19 @@ class MainActivity : ComponentActivity(), WebShell.Host {
     private fun handle(intent: Intent?) {
         if (BuildConfig.DEBUG) DebugLaunch.from(intent)?.let { debug(it) }
         if (intent == null) return
-        val agent = intent.getStringExtra(Notifications.EXTRA_AGENT)?.takeIf { it.isNotEmpty() }
-        // "Answer by voice" (agent + entry), the tile and the launcher shortcut (neither: voice mode picks).
-        // The shortcut's XML extra arrives as the string "true".
-        val voice = intent.getBooleanExtra(VoiceHost.EXTRA_VOICE, false) || intent.getStringExtra(VoiceHost.EXTRA_VOICE) == "true"
-        if (voice) {
-            val entry = intent.getStringExtra(Notifications.EXTRA_ENTRY)?.takeIf { it.isNotEmpty() }
-            lifecycleScope.launch {
-                talk(agent, entry)?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() }
+        // Run once the activity is resumed: voice mode may need the consent sheet, which can only be asked then.
+        LaunchRequest.of(intent)?.let { pendingLaunch = it }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val request = pendingLaunch ?: return
+        pendingLaunch = null
+        when (request) {
+            is LaunchRequest.Focus -> pendingFocus.value = request.machine to request.agent
+            is LaunchRequest.Voice -> lifecycleScope.launch {
+                talk(request.agent, request.entry)?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() }
             }
-        } else if (agent != null) {
-            pendingFocus.value = (intent.getStringExtra(Notifications.EXTRA_MACHINE) ?: "") to agent
         }
     }
 

@@ -6,7 +6,7 @@ import android.app.Notification
 import android.app.NotificationManager
 import androidx.core.app.NotificationCompat
 import androidx.test.core.app.ApplicationProvider
-import dev.pi_mobile.app.app.MainActivity
+import dev.pi_mobile.app.app.LaunchRequest
 import dev.pi_mobile.app.core.Base64Url
 import dev.pi_mobile.app.core.Envelope
 import dev.pi_mobile.app.core.Machine
@@ -56,7 +56,8 @@ class NotificationsTest {
         assertEquals("pi", n.publicVersion.text(NotificationCompat.EXTRA_TITLE))
         assertEquals("New activity", n.publicVersion.text(NotificationCompat.EXTRA_TEXT))
         val open = n.opens()
-        assertEquals(MainActivity::class.java.name, open.component?.className)
+        assertEquals(LaunchRequest.NOTIFICATION_ALIAS, open.component?.className)
+        assertEquals(LaunchRequest.NOTIFICATION_ALIAS, shadowOf(n.actions[0].actionIntent).savedIntent.component?.className)
         assertEquals("m-mac", open.getStringExtra(Notifications.EXTRA_MACHINE))
         assertEquals("a1", open.getStringExtra(Notifications.EXTRA_AGENT))
         assertEquals("e-mac", open.getStringExtra(Notifications.EXTRA_ENTRY))

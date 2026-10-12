@@ -52,6 +52,12 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/voice_shortcuts" />
         </activity>
+        <!-- The app's own notifications open MainActivity through this alias. Not exported: no other app can start
+             it, so only intents through it may name a session to open or answer by voice (LaunchRequest). -->
+        <activity-alias
+            android:name=".app.NotificationOpen"
+            android:exported="false"
+            android:targetActivity=".app.MainActivity" />
 
         <!-- Voice mode keeps listening with the screen off (A8); started only from visible UI. -->
         <service

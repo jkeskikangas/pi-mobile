@@ -12,7 +12,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import dev.pi_mobile.app.app.MainActivity
+import dev.pi_mobile.app.app.LaunchRequest
 import dev.pi_mobile.app.R
 import dev.pi_mobile.app.core.PushContent
 
@@ -21,7 +21,7 @@ import dev.pi_mobile.app.core.PushContent
  * needs an answer: high importance, heads-up) and `activity` (pi finished: default). Notifications group
  * per session (`machine:agent`) under a summary, as iOS threads them.
  *
- * Taps open [MainActivity] with the extras below; the shell calls `PiNative.focus(machine, agent)`, and
+ * Taps open MainActivity (through its non-exported alias, LaunchRequest) with the extras below; the shell calls `PiNative.focus(machine, agent)`, and
  * with [EXTRA_VOICE] starts voice mode on that session (BRIDGE.md `voice.start` with [EXTRA_ENTRY]).
  */
 object Notifications {
@@ -121,7 +121,9 @@ object Notifications {
      * only in extras would otherwise share (and overwrite) one another.
      */
     private fun open(context: Context, shown: PushContent.Shown, id: Int, voice: Boolean): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        // The non-exported alias: only intents through it may name a session (LaunchRequest).
+        val intent = Intent().setClassName(context, LaunchRequest.NOTIFICATION_ALIAS)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         shown.opened?.takeIf { it.agent.isNotEmpty() }?.let { o ->
             intent.putExtra(EXTRA_MACHINE, o.machine).putExtra(EXTRA_AGENT, o.agent).putExtra(EXTRA_ENTRY, o.entry)
             if (voice) intent.putExtra(EXTRA_VOICE, true)
