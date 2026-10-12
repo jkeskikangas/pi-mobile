@@ -1044,6 +1044,12 @@
 				return;
 			}
 			if (ev.type === "gone" && ev.agent === this.agent) this.tell("That session stopped.", "[PI] The session the developer was following stopped.");
+			if (ev.type === "suggestion" && ev.agent === this.agent) return this.offerNextLate();
+			if (ev.type === "suggestion_clear" && ev.agent === this.agent && this.offeredNext?.id === ev.id) {
+				this.offeredNext = null;
+				if (this.engine === "realtime") this.inject("[PI] The likely next message offered earlier no longer applies; don't send it.", false);
+				return;
+			}
 			// Tool calls are pi's business, except significant ones: the voice knows when one runs, and
 			// the developer hears about it when one fails.
 			if (ev.agent !== this.agent) return;
@@ -1129,11 +1135,38 @@
 			const failed = /SIGNIFICANT ACTION FAILED|^ERROR:/m.test(b.report || "");
 			earcon(failed ? "failed" : "done");
 			this.more = b.more || [];
-			const offer = this.more.length && this.engine === "cascade" ? ` Want ${this.more[0]}?` : "";
+			// A likely next message (pi-next-turn) is the one offer at the end: "Next: …?", and "yes" sends it.
+			const next = this.nextToOffer();
+			this.awaitNextUntil = next ? 0 : Date.now() + 15_000;
+			const offer = next ? ` ${next.speech}` : this.more.length && this.engine === "cascade" ? ` Want ${this.more[0]}?` : "";
 			this.tell(
 				b.speech + offer,
-				`[PI] pi finished.\nSPOKEN BRIEF: ${b.speech}\n${this.more.length ? `MORE AVAILABLE: ${this.more.join("; ")} (offer at most one, briefly)\n` : ""}REPORT (for follow-up questions, do not read out):\n${b.report}`,
+				`[PI] pi finished.\nSPOKEN BRIEF: ${b.speech}\n${next ? `${next.context}\n` : this.more.length ? `MORE AVAILABLE: ${this.more.join("; ")} (offer at most one, briefly)\n` : ""}REPORT (for follow-up questions, do not read out):\n${b.report}`,
 			);
+		}
+
+		/** The confident suggestion for this session, as words to say and context for the realtime voice; marks it offered. */
+		nextToOffer() {
+			const s = app().S.next?.get(this.agent);
+			const text = V.nextOffer(s);
+			if (!text) return null;
+			this.offeredNext = { id: s.id, text };
+			const draft = V.speakDraft(s.draft);
+			return {
+				speech: `Next: ${text.replace(/[?.!\s]+$/, "")}?${draft ? ` ${draft}` : ""}`,
+				context: `LIKELY NEXT MESSAGE: "${text}"${draft ? ` (${draft})` : ""}. End by asking only "Next: ${text}?". If the developer accepts (yes, do that, send it), call ask_pi with exactly that text.`,
+			};
+		}
+
+		/** A suggestion that arrives just after the brief: offered once pi's voice is free. */
+		offerNextLate() {
+			if (!(this.awaitNextUntil > Date.now()) || this.closed) return;
+			if (this.state === "speaking" || this.state === "thinking" || this.state === "hearing") return void setTimeout(() => this.offerNextLate(), 400);
+			if (this.state !== "listening" && this.state !== "paused") return;
+			const next = this.nextToOffer();
+			if (!next) return;
+			this.awaitNextUntil = 0;
+			this.tell(next.speech, `[PI] ${next.context}`);
 		}
 
 		/** What the developer said lately (both engines), to check an earlier request really named an action. */
@@ -1765,6 +1798,10 @@
 			this.rememberHeard(text);
 			try {
 				const cmd = V.parseCommand(text);
+				// "Next: …?" stands for one reply ("say that again" keeps it).
+				const offered = this.offeredNext;
+				if (cmd?.kind !== "repeat") this.offeredNext = null;
+				this.awaitNextUntil = 0;
 				if (this.grace && this.cancelsGrace(text)) return this.cancelGrace();
 				const prompts = [...(a.S.prompts.get(this.agent)?.values() || [])];
 				if (cmd?.kind === "end") return this.close();
@@ -1795,6 +1832,15 @@
 						return this.speak(r.value === false ? "Okay, no." : r.value === undefined ? "Cancelled." : "Okay.");
 					}
 					if (p.kind !== "input" && text.split(" ").length < 4) return this.speak(`Sorry. ${V.speakPrompt(p, this.optionPage)}`);
+				}
+				if (offered && !prompts.length && V.acceptsNext(text)) {
+					// Sent only while it still applies: you typed or sent something else, or pi started.
+					if (a.S.next?.get(this.agent)?.id !== offered.id) return this.speak("That suggestion no longer applies. Say what you'd like instead.");
+					const r = await this.tool("ask_pi", { request: offered.text });
+					if (r.error) return this.speak(`I couldn't send that: ${r.error}`);
+					this.more = [];
+					if (r.delivered === "prompt") return this.setState("working");
+					return this.speak(r.delivered === "steer" ? "Passed on." : "Queued for after this.");
 				}
 				if ((cmd?.kind === "more" || /^(yes|yeah|sure|ok|okay)\b/.test(V.norm(text))) && this.more.length) {
 					const topic = this.more.shift();

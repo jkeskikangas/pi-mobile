@@ -137,3 +137,14 @@ test("switching by voice: names, the computer's name, and asking when two comput
 	const one = list.map((x) => ({ ...x, machine: "" })).slice(0, 1).concat([{ agent: "3", name: "web", cwd: "/w/web", task: "", machine: "" }]);
 	assert.equal(V.matchSession(one, "switch to web").match.agent, "3");
 });
+
+test("a likely next message is offered only when confident; 'yes', 'do that', 'send it' accept it", () => {
+	const s = (p: number) => ({ id: "n", candidates: [{ text: " run the tests ", p }, { text: "other", p: 0.1 }], readAhead: "none" });
+	assert.equal(V.nextOffer(s(0.69)), null);
+	assert.equal(V.nextOffer(s(0.7)), "run the tests");
+	assert.equal(V.nextOffer(undefined), null);
+	assert.equal(V.speakDraft({ files: 3, insertions: 1, deletions: 0, checks: "pass" }), "There's a draft: 3 files, tests pass.");
+	assert.equal(V.speakDraft({ files: 1, insertions: 1, deletions: 0 }), "There's a draft: one file.");
+	for (const yes of ["Yes", "yeah", "do that", "Send it!", "yes please", "OK, do it", "go ahead", "pi, send it", "yes do that please"]) assert.equal(V.acceptsNext(yes), true, yes);
+	for (const no of ["no", "", "yes but first fix the lint", "send it to staging", "do that later", "what?"]) assert.equal(V.acceptsNext(no), false, no);
+});

@@ -283,6 +283,29 @@
 	/** Commands that change voice settings, handled on the phone. */
 	const SETTINGS = ["pushToTalk", "openMic", "eyesFree", "glance"];
 
-	const api = { HELP, SETTINGS, matchSession, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
+	/**
+	 * The likely next message worth offering out loud ("Next: …?"): the top candidate of a `suggestion`
+	 * when its calibrated p is at least 0.7 (P_READ in src/suggest.ts), else null.
+	 */
+	function nextOffer(s) {
+		const top = s?.candidates?.[0];
+		return top && typeof top.text === "string" && top.text.trim() && top.p >= 0.7 ? top.text.trim() : null;
+	}
+
+	/** "3 files, tests pass": a prepared draft, said before you accept it. */
+	function speakDraft(d) {
+		if (!d) return "";
+		const files = d.files === 1 ? "one file" : `${d.files} files`;
+		return `There's a draft: ${files}${d.checks === "pass" ? ", tests pass" : d.checks === "fail" ? ", tests fail" : ""}.`;
+	}
+
+	/** "yes", "do that", "send it": the whole reply accepts the "Next: …?" just offered ("yes, but first …" doesn't). */
+	const ACCEPT_NEXT = /^(?:(?:yes|yeah|yep|yup|sure|ok|okay)\b ?)?(?:please ?)?(?:(?:do that|do it|send it|send that|go ahead|go for it|sounds good)\b ?)?(?:please)?$/;
+	function acceptsNext(text) {
+		const t = stripLead(norm(text));
+		return !!t && ACCEPT_NEXT.test(t);
+	}
+
+	const api = { HELP, SETTINGS, nextOffer, speakDraft, acceptsNext, matchSession, isBackchannel, isEcho, parseCommand, answerFor, speakPrompt, isDestructive, requestNames, isSignificant, incomplete, Vad, chunks, EARCONS, norm };
 	globalThis.PiVoiceCore = api;
 })();
