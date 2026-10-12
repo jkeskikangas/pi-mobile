@@ -14,6 +14,10 @@ import dev.pi_mobile.app.core.double
 import dev.pi_mobile.app.core.get
 import dev.pi_mobile.app.core.string
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,6 +83,17 @@ class AppModel(
         val c = try { HubClient(m, http) } catch (_: HubError) { null }
         if (c == null) clients.remove(m.id) else clients[m.id] = c
         c
+    }
+
+    /**
+     * The other computers that answer right now (each serves the web UI too): what the offline screen offers when the
+     * primary one can't be reached. A short budget per computer; this only decides which buttons to show.
+     */
+    suspend fun reachableOthers(primary: Machine): List<Machine> = coroutineScope {
+        _machines.value.filter { it.id != primary.id }
+            .map { m -> async { m.takeIf { client(m)?.let { c -> withTimeoutOrNull(PROBE_MS) { runCatching { c.hub() }.isSuccess } } == true } } }
+            .awaitAll()
+            .filterNotNull()
     }
 
     /** The session on screen in the web UI (bridge `focus`): "Start voice" picks it when no session needs you. */
@@ -183,6 +198,7 @@ class AppModel(
     companion object {
         /** How this phone is listed on the computer (`/remote` devices). */
         const val DEVICE_NAME = "Android · pi app"
+        private const val PROBE_MS = 5_000L
 
         fun primaryOf(list: List<Machine>): Machine? = list.firstOrNull { it.primary } ?: list.firstOrNull()
     }

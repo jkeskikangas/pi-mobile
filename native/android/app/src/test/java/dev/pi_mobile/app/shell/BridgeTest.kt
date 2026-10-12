@@ -3,6 +3,7 @@ package dev.pi_mobile.app.shell
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import dev.pi_mobile.app.app.AppModel
+import dev.pi_mobile.app.consent.AIConsent
 import dev.pi_mobile.app.core.Base64Url
 import dev.pi_mobile.app.core.InMemoryMachineStore
 import dev.pi_mobile.app.core.Machine
@@ -48,7 +49,11 @@ class BridgeTest {
     private val dictation = Dictation(recorder, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
     private val voice = FakeVoice()
     private val push = FakePush()
-    private val consent = FakeConsent()
+    private val consent = AIConsent(
+        ApplicationProvider.getApplicationContext<Context>().getSharedPreferences(Prefs.FILE, Context.MODE_PRIVATE),
+        ask = { true },
+        canAsk = { true },
+    )
     private var scanner = scanning { "" }
     private val main = FrameInfo(isMainFrame = true, origin = origin)
 
@@ -190,16 +195,16 @@ class BridgeTest {
         assertEquals("the web treats exactly this text as a silent cancel", Reply.Error("cancelled"), handle("type" to "scan"))
         scanner = scanning { throw BridgeError("busy") }
         assertEquals(Reply.Error("busy"), handle("type" to "scan"))
-        scanner = scanning { throw BridgeError(ScanCenter.UNSUPPORTED) }
+        scanner = scanning { throw BridgeError("The camera isn't available on this phone. Paste the link instead.") }
         assertEquals(Reply.Error("The camera isn't available on this phone. Paste the link instead."), handle("type" to "scan"))
     }
 
     @Test fun consentAndPushAreDelegated() {
-        consent.ok = true
+        consent.grant()
         assertEquals(value(obj("granted" to true)), handle("type" to "consent.status"))
         handle("type" to "dictation.start")
         assertEquals(value(obj("granted" to false)), handle("type" to "consent.revoke"))
-        assertEquals(false, consent.ok)
+        assertEquals(false, consent.granted)
         assertEquals("revoking drops a take", Dictation.State.IDLE, dictation.state)
         assertEquals("and ends voice mode", 1, voice.stops)
 
@@ -278,13 +283,3 @@ class FakePush : PushController {
     }
 }
 
-class FakeConsent : ConsentController {
-    var ok = false
-    override suspend fun granted() = ok
-    override suspend fun ensure(kind: ConsentKind) {
-        if (!ok) throw BridgeError("needs your OK")
-    }
-    override fun revoke() {
-        ok = false
-    }
-}

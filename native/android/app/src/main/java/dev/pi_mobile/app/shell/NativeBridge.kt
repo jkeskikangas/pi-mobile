@@ -2,6 +2,7 @@ package dev.pi_mobile.app.shell
 
 import dev.pi_mobile.app.app.AppModel
 import dev.pi_mobile.app.app.fromWeb
+import dev.pi_mobile.app.consent.AIConsent
 import dev.pi_mobile.app.core.Machine
 import dev.pi_mobile.app.core.array
 import dev.pi_mobile.app.core.bool
@@ -40,7 +41,7 @@ class NativeBridge(
     private val dictation: Dictation,
     private val voice: VoiceStarter,
     private val push: PushController,
-    private val consent: ConsentController,
+    private val consent: AIConsent,
     private val scanner: Scanner,
 ) {
     suspend fun handle(msg: JsonObject, frame: FrameInfo): Reply {
@@ -97,7 +98,7 @@ class NativeBridge(
         "push.status" -> push.status()
         "push.enable" -> push.enable(msg["on"].bool ?: true)
         "scan" -> obj("link" to scanner.scan())
-        "consent.status" -> obj("granted" to consent.granted())
+        "consent.status" -> obj("granted" to consent.granted)
         "consent.revoke" -> {
             consent.revoke()
             dictation.consentRevoked()

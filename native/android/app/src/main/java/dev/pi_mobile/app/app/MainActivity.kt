@@ -13,35 +13,38 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import dev.pi_mobile.app.BuildConfig
-import dev.pi_mobile.app.R
+import dev.pi_mobile.app.consent.ConsentHost
 import dev.pi_mobile.app.core.Machine
 import dev.pi_mobile.app.core.PairingLink
+import dev.pi_mobile.app.pairing.PairingScreen
+import dev.pi_mobile.app.pairing.ScanOutcome
+import dev.pi_mobile.app.pairing.ScannerSheet
 import dev.pi_mobile.app.push.Notifications
+import dev.pi_mobile.app.shell.ScanResult
 import dev.pi_mobile.app.shell.ShellPhase
+import dev.pi_mobile.app.shell.ShellScreen
 import dev.pi_mobile.app.shell.WebShell
+import dev.pi_mobile.app.ui.PiTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -78,7 +81,14 @@ class MainActivity : ComponentActivity(), WebShell.Host {
     /** Every return to the app: computers may have dropped this phone's relay registration meanwhile. */
     override fun onStart() {
         super.onStart()
+        app.inFront = true
         app.pushCenter.refresh()
+    }
+
+    /** The consent sheet can only be asked while the activity is on screen (AIConsent's canAsk). */
+    override fun onStop() {
+        app.inFront = false
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -130,7 +140,7 @@ class MainActivity : ComponentActivity(), WebShell.Host {
     private fun debug(d: DebugLaunch) = lifecycleScope.launch {
         if (d.reset) {
             app.model.forgetAll()
-            app.consent.revoke()
+            app.aiConsent.revoke()
         }
         val link = d.pairLink?.let { PairingLink.parse(it) } ?: return@launch
         try {
@@ -154,20 +164,20 @@ class MainActivity : ComponentActivity(), WebShell.Host {
 
     @Composable
     private fun Root() {
-        val dark = isSystemInDarkTheme()
-        // replaced by ui/Theme (PiTheme) at integration
-        MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+        PiTheme {
             val machines by app.model.machines.collectAsState()
             val primary = AppModel.primaryOf(machines)
-            Box(Modifier.fillMaxSize().background(colorResource(R.color.pi_bg))) {
+            Box(Modifier.fillMaxSize().background(PiTheme.colors.bg)) {
                 if (primary == null) {
-                    PairingPlaceholder(app.model)
+                    PairingScreen(pair = { app.model.pair(it) })
                 } else {
                     // A re-paired or switched computer is a new page.
                     key(primary.id, primary.d, primary.origin) { Shell(primary) }
                 }
                 ForgetDialog()
-                ScanPlaceholder(app.scanner)
+                val scanning by app.scanner.isOpen.collectAsState()
+                if (scanning) ScannerSheet { app.scanner.finish(it.toScanResult()) }
+                ConsentHost(app.consentPrompter)
             }
         }
     }
@@ -186,10 +196,40 @@ class MainActivity : ComponentActivity(), WebShell.Host {
         BackHandler { shell.back { moveTaskToBack(true) } }
         val web by shell.view.collectAsState()
         val phase by shell.phase.collectAsState()
-        // Edge to edge, but the page sits inside the system bars and above the keyboard: it shrinks with the IME
-        // instead of being covered (WebShell → Keyboard).
-        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-            ShellPlaceholder(primary, phase, retry = shell::load, network = app.network, web = web)
+        val offline = phase is ShellPhase.Offline
+        // The network came back (Wi-Fi, the tailnet): try at once instead of waiting out ShellScreen's backoff.
+        val changes by app.network.changes.collectAsState()
+        LaunchedEffect(changes) { if (offline && app.network.online.value) shell.load() }
+        var others by remember { mutableStateOf(emptyList<Machine>()) }
+        var error by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(offline) {
+            error = null
+            others = if (offline) app.model.reachableOthers(primary) else emptyList()
+        }
+        ShellScreen(
+            name = primary.name,
+            phase = phase,
+            onRetry = shell::load,
+            others = others,
+            onUse = { m -> try { app.model.makePrimary(m) } catch (e: Exception) { error = e.message } },
+            onTalk = { lifecycleScope.launch { error = talk() } },
+            error = error,
+        ) {
+            // Edge to edge, but the page sits inside the system bars and above the keyboard: it shrinks with the
+            // IME instead of being covered (WebShell → Keyboard).
+            key(web) { AndroidView({ web }, Modifier.fillMaxSize().safeDrawingPadding()) }
+        }
+    }
+
+    /** Voice mode needs no web view: the session last on screen, from the offline screen. Null, or the sentence. */
+    private suspend fun talk(): String? {
+        val last = app.model.prefs.lastFocus ?: return "No session is reachable right now."
+        return try {
+            app.dictation.cancelIfActive()
+            app.voice.start(last.agent, last.machine)
+            null
+        } catch (e: Exception) {
+            e.message
         }
     }
 
@@ -206,4 +246,11 @@ class MainActivity : ComponentActivity(), WebShell.Host {
             dismissButton = { TextButton(onClick = { app.model.keep(m) }) { Text("Keep") } },
         )
     }
+}
+
+/** The scanner sheet's outcome as the bridge's (ScanCenter adds `busy`). */
+private fun ScanOutcome.toScanResult(): ScanResult = when (this) {
+    is ScanOutcome.Link -> ScanResult.Link(link)
+    ScanOutcome.Cancelled -> ScanResult.Cancelled
+    is ScanOutcome.Unavailable -> ScanResult.Unavailable(message)
 }

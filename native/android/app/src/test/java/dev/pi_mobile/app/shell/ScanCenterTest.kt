@@ -1,8 +1,5 @@
 package dev.pi_mobile.app.shell
 
-import android.Manifest
-import android.app.Application
-import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -11,19 +8,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 
-/** One scan at a time, camera checks first (BRIDGE.md `scan`). */
-@RunWith(RobolectricTestRunner::class)
+/** One scan at a time (BRIDGE.md `scan`). */
 class ScanCenterTest {
-    private val app = ApplicationProvider.getApplicationContext<Application>()
-    private val permissions = Permissions(app)
-
-    @Test fun oneScanAtATimeAndClosingCancels() = runBlocking(Dispatchers.Unconfined) {
-        shadowOf(app).grantPermissions(Manifest.permission.CAMERA)
-        val center = ScanCenter(permissions) { true }
+    @Test fun oneScanAtATimeAndEachEndingIsTheBridgesReply() = runBlocking(Dispatchers.Unconfined) {
+        val center = ScanCenter()
         val first = async { runCatching { center.scan() } }
         yield()
         assertTrue(center.isOpen.value)
@@ -36,11 +25,10 @@ class ScanCenterTest {
         yield()
         center.finish(ScanResult.Link("https://mac.ts.net/#p=x.y"))
         assertEquals("https://mac.ts.net/#p=x.y", second.await())
-    }
 
-    @Test fun noCameraOrNoAccessIsASentence() = runBlocking {
-        assertEquals(ScanResult.Unavailable(ScanCenter.UNSUPPORTED), ScanCenter(permissions) { false }.open())
-        // No activity to ask from and not granted: as if denied.
-        assertEquals(ScanResult.Unavailable(ScanCenter.DENIED), ScanCenter(permissions) { true }.open())
+        val third = async { runCatching { center.scan() } }
+        yield()
+        center.finish(ScanResult.Unavailable("Camera access is off. Turn it on in Settings, or paste the link instead."))
+        assertEquals("Camera access is off. Turn it on in Settings, or paste the link instead.", third.await().exceptionOrNull()?.message)
     }
 }

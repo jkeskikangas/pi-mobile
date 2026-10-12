@@ -1,7 +1,6 @@
 package dev.pi_mobile.app.app
 
 import android.app.Application
-import android.content.pm.PackageManager
 import android.webkit.WebView
 import dev.pi_mobile.app.BuildConfig
 import dev.pi_mobile.app.PushCenter
@@ -11,8 +10,8 @@ import dev.pi_mobile.app.core.Prefs
 import dev.pi_mobile.app.dictation.AudioRecorder
 import dev.pi_mobile.app.dictation.Dictation
 import dev.pi_mobile.app.shell.BridgeError
-import dev.pi_mobile.app.shell.ConsentController
-import dev.pi_mobile.app.shell.ConsentKind
+import dev.pi_mobile.app.consent.AIConsent
+import dev.pi_mobile.app.consent.ConsentPrompter
 import dev.pi_mobile.app.shell.NativeBridge
 import dev.pi_mobile.app.shell.NetworkWatch
 import dev.pi_mobile.app.shell.Permissions
@@ -47,9 +46,16 @@ class PiApplication : Application(), PushCenter.Host {
     override lateinit var pushCenter: PushCenter
         private set
 
-    // Implemented by other packages and wired here at integration: voice/VoiceHost, consent/AIConsent.
+    /** The consent sheet's question; MainActivity draws it (ConsentHost) while it is pending. */
+    val consentPrompter = ConsentPrompter()
+    lateinit var aiConsent: AIConsent
+        private set
+
+    /** MainActivity is started: the consent sheet can be shown. */
+    @Volatile var inFront = false
+
+    // Implemented by voice/VoiceHost, wired here at integration.
     var voice: VoiceStarter = NoVoice
-    var consent: ConsentController = NoConsent
 
     override fun onCreate() {
         super.onCreate()
@@ -57,10 +63,11 @@ class PiApplication : Application(), PushCenter.Host {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         model = AppModel(KeystoreMachineStore(this), Prefs(this))
         permissions = Permissions(this)
+        aiConsent = AIConsent(getSharedPreferences(Prefs.FILE, MODE_PRIVATE), consentPrompter::ask) { inFront }
         dictation = Dictation(AudioRecorder(this, permissions), MainScope()).apply {
-            consent = { this@PiApplication.consent.ensure(ConsentKind.DICTATION) }
+            consent = { aiConsent.ensure(AIConsent.Purpose.DICTATION) }
         }
-        scanner = ScanCenter(permissions) { packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
+        scanner = ScanCenter()
         network = NetworkWatch(this)
         // Before FCM can deliver anything; without a Firebase configuration push reports available: false.
         FirebaseSetup.init(this)
@@ -77,18 +84,12 @@ class PiApplication : Application(), PushCenter.Host {
     }
 
     /** The bridge for a page served by [primaryOrigin]. */
-    fun bridge(primaryOrigin: String) = NativeBridge(model, primaryOrigin, dictation, voice, pushCenter, consent, scanner)
+    fun bridge(primaryOrigin: String) = NativeBridge(model, primaryOrigin, dictation, voice, pushCenter, aiConsent, scanner)
 
-    // Until integration: what a build without these features answers (replaced by the real implementations).
+    // Until integration: what a build without voice mode answers (replaced by VoiceHost).
 
     private object NoVoice : VoiceStarter {
         override suspend fun start(agent: String, machine: String) = throw BridgeError("Voice mode isn't in this build yet.")
         override fun stop() = Unit
-    }
-
-    private object NoConsent : ConsentController {
-        override suspend fun granted() = false
-        override suspend fun ensure(kind: ConsentKind) = throw BridgeError("pi can't ask for your OK to send your voice in this build yet.")
-        override fun revoke() = Unit
     }
 }
