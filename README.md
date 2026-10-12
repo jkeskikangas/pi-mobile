@@ -76,6 +76,10 @@ An optional native iPhone app (`native/ios`) shows the same web UI and adds what
 
 Either way, Apple sees only a generic "pi" alert; the session name and text travel encrypted to your phone's device key and are opened on the phone.
 
+### Android app
+
+An optional native Android app (`native/android`) does the same as the iPhone app: the same web UI, scan to pair, voice mode that keeps going with the screen off (a foreground service with an ongoing notification that has Mute and End), native dictation, a Quick Settings tile and a launcher shortcut to start voice hands-free, and notifications through the same [push relay](relay/README.md) via Firebase Cloud Messaging, sealed to your phone's device key and opened on the phone. It isn't on Google Play yet: build it with Gradle (`native/android/README.md` has the setup; push needs a Firebase project). It is checked on the emulator only so far; the device checklist is in that README. Like the iPhone app it connects over HTTPS only.
+
 ## Voice
 
 Design notes, research and verification: [docs/voice.md](docs/voice.md).
@@ -159,7 +163,7 @@ No computer you already use can reach the new one? Run `/remote pair` on it, the
 | Lock-screen notifications | Web Push (HTTPS) | native app | Web Push (HTTPS) | Web Push | APNs via a gateway |
 | Several computers in one list | yes, phone to each computer, no relay; add one from pi or by QR | yes (agent mesh, via its relay) | not stated | not stated | not stated |
 
-The others have things this doesn't: native apps in the app stores (remote-pi, Pi Relay; pi-mobile's [iPhone app](#iphone-app) you build yourself), an agent-to-agent mesh across machines (remote-pi), and transcripts of sessions that have since closed (mipsel64).
+The others have things this doesn't: native apps in the app stores (remote-pi, Pi Relay; pi-mobile's [iPhone](#iphone-app) and [Android](#android-app) apps you build yourself), an agent-to-agent mesh across machines (remote-pi), and transcripts of sessions that have since closed (mipsel64).
 
 ## Development
 
