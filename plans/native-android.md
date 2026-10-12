@@ -59,12 +59,14 @@ native/android/
 
 ## Steps (each ends green: `./gradlew assembleDebug testDebugUnitTest lint`, and `npm test` when TypeScript/JS changed)
 
-1. **Scaffold** — wrapper, dependencies, `core/Json`, `core/Models`, `core/Envelope` + `CryptoVectorTest`. *(done)*
+**Status (2026-10-12):** steps 1–10 done and green on the emulator; a parity audit against `native/ios` (file by file, every BRIDGE.md message, every PiTests case) was run and its findings fixed (launch requests wait for the activity; sessions only from the app's own notifications through the non-exported `.app.NotificationOpen` alias; a locked phone gets only state, Mute and End; guarded foreground-service starts; audio re-applied after calls; pi's phone-wide mic mute is always lifted; redial only on a network type change; R8 minification with an R8 that reads Kotlin 2.4). What's left is device-only (`native/android/README.md` → Device checklist) and push needing a Firebase project.
+
+1. **Scaffold** — wrapper, dependencies, `core/Json`, `core/Models`, `core/Envelope` + `CryptoVectorTest`.
 2. **Core** — port `HubClient` (OkHttp; pair; rpc/agent/hub/focus; SSE events with reconnect backoff 0.5–8 s, 40 s stall, `hello` → re-focus, 401 → unauthorized; errors as sentences), `SSEParser`, `OriginPolicy` (+ redirect rule), `MachineStore` (encrypted, migration-free), `Prefs` (voice prefs, last focus), `PushContent`. Tests: ports of `SSEParserTests`, `HubClientTests` (MockWebServer), `OriginPolicyTests`, and an integration test against the fixture hub (`npm run ui`), skipped without a link.
 3. **Voice engine** — port `VoiceCore`, `VoicePorts`, `VoiceEngine`, `BasicVoice` (logic), `LiveFleet` with the same seams; tests: ports of `VoiceCoreTests`, `VoiceEngineTests`, `BasicVoiceTests` with `FakeRealtime`/`FakeHub` and the real `web/voice-core.js`.
 4. **Shell, pairing, consent, dictation** — `MainActivity`/`AppModel`, `PairingScreen` + `QrScanner`, `ConsentSheet`, `WebShell` + `NativeBridge` (every BRIDGE.md message), `ShellScreen` (loading, "Can't reach ‹name›" + Try again, never a WebView error page; no white flash), `Dictation` + `AudioRecorder`, `NetworkWatch`, `ScanCenter`. Tests: ports of `BridgeTests`, `DictationTests`, `DictationSilenceTests`, `ConsentTests`.
 5. **Voice platform and UI** — `RealtimeClient` (WebRTC), `Levels`, `AudioSessionController`, `Earcons`, `BasicVoice` audio (AudioRecord, MediaPlayer, TextToSpeech), `VoiceService` + notification (Mute/End), `VoiceHost` (`voice.start`, consent gate, last session / needs-you pick), `VoiceScreen` (orb, captions, question card with undo countdown, Mute/End, session switcher, settings sheet with persona picker and samples), haptics, keep screen on while visible. Tests: `VoiceActivityTests` counterpart for the notification content; screenshot tests per state, light and dark.
-6. **Hands-free start** — `StartVoiceTile`, launcher shortcut, "Answer by voice".
+6. **Hands-free start** — `StartVoiceTile`, launcher shortcut (dynamic, `intents/VoiceShortcuts`, so it can be disabled while nothing is paired), "Answer by voice".
 7. **Push** — `PushCenter` (FCM token, relay register/reconcile with the iOS rules: 501 pause 6 h, other failures 5 min; `push {relay}` to every computer; off → `{relay: null}`), `PiMessagingService` (open `sealed` with the matching machine key, post the notification grouped by machine/session; urgent → "Answer by voice"), tap → `PiNative.focus`. `POST_NOTIFICATIONS` asked only from the menu. Tests: ports of `PushTests`, `PushRelayTests`.
 8. **Web** — copy that says iPhone inside the app says the platform's word when `PiNative.platform === "android"` (notifications permission hint, Home Screen note never shown in the app); nothing else changes in a browser. `npm test`.
 9. **End to end** — `scripts/e2e.sh`: fixture hub, emulator, `adb reverse`, instrumented test pairs with a link, loads the web UI, consent → voice screen in basic voice → End, a dictation take reaches `transcribe`, menu shows Stop sharing my voice and the notifications state. Screenshots in `native/android/shots/`.
@@ -78,6 +80,6 @@ native/android/
 
 ## Risks
 
-- Starting a microphone foreground service from the Quick Settings tile on Android 14+ needs the app in the foreground on some versions: the tile opens the app (`startActivityAndCollapse`) and starts voice there [verify].
+- Starting a microphone foreground service from the background is refused on Android 12+/14+: the tile always opens the app (`startActivityAndCollapse`) and starts voice there; a refused start ends voice mode with "Open pi to start voice mode." [verify].
 - Headset button mute during `MODE_IN_COMMUNICATION` (MediaSession) is unverified [verify].
 - QuickJS JNI on the JVM test host must match the Mac's architecture (quickjs-kt ships macOS arm64/x64).
