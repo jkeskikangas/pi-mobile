@@ -1,6 +1,5 @@
 package dev.pi_mobile.app.voiceui
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -10,7 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.pi_mobile.app.voice.VoiceEngine
 import dev.pi_mobile.app.voice.VoiceHost
@@ -121,7 +120,7 @@ fun VoiceRoute(host: VoiceHost, revokeConsent: () -> Unit, onClosed: () -> Unit,
 /** Lets the activity show over the lock screen and turn the screen on while voice mode is up. */
 @Composable
 private fun OverLockScreen() {
-    val activity = LocalContext.current as? Activity ?: return
+    val activity = LocalActivity.current ?: return
     DisposableEffect(activity) {
         if (Build.VERSION.SDK_INT >= 27) {
             activity.setShowWhenLocked(true)

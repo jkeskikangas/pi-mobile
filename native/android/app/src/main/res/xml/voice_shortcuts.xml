@@ -11,7 +11,7 @@
         <intent
             android:action="android.intent.action.VIEW"
             android:targetPackage="dev.pi_mobile.app"
-            android:targetClass="dev.pi_mobile.app.MainActivity">
+            android:targetClass="dev.pi_mobile.app.app.MainActivity">
             <extra android:name="voice" android:value="true" />
         </intent>
     </shortcut>

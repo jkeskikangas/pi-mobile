@@ -16,11 +16,12 @@ class BridgeError(message: String) : Exception(message)
 interface VoiceStarter {
     /**
      * Presents voice mode on session [agent] of the computer whose machines-list entry id is [machine], and returns
-     * once it is on screen (BRIDGE.md `voice.start`). Idempotent: when voice mode is already open it is focused and
-     * switched to [agent]. The bridge has already discarded any dictation take, so the microphone is free. Asks for
-     * the user's consent itself (AIConsent.ensure(VOICE)) and throws its sentence when it isn't given.
+     * once it is on screen (BRIDGE.md `voice.start`); without them (the tile, the shortcut, Talk to pi) on the session
+     * that needs you, else the one used last. Idempotent: when voice mode is already open it is focused and switched
+     * to [agent]. Asks for the user's consent and the microphone first and throws the sentence when either is refused.
+     * Call from visible UI (a microphone service can only start then).
      */
-    suspend fun start(agent: String, machine: String)
+    suspend fun start(agent: String?, machine: String?)
 
     /** Ends voice mode if it is open (the user took back their consent); no-op otherwise. */
     fun stop()

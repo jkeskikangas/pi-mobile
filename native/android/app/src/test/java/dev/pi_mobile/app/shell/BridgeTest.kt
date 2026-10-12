@@ -252,12 +252,12 @@ class BridgeTest {
 }
 
 class FakeVoice : VoiceStarter {
-    val started = mutableListOf<Pair<String, String>>()
+    val started = mutableListOf<Pair<String?, String?>>()
     var onStart: () -> Unit = {}
     var stops = 0
     var error: String? = null
 
-    override suspend fun start(agent: String, machine: String) {
+    override suspend fun start(agent: String?, machine: String?) {
         error?.let { throw BridgeError(it) }
         onStart()
         started += agent to machine

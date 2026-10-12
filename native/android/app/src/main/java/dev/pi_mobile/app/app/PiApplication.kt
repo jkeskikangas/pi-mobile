@@ -1,5 +1,6 @@
 package dev.pi_mobile.app.app
 
+import android.Manifest
 import android.app.Application
 import android.webkit.WebView
 import dev.pi_mobile.app.BuildConfig
@@ -17,7 +18,9 @@ import dev.pi_mobile.app.shell.NetworkWatch
 import dev.pi_mobile.app.shell.Permissions
 import dev.pi_mobile.app.push.FirebaseSetup
 import dev.pi_mobile.app.push.SystemNotificationPermission
+import dev.pi_mobile.app.shell.PermissionResult
 import dev.pi_mobile.app.shell.ScanCenter
+import dev.pi_mobile.app.voice.VoiceHost
 import dev.pi_mobile.app.shell.VoiceStarter
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.drop
@@ -54,8 +57,17 @@ class PiApplication : Application(), PushCenter.Host {
     /** MainActivity is started: the consent sheet can be shown. */
     @Volatile var inFront = false
 
-    // Implemented by voice/VoiceHost, wired here at integration.
-    var voice: VoiceStarter = NoVoice
+    /** Native voice mode for the bridge, notifications and the offline screen (over voice/VoiceHost). */
+    val voice: VoiceStarter = object : VoiceStarter {
+        override suspend fun start(agent: String?, machine: String?) {
+            // The OK first, then the microphone: the sheet explains what the permission is for.
+            aiConsent.ensure(AIConsent.Purpose.VOICE)
+            if (permissions.request(Manifest.permission.RECORD_AUDIO) != PermissionResult.GRANTED) throw BridgeError(VoiceHost.MIC_OFF)
+            VoiceHost.shared.start(agent, machine?.ifEmpty { null })
+        }
+
+        override fun stop() = VoiceHost.shared.end()
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -79,17 +91,22 @@ class PiApplication : Application(), PushCenter.Host {
             hubs = { m, method, p -> (model.client(m) ?: HubClient(m)).rpc(method, p) },
         )
         pushCenter.start()
-        // A computer added or removed registers (or forgets) this phone at once.
-        MainScope().launch { model.machines.drop(1).collect { pushCenter.refresh() } }
+        VoiceHost.install(
+            this,
+            consent = { aiConsent.ensure(AIConsent.Purpose.VOICE) },
+            drainDictation = { dictation.cancelIfActive() },
+            // Called only after a fresh 401 from that computer; removes exactly the credential checked.
+            forget = { m -> model.forget(m) },
+        )
+        // A computer added or removed registers (or forgets) this phone at once, and a running voice mode follows.
+        MainScope().launch {
+            model.machines.drop(1).collect {
+                pushCenter.refresh()
+                VoiceHost.shared.machinesChanged(it)
+            }
+        }
     }
 
     /** The bridge for a page served by [primaryOrigin]. */
     fun bridge(primaryOrigin: String) = NativeBridge(model, primaryOrigin, dictation, voice, pushCenter, aiConsent, scanner)
-
-    // Until integration: what a build without voice mode answers (replaced by VoiceHost).
-
-    private object NoVoice : VoiceStarter {
-        override suspend fun start(agent: String, machine: String) = throw BridgeError("Voice mode isn't in this build yet.")
-        override fun stop() = Unit
-    }
 }

@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <!-- QR pairing. Not required: without a camera the user pastes the link. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
@@ -46,7 +47,32 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- The launcher's "Talk to pi" shortcut (plans/native-android.md A11). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/voice_shortcuts" />
         </activity>
+
+        <!-- Voice mode keeps listening with the screen off (A8); started only from visible UI. -->
+        <service
+            android:name=".voice.VoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Quick Settings "Talk to pi" (A11). -->
+        <service
+            android:name=".intents.StartVoiceTile"
+            android:exported="true"
+            android:icon="@drawable/voice_notification"
+            android:label="@string/voice_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="false" />
+        </service>
 
         <!-- Push through the relay (push/): data-only FCM messages, opened on the phone. No token before the user
              turns notifications on (FirebaseSetup.token). -->

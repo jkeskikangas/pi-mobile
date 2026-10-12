@@ -45,6 +45,9 @@ import dev.pi_mobile.app.shell.ShellPhase
 import dev.pi_mobile.app.shell.ShellScreen
 import dev.pi_mobile.app.shell.WebShell
 import dev.pi_mobile.app.ui.PiTheme
+import dev.pi_mobile.app.voice.VoiceHost
+import dev.pi_mobile.app.voiceui.VoiceRoute
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -55,6 +58,9 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity(), WebShell.Host {
     private val app get() = application as PiApplication
+
+    /** The page on screen, for voice mode's `voiceClosed`. */
+    private var shell: WebShell? = null
 
     /** A notification tap waiting for the shell: hub machine id and session id. */
     private val pendingFocus = MutableStateFlow<Pair<String, String>?>(null)
@@ -119,21 +125,18 @@ class MainActivity : ComponentActivity(), WebShell.Host {
 
     private fun handle(intent: Intent?) {
         if (BuildConfig.DEBUG) DebugLaunch.from(intent)?.let { debug(it) }
-        val agent = intent?.getStringExtra(Notifications.EXTRA_AGENT)?.takeIf { it.isNotEmpty() } ?: return
-        val machine = intent.getStringExtra(Notifications.EXTRA_MACHINE) ?: ""
-        if (intent.getBooleanExtra(Notifications.EXTRA_VOICE, false)) {
-            // Voice mode takes the session's machines-list entry (the primary when the notification names none).
-            val entry = intent.getStringExtra(Notifications.EXTRA_ENTRY)?.takeIf { it.isNotEmpty() } ?: app.model.primary?.id ?: ""
+        if (intent == null) return
+        val agent = intent.getStringExtra(Notifications.EXTRA_AGENT)?.takeIf { it.isNotEmpty() }
+        // "Answer by voice" (agent + entry), the tile and the launcher shortcut (neither: voice mode picks).
+        // The shortcut's XML extra arrives as the string "true".
+        val voice = intent.getBooleanExtra(VoiceHost.EXTRA_VOICE, false) || intent.getStringExtra(VoiceHost.EXTRA_VOICE) == "true"
+        if (voice) {
+            val entry = intent.getStringExtra(Notifications.EXTRA_ENTRY)?.takeIf { it.isNotEmpty() }
             lifecycleScope.launch {
-                try {
-                    app.dictation.cancelIfActive()
-                    app.voice.start(agent, entry)
-                } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, e.message, Toast.LENGTH_LONG).show()
-                }
+                talk(agent, entry)?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() }
             }
-        } else {
-            pendingFocus.value = machine to agent
+        } else if (agent != null) {
+            pendingFocus.value = (intent.getStringExtra(Notifications.EXTRA_MACHINE) ?: "") to agent
         }
     }
 
@@ -174,6 +177,15 @@ class MainActivity : ComponentActivity(), WebShell.Host {
                     // A re-paired or switched computer is a new page.
                     key(primary.id, primary.d, primary.origin) { Shell(primary) }
                 }
+                // Over the shell, which stays alive underneath and catches up when it closes (BRIDGE.md `voiceClosed`).
+                VoiceRoute(
+                    VoiceHost.shared,
+                    revokeConsent = {
+                        app.aiConsent.revoke()
+                        app.dictation.consentRevoked()
+                    },
+                    onClosed = { shell?.voiceClosed() },
+                )
                 ForgetDialog()
                 val scanning by app.scanner.isOpen.collectAsState()
                 if (scanning) ScannerSheet { app.scanner.finish(it.toScanResult()) }
@@ -185,7 +197,13 @@ class MainActivity : ComponentActivity(), WebShell.Host {
     @Composable
     private fun Shell(primary: Machine) {
         val shell = remember { WebShell(this, primary, app.model, app.bridge(primary.origin), app.dictation, this) }
-        DisposableEffect(shell) { onDispose { shell.destroy() } }
+        DisposableEffect(shell) {
+            this@MainActivity.shell = shell
+            onDispose {
+                if (this@MainActivity.shell === shell) this@MainActivity.shell = null
+                shell.destroy()
+            }
+        }
         LaunchedEffect(shell) { shell.load() }
         val focus by pendingFocus.collectAsState()
         LaunchedEffect(focus) {
@@ -212,7 +230,7 @@ class MainActivity : ComponentActivity(), WebShell.Host {
             onRetry = shell::load,
             others = others,
             onUse = { m -> try { app.model.makePrimary(m) } catch (e: Exception) { error = e.message } },
-            onTalk = { lifecycleScope.launch { error = talk() } },
+            onTalk = { lifecycleScope.launch { error = talk(null, null) } },
             error = error,
         ) {
             // Edge to edge, but the page sits inside the system bars and above the keyboard: it shrinks with the
@@ -221,16 +239,14 @@ class MainActivity : ComponentActivity(), WebShell.Host {
         }
     }
 
-    /** Voice mode needs no web view: the session last on screen, from the offline screen. Null, or the sentence. */
-    private suspend fun talk(): String? {
-        val last = app.model.prefs.lastFocus ?: return "No session is reachable right now."
-        return try {
-            app.dictation.cancelIfActive()
-            app.voice.start(last.agent, last.machine)
-            null
-        } catch (e: Exception) {
-            e.message
-        }
+    /** Starts voice mode (it needs no web view); null, or the sentence to show. */
+    private suspend fun talk(agent: String?, entry: String?): String? = try {
+        app.voice.start(agent, entry)
+        null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        e.message
     }
 
     /** Computers the page dropped that still accept this phone: the user decides (BRIDGE.md `machines`). */
