@@ -1,10 +1,10 @@
 # pi mobile privacy policy
 
-_Last updated: 11 October 2026. Applies to the pi iPhone app and the pi-mobile extension. Web address: https://pi-mobile.dev/privacy_
+_Last updated: 11 October 2026. Applies to the pi iPhone and Android apps and the pi-mobile extension. Web address: https://pi-mobile.dev/privacy_
 
 ## The short version
 
-**The developer of pi collects nothing.** There is no account, no analytics, no tracking and no advertising. The app talks to computers you pair it with, to OpenAI when you use voice mode, and, only if you turn notifications on, to the pi push relay and Apple. The relay is the one server run by the developer: it only forwards sealed notifications it can't read (details in the [relay README](https://github.com/jkeskikangas/pi-mobile/blob/main/relay/README.md)). The developer also runs the pi-mobile.dev website, a static site on Cloudflare with no cookies, analytics or tracking.
+**The developer of pi collects nothing.** There is no account, no analytics, no tracking and no advertising. The app talks to computers you pair it with, to OpenAI when you use voice mode, and, only if you turn notifications on, to the pi push relay and Apple (iPhone) or Google (Android). The relay is the one server run by the developer: it only forwards sealed notifications it can't read (details in the [relay README](https://github.com/jkeskikangas/pi-mobile/blob/main/relay/README.md)). The developer also runs the pi-mobile.dev website, a static site on Cloudflare with no cookies, analytics or tracking.
 
 ## Where your data goes
 
@@ -15,14 +15,16 @@ _Last updated: 11 October 2026. Applies to the pi iPhone app and the pi-mobile e
 | Your voice in **basic voice** (when realtime voice isn't available) | **Your computer**, which turns it into text and may speak replies using the speech services it is set up with (OpenAI or another provider) | Voice mode without the realtime model. |
 | Your recording in **dictation** | **Your computer**, which transcribes it with its speech service and tidies the text with its AI model (either may be OpenAI or another provider) | To turn speech into text you can review before sending. |
 | A notification (only if you turn notifications on) | **Apple's push service**. In the App Store app it goes through **the pi push relay**, an open-source Cloudflare Worker ([`relay/`](https://github.com/jkeskikangas/pi-mobile/tree/main/relay) in the repository) run by the developer; self-built apps can push from your computer directly | So you hear when pi finishes or needs you. The relay (and Cloudflare, which hosts it) handles your phone's push token and the sealed notification, which it can't read; Apple sees only "pi · New activity". The real text is sealed with your device key and opened on the phone. What the relay stores and for how long is described in the [relay README](https://github.com/jkeskikangas/pi-mobile/blob/main/relay/README.md). |
+| A notification on **Android** (only if you turn notifications on) | **Google's Firebase Cloud Messaging**, through **the pi push relay** | As above. Google receives only the sealed notification, which it can't read, plus the app's Firebase installation and push token (under [Google's privacy policy](https://policies.google.com/privacy)); the phone opens the text with your device key. The Android app asks Firebase for a token only after you turn notifications on. |
+| Scanning the pairing code on **Android** | Nowhere: the code is read on the phone by Google's ML Kit barcode scanner, which is bundled in the app | ML Kit may send Google anonymous diagnostics about its own performance and usage; it never receives the camera image or the code. |
 
 The app asks before voice mode or dictation sends any audio, and names these recipients. You can take that back at any time: voice settings → Stop sharing my voice, or the menu → Voice.
 
 ## What stays on your phone
 
-- The list of paired computers and their keys: in the iOS Keychain.
-- Your voice preferences, notification setting, the last session you looked at and your consent answer: in the app's own settings storage (UserDefaults).
-- The web view's storage (localStorage) holds a copy of the paired computers and their keys, rewritten from the Keychain each time the app opens, plus the web app's own settings; the web view also caches the web app's files.
+- The list of paired computers and their keys: in the iOS Keychain (iPhone), or in the app's private storage encrypted with a key held by the Android Keystore (Android; excluded from backups).
+- Your voice preferences, notification setting, the last session you looked at and your consent answer: in the app's own settings storage (UserDefaults on iPhone, SharedPreferences on Android).
+- The web view's storage (localStorage) holds a copy of the paired computers and their keys, rewritten from that storage each time the app opens, plus the web app's own settings; the web view also caches the web app's files.
 - A dictation recording is written to a temporary file while you record and deleted once it has been sent or cancelled.
 - Nothing else is stored by the app.
 
