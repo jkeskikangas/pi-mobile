@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window behind Compose: the page colour, transparent system bars (edge to edge, Compose pads the insets). -->
+    <style name="Base.Theme.Pi" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/pi_bg</item>
+        <item name="android:colorBackground">@color/pi_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.Pi" parent="Base.Theme.Pi" />
+</resources>
