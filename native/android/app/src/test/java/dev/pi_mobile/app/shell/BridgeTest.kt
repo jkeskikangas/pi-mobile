@@ -11,6 +11,7 @@ import dev.pi_mobile.app.core.Prefs
 import dev.pi_mobile.app.core.obj
 import dev.pi_mobile.app.dictation.Dictation
 import dev.pi_mobile.app.dictation.FakeRecorder
+import dev.pi_mobile.app.push.PushController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

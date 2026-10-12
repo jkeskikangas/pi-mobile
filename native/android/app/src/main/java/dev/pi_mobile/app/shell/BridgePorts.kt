@@ -1,9 +1,7 @@
 package dev.pi_mobile.app.shell
 
-import kotlinx.serialization.json.JsonElement
-
 /*
- * What the bridge (NativeBridge, BRIDGE.md) needs from features built elsewhere. Each is implemented by its feature's
+ * What the bridge (NativeBridge, BRIDGE.md) needs from features built elsewhere (push's is push/PushController). Each is implemented by its feature's
  * package and handed to NativeBridge in PiApplication; the bridge only translates messages and replies.
  *
  * Every suspend function reports a failure by throwing: the exception's message is the sentence the page shows
@@ -25,15 +23,6 @@ interface VoiceStarter {
 
     /** Ends voice mode if it is open (the user took back their consent); no-op otherwise. */
     fun stop()
-}
-
-/** Notifications through the relay (package `push`, app/PushCenter). Values are BRIDGE.md's `push.status` object. */
-interface PushController {
-    /** `{ on, permission, available, computers }` (BRIDGE.md `push.status`). */
-    suspend fun status(): JsonElement
-
-    /** Turns notifications on or off and returns the new status; throws the sentence when it can't (`push.enable`). */
-    suspend fun enable(on: Boolean): JsonElement
 }
 
 /** What the user's OK covers (native/ios/README.md → Consent); the sheet words its request for each. */

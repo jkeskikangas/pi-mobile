@@ -1,4 +1,131 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">pi-mobile</string>
+    <string name="app_name">pi</string>
+
+    <!-- Shared -->
+    <string name="privacy_policy">Privacy policy</string>
+    <string name="cancel">Cancel</string>
+    <string name="done">Done</string>
+    <string name="close">Close</string>
+    <string name="back">Back</string>
+    <string name="open_settings">Open settings</string>
+
+    <!-- Pairing (PairingView.swift) -->
+    <string name="pairing_title">Pair with your computer</string>
+    <string name="pairing_subtitle">Continue every pi session from this phone.</string>
+    <string name="pairing_step_1"><![CDATA[On your computer, run <b>/remote</b> in pi.]]></string>
+    <string name="pairing_step_2_scan">Scan the code it shows.</string>
+    <string name="pairing_step_2_paste">Copy the link it shows and paste it here.</string>
+    <string name="pairing_step_label">Step %1$d. %2$s</string>
+    <string name="pairing_scan">Scan code</string>
+    <string name="pairing_paste_instead">Paste link instead</string>
+    <string name="pairing_paste">Paste link</string>
+    <string name="pairing_pairing">Pairing…</string>
+    <string name="pairing_not_a_link">That isn’t a pairing link. Run /remote in pi and scan or copy the code it shows.</string>
+    <string name="pairing_expired">That code was already used or has expired. Run /remote again for a new one.</string>
+    <string name="pairing_unauthorized">That code isn’t valid. Run /remote again for a new one.</string>
+    <string name="pairing_network">Can’t reach your computer. Check that this phone is on the same Wi-Fi or tailnet, and that pi is running.</string>
+    <string name="camera_rationale">Scanning needs the camera. pi uses it only to read the code from /remote, on this phone.</string>
+    <string name="camera_allow">Allow camera</string>
+    <string name="camera_off">Camera access is off. Turn it on in Settings to scan, or paste the link.</string>
+    <string name="paste_title">Paste link</string>
+    <string name="paste_explainer">Copy the link that /remote shows on your computer, then paste it here.</string>
+    <string name="paste_placeholder">http://…/#p=…</string>
+    <string name="paste_field_label">Pairing link</string>
+    <string name="paste_from_clipboard">Paste</string>
+    <string name="paste_pair">Pair</string>
+
+    <!-- Scanner (ScannerView.swift, ScanCenter.swift; the last three are also scan errors for the web, BRIDGE.md) -->
+    <string name="scan_hint">Point at the code from /remote</string>
+    <string name="scan_not_pi">That code isn’t from pi. Scan the one /remote shows.</string>
+    <string name="scan_camera">Camera</string>
+    <string name="scan_unavailable">The camera isn’t available right now. Paste the link instead.</string>
+    <string name="scan_unsupported">The camera isn’t available on this phone. Paste the link instead.</string>
+    <string name="scan_denied">Camera access is off. Turn it on in Settings, or paste the link instead.</string>
+
+    <!-- Consent (ConsentSheet.swift) -->
+    <string name="consent_title">Where your voice goes</string>
+    <string name="consent_intro_voice">Before voice mode starts, here is who hears you.</string>
+    <string name="consent_intro_dictation">Before dictation starts, here is who hears you.</string>
+    <string name="consent_voice_title">Voice mode</string>
+    <string name="consent_voice_text"><![CDATA[Your voice streams straight to <b>OpenAI</b>’s realtime model, using your computer’s ChatGPT sign-in or API key. OpenAI also gets the session’s recent messages and tool results as context. Your computer gets what you say and pi’s replies.]]></string>
+    <string name="consent_basic_title">Basic voice</string>
+    <string name="consent_basic_text"><![CDATA[When realtime voice isn’t available, <b>your computer</b> turns your speech into text and may speak replies, using the speech services it is set up with (OpenAI or another provider).]]></string>
+    <string name="consent_dictation_title">Dictation</string>
+    <string name="consent_dictation_text"><![CDATA[The recording goes to <b>your computer</b>, which transcribes it with its speech service and tidies the text with its AI model. Either may be OpenAI or another provider.]]></string>
+    <string name="consent_developer_title">Not the developer</string>
+    <string name="consent_developer_text">The developer of pi never receives your audio or text. Traffic between this phone and your computer is end-to-end encrypted.</string>
+    <string name="consent_footer">Each provider handles what it gets under its own privacy policy. You can turn this off any time in voice settings or the menu.</string>
+    <string name="consent_pi_privacy">pi’s privacy policy</string>
+    <string name="consent_openai_privacy">OpenAI’s privacy policy</string>
+    <string name="consent_allow">Allow</string>
+    <string name="consent_allow_hint">Lets voice mode and dictation send audio as described</string>
+    <string name="consent_not_now">Not now</string>
+
+    <!-- Shell (ShellView.swift) -->
+    <string name="shell_connecting">Connecting…</string>
+    <string name="shell_connecting_to">Connecting to %1$s…</string>
+    <string name="shell_cant_reach_yours">Can’t reach your computer</string>
+    <string name="shell_cant_reach">Can’t reach %1$s</string>
+    <string name="shell_offline_advice">Check that pi is running with /remote on, and that this phone is on the same Wi-Fi or tailnet.</string>
+    <string name="shell_retry_in">Trying again in %1$d s</string>
+    <string name="shell_retrying">Trying again…</string>
+    <string name="shell_try_again">Try again now</string>
+    <string name="shell_open_other">Open %1$s</string>
+    <string name="shell_open_other_unnamed">Open your other computer</string>
+    <string name="shell_talk">Talk to pi</string>
+
+    <!-- Voice mode (VoiceScreen.swift, QuestionCard.swift) -->
+    <string name="voice_session">Session</string>
+    <string name="voice_switch_session">Switch session</string>
+    <string name="voice_settings">Voice settings</string>
+    <string name="voice_mute">Mute</string>
+    <string name="voice_unmute">Unmute</string>
+    <string name="voice_end">End</string>
+    <string name="voice_end_label">End voice mode</string>
+    <string name="voice_pi_speaking">pi is speaking</string>
+    <string name="voice_you">"You · "</string>
+    <string name="voice_you_said">You said: %1$s</string>
+    <string name="voice_pi_said">pi: %1$s</string>
+    <string name="voice_pi_asks">pi asks</string>
+    <string name="voice_pi_asks_title">pi asks: %1$s</string>
+    <string name="voice_going_ahead">Going ahead</string>
+    <string name="voice_going_ahead_in">Going ahead in %1$d s, as you asked. Say “stop” or tap Cancel.</string>
+    <string name="voice_say_answer">Say your answer.</string>
+    <string name="voice_do_it_now">Do it now</string>
+    <string name="voice_destructive">Destructive</string>
+
+    <!-- Voice sheets (VoiceSheets.swift) -->
+    <string name="voice_talk_to">Talk to</string>
+    <string name="voice_no_sessions">No other sessions</string>
+    <string name="voice_group_needs_you">Needs you</string>
+    <string name="voice_group_working">Working</string>
+    <string name="voice_group_idle">Idle</string>
+    <string name="voice_sub_terminal">Waiting for input in the terminal</string>
+    <string name="voice_attention_header">How much pi says</string>
+    <string name="voice_eyes_free">Eyes-free</string>
+    <string name="voice_can_glance">Can glance</string>
+    <string name="voice_eyes_free_footer">Shortest answers, nothing visual: driving, running, cycling.</string>
+    <string name="voice_glance_footer">A little more detail; you can look at the screen.</string>
+    <string name="voice_turns_header">Taking turns</string>
+    <string name="voice_open_mic">Open mic</string>
+    <string name="voice_push_to_talk">Push to talk</string>
+    <string name="voice_open_mic_footer">Just talk; pi notices when you’re done.</string>
+    <string name="voice_ptt_footer">Hold the circle while you talk, or tap to start and stop. For wind, traffic and noise.</string>
+    <string name="voice_voice_header">Voice</string>
+    <string name="voice_choose">Choose a voice</string>
+    <string name="voice_choose_sub">How pi sounds</string>
+    <string name="voice_basic">Basic voice: recognition on your computer and a spoken brief.</string>
+    <string name="voice_basic_because">Basic voice: recognition on your computer and a spoken brief, because realtime voice is unavailable (%1$s).</string>
+    <string name="voice_realtime">Realtime voice.</string>
+    <string name="voice_say_settings">You can also say “push to talk”, “open mic”, “eyes free” or “I can glance”.</string>
+    <string name="voice_privacy_header">Privacy</string>
+    <string name="voice_stop_sharing">Stop sharing my voice</string>
+    <string name="voice_stop_sharing_title">Stop sharing your voice?</string>
+    <string name="voice_stop_sharing_message">Voice mode ends now. pi asks again before voice mode or dictation next time.</string>
+    <string name="voice_stop_sharing_confirm">Stop sharing and end voice mode</string>
+    <string name="voice_privacy_footer">Your voice goes to OpenAI for realtime speech and to your computer. The developer of pi never receives it.</string>
+    <string name="voice_persona_footer">Tap a voice to hear it. It changes how pi sounds, never what it says or how much.</string>
+    <string name="voice_switching">Switching voice</string>
+    <string name="voice_plays_sample">Plays a sample</string>
 </resources>

@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.pm.PackageManager
 import android.webkit.WebView
 import dev.pi_mobile.app.BuildConfig
+import dev.pi_mobile.app.PushCenter
+import dev.pi_mobile.app.core.HubClient
 import dev.pi_mobile.app.core.KeystoreMachineStore
 import dev.pi_mobile.app.core.Prefs
 import dev.pi_mobile.app.dictation.AudioRecorder
@@ -14,18 +16,20 @@ import dev.pi_mobile.app.shell.ConsentKind
 import dev.pi_mobile.app.shell.NativeBridge
 import dev.pi_mobile.app.shell.NetworkWatch
 import dev.pi_mobile.app.shell.Permissions
-import dev.pi_mobile.app.shell.PushController
+import dev.pi_mobile.app.push.FirebaseSetup
+import dev.pi_mobile.app.push.SystemNotificationPermission
 import dev.pi_mobile.app.shell.ScanCenter
 import dev.pi_mobile.app.shell.VoiceStarter
-import dev.pi_mobile.app.core.obj
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 
 /**
  * The process: one [AppModel] and the app-scoped services the shell, the bridge and (later) the voice service and
  * notifications share. Everything here outlives an activity: a dictation take or a scan belongs to the page, which
- * the activity may recreate.
+ * the activity may recreate. It is also [PushCenter.Host], so FCM callbacks find the one PushCenter.
  */
-class PiApplication : Application() {
+class PiApplication : Application(), PushCenter.Host {
     lateinit var model: AppModel
         private set
     lateinit var permissions: Permissions
@@ -37,9 +41,14 @@ class PiApplication : Application() {
     lateinit var network: NetworkWatch
         private set
 
-    // Implemented by other packages and wired here at integration: voice/VoiceHost, app/PushCenter, consent/AIConsent.
+    /** Asked only from the web's Turn on notifications; MainActivity attaches its launcher. */
+    lateinit var notificationPermission: SystemNotificationPermission
+        private set
+    override lateinit var pushCenter: PushCenter
+        private set
+
+    // Implemented by other packages and wired here at integration: voice/VoiceHost, consent/AIConsent.
     var voice: VoiceStarter = NoVoice
-    var push: PushController = NoPush
     var consent: ConsentController = NoConsent
 
     override fun onCreate() {
@@ -53,23 +62,28 @@ class PiApplication : Application() {
         }
         scanner = ScanCenter(permissions) { packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
         network = NetworkWatch(this)
+        // Before FCM can deliver anything; without a Firebase configuration push reports available: false.
+        FirebaseSetup.init(this)
+        notificationPermission = SystemNotificationPermission(this)
+        pushCenter = PushCenter.create(
+            this, notificationPermission,
+            machines = { model.machines.value },
+            // The model's client per computer; one that can't be built throws its sentence (key, origin).
+            hubs = { m, method, p -> (model.client(m) ?: HubClient(m)).rpc(method, p) },
+        )
+        pushCenter.start()
+        // A computer added or removed registers (or forgets) this phone at once.
+        MainScope().launch { model.machines.drop(1).collect { pushCenter.refresh() } }
     }
 
     /** The bridge for a page served by [primaryOrigin]. */
-    fun bridge(primaryOrigin: String) = NativeBridge(model, primaryOrigin, dictation, voice, push, consent, scanner)
+    fun bridge(primaryOrigin: String) = NativeBridge(model, primaryOrigin, dictation, voice, pushCenter, consent, scanner)
 
     // Until integration: what a build without these features answers (replaced by the real implementations).
 
     private object NoVoice : VoiceStarter {
         override suspend fun start(agent: String, machine: String) = throw BridgeError("Voice mode isn't in this build yet.")
         override fun stop() = Unit
-    }
-
-    /** BRIDGE.md `push.status` for a build without push (`available: false`, plans/native-android.md A14). */
-    private object NoPush : PushController {
-        private val off = obj("on" to false, "permission" to "default", "available" to false, "computers" to emptyList<Any>())
-        override suspend fun status() = off
-        override suspend fun enable(on: Boolean) = throw BridgeError("Notifications aren't available in this build.")
     }
 
     private object NoConsent : ConsentController {

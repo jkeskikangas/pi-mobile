@@ -1664,7 +1664,7 @@
 				const n = S.push.native;
 				if (n?.available === false) body.appendChild(el("p", "note", "Notifications aren't available in this build of the app."));
 				else if (n?.on) add("Turn off notifications", () => setNativePush(false), "", "bell", "You get one when pi finishes or asks");
-				else add("Turn on notifications", () => setNativePush(true), "", "bell", n?.permission === "denied" ? "Allow them for pi in iPhone Settings first" : "When pi finishes or needs you");
+				else add("Turn on notifications", () => setNativePush(true), "", "bell", n?.permission === "denied" ? `Allow them for pi in ${window.PiNative.platform === "android" ? "Android" : "iPhone"} Settings first` : "When pi finishes or needs you");
 				if (n?.available !== false) notifyLines(body);
 			} else if (!pushSupported()) {
 				body.appendChild(el("p", "note", "On iPhone, add this page to your Home Screen (Share → Add to Home Screen) and open pi from there to get lock-screen notifications."));

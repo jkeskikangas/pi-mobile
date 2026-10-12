@@ -39,6 +39,7 @@ import dev.pi_mobile.app.BuildConfig
 import dev.pi_mobile.app.R
 import dev.pi_mobile.app.core.Machine
 import dev.pi_mobile.app.core.PairingLink
+import dev.pi_mobile.app.push.Notifications
 import dev.pi_mobile.app.shell.ShellPhase
 import dev.pi_mobile.app.shell.WebShell
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,8 +47,8 @@ import kotlinx.coroutines.launch
 
 /**
  * The one activity: the pairing screen until a computer is paired, then the web shell. Also receives notification
- * taps (singleTask → [onNewIntent]): [EXTRA_AGENT] + [EXTRA_MACHINE] open that session in the page
- * (BRIDGE.md `focus`), with [EXTRA_VOICE] they start voice mode on it ("Answer by voice").
+ * taps (push/Notifications' extras, → [onNewIntent]): agent + machine open that session in the page
+ * (BRIDGE.md `focus`); with voice they start voice mode on it ("Answer by voice") on the list entry.
  */
 class MainActivity : ComponentActivity(), WebShell.Host {
     private val app get() = application as PiApplication
@@ -68,9 +69,16 @@ class MainActivity : ComponentActivity(), WebShell.Host {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         app.permissions.attach(this)
+        app.notificationPermission.attach(this)
         app.dictation.onDenied = { offerMicrophoneSettings() }
         if (savedInstanceState == null) handle(intent)
         setContent { Root() }
+    }
+
+    /** Every return to the app: computers may have dropped this phone's relay registration meanwhile. */
+    override fun onStart() {
+        super.onStart()
+        app.pushCenter.refresh()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -101,15 +109,15 @@ class MainActivity : ComponentActivity(), WebShell.Host {
 
     private fun handle(intent: Intent?) {
         if (BuildConfig.DEBUG) DebugLaunch.from(intent)?.let { debug(it) }
-        val agent = intent?.getStringExtra(EXTRA_AGENT)?.takeIf { it.isNotEmpty() } ?: return
-        val machine = intent.getStringExtra(EXTRA_MACHINE) ?: ""
-        if (intent.getBooleanExtra(EXTRA_VOICE, false)) {
-            // Voice mode takes the session's machines-list entry; the notification names the hub machine.
-            val entry = app.model.machines.value.firstOrNull { it.machine == machine && machine.isNotEmpty() } ?: app.model.primary
+        val agent = intent?.getStringExtra(Notifications.EXTRA_AGENT)?.takeIf { it.isNotEmpty() } ?: return
+        val machine = intent.getStringExtra(Notifications.EXTRA_MACHINE) ?: ""
+        if (intent.getBooleanExtra(Notifications.EXTRA_VOICE, false)) {
+            // Voice mode takes the session's machines-list entry (the primary when the notification names none).
+            val entry = intent.getStringExtra(Notifications.EXTRA_ENTRY)?.takeIf { it.isNotEmpty() } ?: app.model.primary?.id ?: ""
             lifecycleScope.launch {
                 try {
                     app.dictation.cancelIfActive()
-                    app.voice.start(agent, entry?.id ?: "")
+                    app.voice.start(agent, entry)
                 } catch (e: Exception) {
                     Toast.makeText(this@MainActivity, e.message, Toast.LENGTH_LONG).show()
                 }
@@ -151,7 +159,7 @@ class MainActivity : ComponentActivity(), WebShell.Host {
         MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
             val machines by app.model.machines.collectAsState()
             val primary = AppModel.primaryOf(machines)
-            Box(Modifier.fillMaxSize().background(colorResource(R.color.pi_background))) {
+            Box(Modifier.fillMaxSize().background(colorResource(R.color.pi_bg))) {
                 if (primary == null) {
                     PairingPlaceholder(app.model)
                 } else {
@@ -197,16 +205,5 @@ class MainActivity : ComponentActivity(), WebShell.Host {
             confirmButton = { TextButton(onClick = { app.model.forget(m) }) { Text("Forget", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { app.model.keep(m) }) { Text("Keep") } },
         )
-    }
-
-    companion object {
-        /** Session id the notification is about. */
-        const val EXTRA_AGENT = "agent"
-
-        /** The hub's machine id (may be empty) of that session. */
-        const val EXTRA_MACHINE = "machine"
-
-        /** "Answer by voice": start voice mode on that session instead of just opening it. */
-        const val EXTRA_VOICE = "voice"
     }
 }

@@ -44,15 +44,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 
-/** What the shell chrome shows over (or instead of) the web view. */
-sealed interface ShellPhase {
-    data object Loading : ShellPhase
-    data object Ready : ShellPhase
-
-    /** The page can't be shown; [message] says why (never a WebView error page). */
-    data class Offline(val message: String) : ShellPhase
-}
-
 /**
  * The web UI of the primary computer in an [android.webkit.WebView], already paired through the document-start script
  * (BRIDGE.md → Setup, plans/native-android.md A7). Owns the view, its loading state and the native → JS calls; the
@@ -167,7 +158,7 @@ class WebShell(
     private fun newWebView(): WebView = WebView(context).apply {
         // A WRAP_CONTENT web view (AndroidView's default) sizes the page to its content: 100vh would be 0.
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        setBackgroundColor(ContextCompat.getColor(context, R.color.pi_background))
+        setBackgroundColor(ContextCompat.getColor(context, R.color.pi_bg))
         overScrollMode = View.OVER_SCROLL_NEVER
         settings.apply {
             javaScriptEnabled = true

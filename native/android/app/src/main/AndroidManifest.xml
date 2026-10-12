@@ -45,6 +45,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Push through the relay (push/): data-only FCM messages, opened on the phone. No token before the user
+             turns notifications on (FirebaseSetup.token). -->
+        <service
+            android:name=".push.PiMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
     </application>
 
 </manifest>

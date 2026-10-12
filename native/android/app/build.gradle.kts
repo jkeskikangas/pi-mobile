@@ -84,6 +84,9 @@ android {
             it.systemProperty("pi.repo", rootProject.file("../..").absolutePath)
             // scripts/integration.sh: the fixture hub's pairing link for FixtureHubIntegrationTest.
             prop("piPairLink").takeIf { l -> l.isNotEmpty() }?.let { l -> it.systemProperty("PI_PAIR_LINK", l) }
+            // Screenshot tests write to build/shots; `-Ppi.shots` refreshes the committed native/android/shots.
+            val shots = if (project.hasProperty("pi.shots")) rootProject.file("shots") else layout.buildDirectory.dir("shots").get().asFile
+            it.systemProperty("pi.shots", shots.absolutePath)
         }
     }
 
@@ -138,6 +141,12 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("androidx.test:core:1.7.0")
     testImplementation("io.github.dokar3:quickjs-kt-jvm:1.0.15")
+    // Compose UI tests and screenshots under Robolectric (native graphics).
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    // Captures composables under Robolectric (captureToImage needs a real frame); no Gradle plugin.
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.76.0")
 
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

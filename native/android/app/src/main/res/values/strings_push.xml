@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="push_channel_asks">pi needs you</string>
+    <string name="push_channel_asks_description">A session asks a question or waits for your answer.</string>
+    <string name="push_channel_activity">pi finished</string>
+    <string name="push_channel_activity_description">A session finished its work.</string>
+    <string name="push_answer_by_voice">Answer by voice</string>
+</resources>

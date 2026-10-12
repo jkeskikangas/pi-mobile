@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The web UI's background token, bg in web/app.css (dark). -->
-    <color name="pi_background">#0E0F11</color>
-
-    <style name="Theme.Pi" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/pi_background</item>
-        <item name="android:colorBackground">@color/pi_background</item>
+    <style name="Base.Theme.Pi" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/pi_bg</item>
+        <item name="android:colorBackground">@color/pi_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>
