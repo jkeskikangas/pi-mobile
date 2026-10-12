@@ -87,4 +87,12 @@ Call with `webView.evaluateJavaScript("window.PiNative.<fn>(…)")` on the main 
 - The menu's Voice section shows Stop sharing my voice (`consent.revoke`) while `consent.status` says granted, else a note that pi asks first (when `window.PiNative?.consent` is true).
 - With `push.status` `available: false`, the Notifications section is only a note: notifications aren't available in this build.
 
+## Android app
+
+The Android app (`native/android`, `shell/ShellScripts.kt`, `shell/NativeBridge.kt`) implements this same contract, so the web needs no Android branch:
+
+- Its document-start script (`WebViewCompat.addDocumentStartJavaScript`, primary origin only) does the Setup above and also sets `window.PiNative.platform = "android"` (absent on iOS). The web uses it only for wording (e.g. "Android Settings").
+- It defines `window.webkit.messageHandlers.piNative.postMessage(msg)` as a shim returning a Promise: it posts `{id, msg}` to a `WebMessageListener` named `piNativeAndroid` that only the primary origin can reach; native replies `{id, ok}` or `{id, error}`, which resolve or reject it (an `Error` whose `message` is the text). The Trust rule is checked on the listener's `isMainFrame` and `sourceOrigin`.
+- Native → JS calls are the same functions, run with `evaluateJavascript`. Where this document says Keychain, Android uses its Keystore-encrypted machine store; "this iPhone" reads "this phone".
+
 Version: `window.PiNative.version` is set by native (currently `1`); bump it if this contract changes incompatibly, and gate new web behaviour on it. Additive messages get a capability flag instead (`window.PiNative.scan = true`, set in the setup script), which the web checks before using them.
