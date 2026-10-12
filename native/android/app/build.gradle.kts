@@ -78,7 +78,7 @@ android {
             // -PpiReleaseDebugSigned: a release build signed with the debug key, to try the shrunk app on an emulator.
             // Never uploaded: Play refuses debug-signed apps.
             signingConfig = signingConfigs.findByName("upload")
-                ?: signingConfigs.getByName("debug").takeIf { prop("piReleaseDebugSigned").isNotEmpty() }
+                ?: signingConfigs.getByName("debug").takeIf { project.hasProperty("piReleaseDebugSigned") }
         }
     }
 

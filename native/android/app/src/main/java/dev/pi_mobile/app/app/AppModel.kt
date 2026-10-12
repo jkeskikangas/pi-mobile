@@ -71,7 +71,7 @@ class AppModel(
     }
 
     /** Serves the web UI from another computer (the primary one is unreachable). */
-    fun makePrimary(m: Machine) = synchronized(lock) {
+    fun makePrimary(m: Machine): Unit = synchronized(lock) {
         val now = _machines.value
         if (now.none { it.id == m.id }) return
         commit(now.map { it.copy(primary = it.id == m.id) })
