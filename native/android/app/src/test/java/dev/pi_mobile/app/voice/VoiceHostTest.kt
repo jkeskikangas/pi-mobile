@@ -7,6 +7,7 @@ import dev.pi_mobile.app.core.HubInfo
 import dev.pi_mobile.app.core.Machine
 import dev.pi_mobile.app.core.Prefs
 import dev.pi_mobile.app.core.obj
+import dev.pi_mobile.app.push.NotificationPermission
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -80,8 +81,14 @@ class VoiceHostTest {
         override fun basic() = FakeBasic()
         override fun earcons(core: VoiceCore) = FakeEarcons()
         override fun audioSession() = FakeAudioSession()
+        var refuseService = false
+        var offers = 0
         override fun startService() {
+            if (refuseService) throw IllegalStateException("ForegroundServiceStartNotAllowedException")
             services += 1
+        }
+        override suspend fun offerNotifications() {
+            offers += 1
         }
     }
 
@@ -178,6 +185,49 @@ class VoiceHostTest {
         fleet.onUnauthorized!!("m2")
         runCurrent()
         assertEquals(listOf("m2"), forgotten)
+    }
+
+    @Test fun aRunningVoiceModeJustComesForwardWhenNoSessionIsNamed() = hostTest {
+        host.start("a1", "m1")
+        runCurrent()
+        val before = Triple(consents.size, drained, calls.size)
+        sessions["m2"] = listOf(session("b1", "api", "waiting")) // would win a pick
+        host.start() // the notification, the tile, the shortcut
+        runCurrent()
+        assertEquals(before, Triple(consents.size, drained, calls.size))
+        assertEquals("a1", host.engine.agent)
+        assertEquals(1, platform.services)
+    }
+
+    @Test fun aRefusedServiceStartsNothingAndSaysWhy() = hostTest {
+        platform.refuseService = true
+        assertEquals(VoiceHost.OPEN_PI, failure { host.start("a1", "m1") }?.message)
+        assertFalse(host.engine.isOpen)
+        assertNull(host.running.value)
+        assertTrue(calls.none { it.endsWith(":voiceSession") })
+        assertEquals(0, platform.offers)
+    }
+
+    @Test fun notificationsAreOfferedAlongsideNotBefore() = hostTest {
+        host.start("a1", "m1")
+        runCurrent()
+        assertTrue(host.engine.isOpen)
+        assertEquals(1, platform.offers)
+    }
+
+    @Test fun theNotificationPermissionIsAskedOnlyWhileTheDialogWouldShow() = runTest {
+        val explained = mutableListOf<String>()
+        var asked = 0
+        fun permission(state: String) = object : NotificationPermission {
+            override suspend fun request(): Boolean = true.also { asked++ }
+            override fun state() = state
+        }
+        VoiceHost.offerNotifications(permission("granted"), explained::add)
+        VoiceHost.offerNotifications(permission("denied"), explained::add)
+        assertEquals(0, asked)
+        VoiceHost.offerNotifications(permission("default"), explained::add)
+        assertEquals(1, asked)
+        assertEquals(listOf(VoiceHost.NOTIFICATIONS_REASON), explained)
     }
 
     @Test fun voicePrefsGoThroughTheBridgeKeys() {

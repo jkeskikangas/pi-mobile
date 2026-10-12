@@ -7,11 +7,13 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.widget.Toast
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -37,17 +39,27 @@ class VoiceService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val host = VoiceHost.sharedOrNull
+        val running = host?.engine?.takeIf { it.isOpen }
         when (intent?.action) {
-            ACTION_MUTE -> host?.engine?.toggleMute()
-            ACTION_END -> host?.engine?.stop()
+            // A Mute or End left on a notification of a voice mode that is gone: nothing to act on, nothing to keep.
+            ACTION_MUTE -> running?.toggleMute() ?: return stop()
+            ACTION_END -> running?.stop() ?: return stop()
             else -> {
                 if (watch == null) startedMs = System.currentTimeMillis()
                 // Within seconds of startForegroundService, and while the app is visible (microphone FGS rules).
                 val ui = host?.engine?.ui?.value ?: VoiceUiState()
-                ServiceCompat.startForeground(
-                    this, VoiceNotification.ID, VoiceNotification.build(this, VoiceNotificationContent.of(ui, startedMs)),
-                    if (Build.VERSION.SDK_INT >= 30) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0,
-                )
+                try {
+                    ServiceCompat.startForeground(
+                        this, VoiceNotification.ID, VoiceNotification.build(this, VoiceNotificationContent.of(ui, startedMs)),
+                        if (Build.VERSION.SDK_INT >= 30) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0,
+                    )
+                } catch (_: RuntimeException) {
+                    // Android 14+ refuses a microphone service unless pi is in front (SecurityException), 12+ a
+                    // late start (ForegroundServiceStartNotAllowedException): no voice mode without it.
+                    host?.engine?.stop()
+                    Toast.makeText(this, VoiceHost.OPEN_PI, Toast.LENGTH_LONG).show()
+                    return stop()
+                }
                 // Started for a voice mode that is already gone (a restart without the app): nothing to keep alive.
                 if (host == null) return stop()
                 run(host)
@@ -63,6 +75,11 @@ class VoiceService : Service() {
             acquire(WAKE_LOCK_MAX_MS)
         }
         var wasOpen = false
+        // A voice mode that never opened (its start failed after the service was asked for) keeps nothing alive.
+        scope.launch {
+            delay(OPEN_TIMEOUT_MS)
+            if (!wasOpen) stop()
+        }
         watch = scope.launch {
             host.engine.ui
                 .map { it.isOpen to VoiceNotificationContent.of(it, startedMs) }
@@ -95,6 +112,8 @@ class VoiceService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        // The phone-wide mic mute is pi's only while voice mode runs.
+        AudioSessionController.clearStaleMute(this)
         wakeLock?.takeIf { it.isHeld }?.release()
         super.onDestroy()
     }
@@ -105,6 +124,7 @@ class VoiceService : Service() {
         const val ACTION_END = "dev.pi_mobile.app.voice.END"
         /** A safety net: a voice mode that somehow never ends doesn't hold the CPU forever. */
         private const val WAKE_LOCK_MAX_MS = 4 * 60 * 60 * 1000L
+        private const val OPEN_TIMEOUT_MS = 10_000L
 
         fun intent(context: Context, action: String): Intent = Intent(context, VoiceService::class.java).setAction(action)
     }

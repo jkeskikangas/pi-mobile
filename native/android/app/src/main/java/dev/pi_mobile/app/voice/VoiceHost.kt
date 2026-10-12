@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import dev.pi_mobile.app.core.HubClient
 import dev.pi_mobile.app.core.HubError
@@ -14,6 +15,7 @@ import dev.pi_mobile.app.core.MachineStore
 import dev.pi_mobile.app.core.Prefs
 import dev.pi_mobile.app.core.get
 import dev.pi_mobile.app.core.string
+import dev.pi_mobile.app.push.NotificationPermission
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.async
@@ -61,8 +63,10 @@ class VoiceHost(
         fun basic(): BasicAudio
         fun earcons(core: VoiceCore): EarconPlaying
         fun audioSession(): VoiceAudioSession?
-        /** Keeps voice mode alive in the background ([VoiceService]). */
+        /** Keeps voice mode alive in the background ([VoiceService]); throws when Android refuses it now. */
         fun startService()
+        /** Asks once for the notification permission, with the reason (see [offerNotifications]). */
+        suspend fun offerNotifications()
     }
 
     /** A session voice mode can follow. */
@@ -94,6 +98,9 @@ class VoiceHost(
      * last. Throws [HubError] with a sentence to show when it can't.
      */
     suspend fun start(agent: String? = null, machine: String? = null) {
+        // Already talking and no session named (the notification, the tile, the shortcut): the screen just comes
+        // forward. No pick, no network, no switch.
+        if (engine.isOpen && agent == null) return
         drainDictation()
         val target = if (agent != null && machine != null) Target(agent, machine) else pickSession(agent) ?: throw HubError.Network(NO_SESSION)
         val open = engine.isOpen
@@ -119,9 +126,16 @@ class VoiceHost(
             ),
         )
         engine.onClose = { onClosed?.invoke() }
-        platform.startService()
+        // Android refuses a microphone service unless pi is on screen: then nothing starts, and the user is told why.
+        try {
+            platform.startService()
+        } catch (_: Exception) {
+            throw HubError.Network(OPEN_PI)
+        }
         // The voice screen shows as soon as the engine opens; connecting continues behind it.
         scope.launch { engine.start(target.agent, target.machine) }
+        // Without the notification there is no Mute and End off the voice screen: ask once, never in the way.
+        scope.launch { catching { platform.offerNotifications() } }
     }
 
     /** End voice mode (the notification's End, the voice screen). */
@@ -181,15 +195,36 @@ class VoiceHost(
             consent: suspend (kind: String) -> Unit,
             drainDictation: suspend () -> Unit,
             forget: (Machine) -> Unit,
+            notifications: NotificationPermission? = null,
             store: MachineStore = KeystoreMachineStore(context),
             prefs: Prefs = Prefs(context),
             connect: (Machine) -> FleetClient = { HubFleetClient(HubClient(it)) },
         ): VoiceHost {
             val app = context.applicationContext
             val scope = MainScope()
-            return VoiceHost(scope, prefs, store::load, connect, AndroidPlatform(app, scope), consent, drainDictation, forget)
+            // A crash or a kill while muted left the phone's microphone muted for every app: lift it.
+            AudioSessionController.clearStaleMute(app)
+            return VoiceHost(scope, prefs, store::load, connect, AndroidPlatform(app, scope, notifications), consent, drainDictation, forget)
                 .also { sharedOrNull = it }
         }
+
+        const val OPEN_PI = "Open pi to start voice mode."
+        const val NOTIFICATIONS_REASON = "Allow notifications for Mute and End from the lock screen."
+
+        /**
+         * The ongoing notification needs POST_NOTIFICATIONS on Android 13+. Asked at most once (only while the
+         * system would still show its dialog), with the reason first; voice mode never waits for the answer.
+         */
+        suspend fun offerNotifications(permission: NotificationPermission, explain: (String) -> Unit) {
+            if (permission.state() != "default") return
+            explain(NOTIFICATIONS_REASON)
+            permission.request()
+        }
+
+        /** Brings the app forward; a running voice mode shows its screen (the ongoing notification's tap). */
+        fun showIntent(context: Context): Intent =
+            (context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent())
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 
         /** Opens the app on the voice screen. */
         fun openIntent(context: Context): Intent =
@@ -223,15 +258,27 @@ class PrefsVoicePrefs(private val prefs: Prefs) : VoicePrefs {
     override fun set(key: String, value: String?) = prefs.setVoice(key, value)
 }
 
-private class AndroidPlatform(private val app: Context, private val scope: CoroutineScope) : VoiceHost.Platform {
+private class AndroidPlatform(
+    private val app: Context,
+    private val scope: CoroutineScope,
+    private val notifications: NotificationPermission?,
+) : VoiceHost.Platform {
     override fun core() = VoiceCore.bundled(app)
     override val micAllowed: Boolean
         get() = ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     override fun realtime() = RealtimeClient(app, scope)
     override fun basic() = AndroidBasicAudio(app, scope)
-    override fun earcons(core: VoiceCore) = Earcons(core.earcons)
+    override fun earcons(core: VoiceCore) = Earcons(core.earcons, CoroutineScheduler(scope))
     override fun audioSession() = AudioSessionController(app)
+
+    /** Checked right before: Android 12+ refuses a foreground service from the background (and throws). */
     override fun startService() {
+        check(VoiceHost.appVisible()) { "not in front" }
         ContextCompat.startForegroundService(app, VoiceService.intent(app, VoiceService.ACTION_RUN))
+    }
+
+    override suspend fun offerNotifications() {
+        val permission = notifications ?: return
+        VoiceHost.offerNotifications(permission) { Toast.makeText(app, it, Toast.LENGTH_LONG).show() }
     }
 }

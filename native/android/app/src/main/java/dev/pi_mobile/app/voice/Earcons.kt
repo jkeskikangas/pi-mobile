@@ -12,11 +12,25 @@ import kotlin.math.sin
  * they mix with the call and the echo canceller knows them. [verify] they aren't cancelled away on device.
  * Port of native/ios/Pi/Voice/Earcons.swift.
  */
-class Earcons(steps: Map<String, List<List<Double>>>) : EarconPlaying {
+class Earcons(steps: Map<String, List<List<Double>>>, scheduler: VoiceScheduler) : EarconPlaying {
     private val pcm = steps.mapValues { render(it.value) }.filterValues { it.isNotEmpty() }
     private val tracks = mutableMapOf<String, AudioTrack>()
+    private val queue = EarconQueue(scheduler, ::durationOf, ::start)
 
+    /** Queued after one that is still playing, as iOS schedules its buffers. */
     override fun play(name: String) {
+        if (name in pcm) queue.play(name)
+    }
+
+    override fun stop() {
+        queue.clear()
+        tracks.values.forEach { it.release() }
+        tracks.clear()
+    }
+
+    private fun durationOf(name: String): Double = (pcm[name]?.size ?: 0).toDouble() / SAMPLE_RATE
+
+    private fun start(name: String) {
         val track = tracks[name] ?: pcm[name]?.let(::load)?.also { tracks[name] = it } ?: return
         try {
             if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.stop()
@@ -25,11 +39,6 @@ class Earcons(steps: Map<String, List<List<Double>>>) : EarconPlaying {
         } catch (_: IllegalStateException) {
             // A sound is a nicety: never let it break voice mode.
         }
-    }
-
-    override fun stop() {
-        tracks.values.forEach { it.release() }
-        tracks.clear()
     }
 
     private fun load(samples: ShortArray): AudioTrack? = try {
@@ -45,6 +54,34 @@ class Earcons(steps: Map<String, List<List<Double>>>) : EarconPlaying {
             .also { it.write(samples, 0, samples.size) }
     } catch (_: Exception) {
         null
+    }
+
+    /** One sound at a time, the next when the last has played out (pure timing, unit tested). */
+    internal class EarconQueue(
+        private val scheduler: VoiceScheduler,
+        private val seconds: (String) -> Double,
+        private val start: (String) -> Unit,
+    ) {
+        private val waiting = ArrayDeque<String>()
+        private var playing: VoiceTimer? = null
+
+        fun play(name: String) {
+            if (playing != null) waiting.addLast(name) else begin(name)
+        }
+
+        fun clear() {
+            waiting.clear()
+            playing?.cancel()
+            playing = null
+        }
+
+        private fun begin(name: String) {
+            start(name)
+            playing = scheduler.after(seconds(name)) {
+                playing = null
+                waiting.removeFirstOrNull()?.let(::begin)
+            }
+        }
     }
 
     companion object {

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -301,7 +302,14 @@ class MainActivity : ComponentActivity(), WebShell.Host, SettingsOffer {
         ) {
             // Edge to edge, but the page sits inside the system bars and above the keyboard: it shrinks with the
             // IME instead of being covered (WebShell → Keyboard).
-            key(web) { AndroidView({ web }, Modifier.fillMaxSize().safeDrawingPadding()) }
+            // Hidden from TalkBack while voice mode covers it (VoiceRoute also takes every touch).
+            val voiceOn = VoiceHost.shared.running.collectAsState().value != null
+            key(web) {
+                AndroidView({ web }, Modifier.fillMaxSize().safeDrawingPadding()) {
+                    it.importantForAccessibility =
+                        if (voiceOn) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                }
+            }
         }
     }
 

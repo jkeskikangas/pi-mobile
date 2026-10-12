@@ -20,11 +20,12 @@ import dev.pi_mobile.app.shell.NetworkWatch
 import dev.pi_mobile.app.shell.Permissions
 import dev.pi_mobile.app.shell.ScanCenter
 import dev.pi_mobile.app.shell.VoiceStarter
+import dev.pi_mobile.app.intents.VoiceShortcuts
 import dev.pi_mobile.app.voice.VoiceHost
 import kotlinx.coroutines.MainScope
-import kotlinx.serialization.json.JsonElement
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
 
 /**
  * The process: one [AppModel] and the app-scoped services the shell, the bridge, voice mode and notifications
@@ -114,12 +115,16 @@ class PiApplication : Application(), PushCenter.Host {
             drainDictation = { dictation.cancelIfActive() },
             // Called only after a fresh 401 from that computer; removes exactly the credential checked.
             forget = { m -> model.forget(m) },
+            // Asked once at the first voice mode, for Mute and End on the lock screen.
+            notifications = notificationPermission,
         )
+        VoiceShortcuts.update(this, model.machines.value.isNotEmpty())
         // A computer added or removed registers (or forgets) this phone at once, and a running voice mode follows.
         MainScope().launch {
             model.machines.drop(1).collect {
                 pushCenter.refresh()
                 VoiceHost.shared.machinesChanged(it)
+                VoiceShortcuts.update(this@PiApplication, it.isNotEmpty())
             }
         }
     }

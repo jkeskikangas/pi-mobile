@@ -103,9 +103,13 @@ class AppE2ETest {
         shot("07-menu-notifications")
     }
 
-    /** A fresh install asks for the microphone after the consent sheet (the permission controller's dialog). */
+    /**
+     * A fresh install asks for the microphone after the consent sheet, then (first voice mode, Android 13+) for
+     * notifications, which carry Mute and End on the lock screen: the permission controller's dialogs.
+     */
     private fun allowMicrophone() {
         device.wait(Until.findObject(By.res("com.android.permissioncontroller:id/permission_allow_foreground_only_button")), 5_000)?.click()
+        device.wait(Until.findObject(By.res("com.android.permissioncontroller:id/permission_allow_button")), 3_000)?.click()
     }
 
     /** A web or native element by its accessible name (WebView reports it as text, Compose as content description). */

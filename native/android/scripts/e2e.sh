@@ -24,6 +24,7 @@ adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.
 adb reverse tcp:"$PORT" tcp:"$PORT" >/dev/null
 # A first run: the test answers the microphone dialog itself.
 adb shell pm revoke "$APP" android.permission.RECORD_AUDIO 2>/dev/null || true
+adb shell pm revoke "$APP" android.permission.POST_NOTIFICATIONS 2>/dev/null || true
 adb shell rm -rf "/sdcard/Android/data/$APP/files/e2e"
 OUT="$(adb shell am instrument -w -e piPairLink "$LINK" -e class "$APP.AppE2ETest" "$APP.test/androidx.test.runner.AndroidJUnitRunner")"
 echo "$OUT" | tail -5

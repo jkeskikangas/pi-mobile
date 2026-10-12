@@ -17,8 +17,11 @@ val keystoreProps = Properties().apply {
 fun prop(name: String, default: String = "") = (project.findProperty(name) as String?) ?: default
 
 // The shared voice logic (plans/native-android.md D3): only the copy bundled at build time runs.
+val voiceCoreSource = rootProject.file("../../web/voice-core.js")
 val bundleVoiceCore by tasks.registering(Copy::class) {
-    from(rootProject.file("../../web/voice-core.js"))
+    // A Copy of a missing file copies nothing and succeeds: an app without its voice logic must not build.
+    doFirst { check(voiceCoreSource.isFile) { "web/voice-core.js is missing: voice mode can't be built without it" } }
+    from(voiceCoreSource)
     into(layout.buildDirectory.dir("generated/voicecore/assets"))
 }
 
