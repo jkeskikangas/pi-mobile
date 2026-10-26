@@ -248,6 +248,17 @@ async function session(theme, width, flow) {
 			await say("pick");
 			await shot("09-select");
 			await step("pick", () => tap(".prompt .pact button"));
+			await say("perm");
+			await shot("09b-permission");
+			await step("permission", () => tap(".prompt .pact button", "Yes, for this session"));
+			await say("form");
+			await shot("09c-questionnaire");
+			await step("questionnaire", async () => {
+				await tap(".prompt .popt");
+				await tap(".prompt .popt", "Auth");
+				await shot("09d-questionnaire-answered");
+				await tap(".prompt .pact button", "Submit");
+			});
 			await say("done");
 			await step("menu", async () => {
 				await tap("#menuBtn");

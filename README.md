@@ -154,6 +154,7 @@ No computer you already use can reach the new one? Run `/remote pair` on it, the
 - **One hub per machine.** Whichever pi binds the port hosts it; the others link to it. If that pi exits, another takes over within a second and the phone reconnects to the same address.
 - **Nothing lost on reconnect.** Events carry sequence numbers and a replay buffer, so a phone that drops off catches up exactly.
 - **Dialogs from any extension.** pi gives every extension the same `ctx.ui`, so wrapping `select`, `confirm` and `input` covers them all; whichever side loses is dismissed.
+- **Two extensions that don't use those dialogs.** `@juicesharp/rpiv-ask-user-question` shows its form with `ctx.ui.custom`, so pi-mobile follows its `rpiv:ask-user:*` events and answers on the same channel (a form on the phone: options, multi-select, "Something else", decline; option previews stay in the terminal). `@gotgenes/pi-permission-system` asks through an inline `ctx.ui.custom` dialog in the terminal UI; it announces it with `permissions:ui_prompt` in the same tick, so the next `custom()` call is that dialog and the phone's answer calls its `done` (Yes, Yes for this session, No, No with a reason; the session grant is the proven-direction one, not the wider "family" grant).
 
 ## Compared with other pi remotes (October 2026)
 

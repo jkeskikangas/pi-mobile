@@ -1190,12 +1190,19 @@
 	}
 
 	const answered = new Map();
+	const revealed = new Set();
 	function renderPrompts(endEv) {
 		const box = $("prompts");
 		const map = S.prompts.get(S.current) || new Map();
 		if (endEv && answered.has(endEv.id)) answered.delete(endEv.id);
 		else if (endEv && endEv.by === "terminal") toast("Answered in the terminal");
 		box.replaceChildren(...[...map.values()].map(promptNode));
+		// A tall card (the questionnaire) opens with its buttons in view, not under the composer.
+		for (const p of map.values()) {
+			if (p.kind !== "questionnaire" || revealed.has(p.id)) continue;
+			revealed.add(p.id);
+			requestAnimationFrame(() => box.lastElementChild?.scrollIntoView({ block: "end" }));
+		}
 		updateComposer();
 	}
 
@@ -1227,6 +1234,33 @@
 			yes.onclick = () => answer(true);
 			no.onclick = () => answer(false);
 			act.append(yes, no);
+		} else if (p.kind === "permission") {
+			act.classList.add("col");
+			const choose = (action, reason) => answer({ action, ...(reason ? { reason } : {}) });
+			const yes = el("button", "primary", "Yes");
+			const session = el("button", "", "Yes, for this session");
+			const no = el("button", "", "No");
+			const why = el("button", "", "No, tell pi why");
+			yes.onclick = () => choose("approve");
+			session.onclick = () => choose("session");
+			no.onclick = () => choose("deny");
+			why.onclick = () => {
+				const input = el("input");
+				input.placeholder = "Why not? pi sees this";
+				input.enterKeyHint = "send";
+				const send = el("button", "danger", "Deny with this reason");
+				send.onclick = () => choose("deny", input.value);
+				input.onkeydown = (e) => {
+					if (e.key === "Enter") send.click();
+				};
+				why.replaceWith(input);
+				no.replaceWith(send);
+				input.focus();
+			};
+			act.append(yes, session, no, why);
+		} else if (p.kind === "questionnaire") {
+			card.classList.add("questionnaire");
+			card.appendChild(questionnaireForm(p, act, answer));
 		} else if (p.kind === "select") {
 			act.classList.add("col");
 			for (const o of p.options || []) {
@@ -1266,6 +1300,77 @@
 		}
 		card.appendChild(foot);
 		return card;
+	}
+
+	/**
+	 * ask_user_question's form: every question on one card, options as toggles (one per question, or
+	 * several when it allows), and a "Something else" field per question, as the terminal's
+	 * "Type something" row. Submit unlocks once each question has an answer. Previews are terminal-only.
+	 */
+	function questionnaireForm(p, act, answer) {
+		const wrap = el("div", "pform");
+		const picked = (p.questions || []).map(() => ({ picks: new Set(), text: "" }));
+		const submit = el("button", "primary", "Submit");
+		const decline = el("button", "ghost", "Decline");
+		const refresh = () => {
+			submit.disabled = !picked.every((a) => a.picks.size || a.text.trim());
+		};
+		(p.questions || []).forEach((q, qi) => {
+			const a = picked[qi];
+			const group = el("div", "pq");
+			group.setAttribute("role", q.multiSelect ? "group" : "radiogroup");
+			const head = el("div", "pqhead");
+			if (q.header) head.appendChild(el("span", "chip", q.header));
+			head.appendChild(el("span", "pqtext", q.question));
+			group.appendChild(head);
+			const buttons = [];
+			q.options.forEach((o, oi) => {
+				const b = el("button", "popt");
+				b.type = "button";
+				b.setAttribute("role", q.multiSelect ? "checkbox" : "radio");
+				b.setAttribute("aria-checked", "false");
+				b.append(el("span", "olabel", o.label));
+				if (o.description) b.append(el("span", "odesc", o.description));
+				b.onclick = () => {
+					if (q.multiSelect) a.picks.has(oi) ? a.picks.delete(oi) : a.picks.add(oi);
+					else {
+						a.picks = new Set([oi]);
+						a.text = "";
+						other.value = "";
+					}
+					sync();
+				};
+				buttons.push(b);
+				group.appendChild(b);
+			});
+			const other = el("input");
+			other.placeholder = "Something else…";
+			other.setAttribute("aria-label", `Your own answer to: ${q.question}`);
+			other.oninput = () => {
+				a.text = other.value;
+				if (!q.multiSelect && other.value.trim()) a.picks.clear();
+				sync();
+			};
+			const sync = () => {
+				buttons.forEach((b, i) => b.setAttribute("aria-checked", String(a.picks.has(i))));
+				refresh();
+			};
+			group.appendChild(other);
+			wrap.appendChild(group);
+		});
+		submit.onclick = () =>
+			answer({
+				answers: picked.map((a, questionIndex) => ({
+					questionIndex,
+					...(a.picks.size ? { optionIndexes: [...a.picks].sort((x, y) => x - y) } : {}),
+					...(a.text.trim() ? { text: a.text.trim() } : {}),
+				})),
+			});
+		decline.onclick = () => answer(undefined);
+		act.classList.add("col");
+		act.append(submit, decline);
+		refresh();
+		return wrap;
 	}
 
 	function updateComposer() {

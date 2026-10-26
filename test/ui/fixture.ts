@@ -355,6 +355,25 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 		prompts.set("f-api", [p]);
 		emit(api, { type: "prompt", prompt: p });
 	}
+	if (cmd === "perm") {
+		const p = { id: `pm${Date.now()}`, kind: "permission", title: "Permission required", message: "api wants to use bash\ntofu apply -auto-approve\nMatched rule: tofu *" };
+		prompts.set("f-api", [p]);
+		emit(api, { type: "prompt", prompt: p });
+	}
+	if (cmd === "form") {
+		const opt = (label: string, description: string) => ({ label, description });
+		const p = {
+			id: `pq${Date.now()}`,
+			kind: "questionnaire",
+			title: "2 questions",
+			questions: [
+				{ question: "Which database should the service use?", header: "Database", multiSelect: false, options: [opt("Postgres (Recommended)", "Relational, already running in staging"), opt("SQLite", "Embedded, no server to run")] },
+				{ question: "Which extras do you want?", header: "Extras", multiSelect: true, options: [opt("Auth", "Login and sessions"), opt("Metrics", "Prometheus endpoint"), opt("Docs", "OpenAPI page")] },
+			],
+		};
+		prompts.set("f-api", [p]);
+		emit(api, { type: "prompt", prompt: p });
+	}
 	if (cmd === "done") {
 		emit(api, { type: "tool_end", id: "t9", isError: false });
 		emit(api, { type: "item", item: { k: "tool", id: "t9", name: "bash", output: "https://github.com/acme/api/pull/918", isError: false, truncated: false, ts: Date.now() } });

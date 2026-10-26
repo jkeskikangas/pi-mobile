@@ -4,6 +4,18 @@
 import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomId } from "./crypto.ts";
+import {
+	ASK_ANSWER_EVENT,
+	ASK_BLOCKED_EVENT,
+	ASK_PROMPT_EVENT,
+	ASK_RESULT_EVENT,
+	answerPayload,
+	PERMISSION_PROMPT_EVENT,
+	permissionDecision,
+	permissionPrompt,
+	questionnaireId,
+	questionnairePrompt,
+} from "./extension-prompts.ts";
 import { actionKey, Once } from "./once.ts";
 
 /** Phone requests that change the session: run at most once per idempotency key. */
@@ -60,7 +72,8 @@ function activeBridge(): Bridge | undefined {
 
 interface OpenPrompt {
 	prompt: Prompt;
-	answer: (value: unknown) => void;
+	/** Throws (or rejects) to refuse the answer; the phone shows the message and the prompt stays open. */
+	answer: (value: unknown) => void | Promise<void>;
 }
 
 interface RunningTool {
@@ -78,6 +91,9 @@ export class Bridge {
 	private status: Status = "idle";
 	private prompts = new Map<string, OpenPrompt>();
 	private terminalPrompt = 0;
+	private unsubscribe: Array<() => void> = [];
+	/** Prompts a phone answered, so their close says "remote" rather than "terminal". */
+	private answeredRemotely = new Set<string>();
 	private streamKey?: string;
 	private partial: unknown;
 	private streamBuf = new Map<string, { i: number; kind: "text" | "thinking" | "tool"; delta: string; name?: string }>();
@@ -125,6 +141,7 @@ export class Bridge {
 	start(): void {
 		(globalThis as G)[BRIDGE_KEY] = this;
 		patchUI(this.ctx);
+		this.watchExtensions();
 		this.link.start();
 	}
 
@@ -134,6 +151,7 @@ export class Bridge {
 		clearTimeout(this.streamTimer);
 		clearTimeout(this.infoTimer);
 		for (const t of this.tools.values()) clearTimeout(t.timer);
+		for (const off of this.unsubscribe.splice(0)) off?.();
 		this.link.stop();
 	}
 
@@ -363,7 +381,71 @@ export class Bridge {
 		this.pushInfo();
 	}
 
-	private answer(id: string, value: unknown): { ok: true } {
+	// ── prompts from extensions that don't use ctx.ui dialogs ───────────────────────
+
+	/**
+	 * ask_user_question shows its form with ctx.ui.custom, so it's mirrored from its events instead. The
+	 * permission system's events are handled where its dialog opens (patchUI's custom), because answering
+	 * needs that dialog's `done`.
+	 */
+	private watchExtensions(): void {
+		const events = this.pi.events;
+		if (!events) return; // a pi without an extension event bus has neither extension
+		this.unsubscribe.push(
+			events.on(ASK_PROMPT_EVENT, (raw) => {
+				// RPC hosts get the extension's own select/input dialogs, which patchUI already mirrors.
+				if (this.ctx.mode === "rpc") return;
+				const q = questionnairePrompt(raw);
+				if (!q || this.prompts.has(q.prompt.id)) return;
+				this.openPrompt(q.prompt, (value) => this.answerQuestionnaire(q.toolCallId, q.prompt.id, value));
+			}),
+			events.on(ASK_BLOCKED_EVENT, (raw) => {
+				const r = raw as { active?: unknown; toolCallId?: unknown };
+				if (r?.active !== false || typeof r.toolCallId !== "string") return;
+				const id = questionnaireId(r.toolCallId);
+				this.closePrompt(id, this.answeredRemotely.delete(id) ? "remote" : "terminal");
+			}),
+			events.on(PERMISSION_PROMPT_EVENT, (raw) => noteAskedPermission(permissionPrompt(raw))),
+		);
+	}
+
+	/** Hands a phone's answer to ask_user_question and waits for its verdict, which says why it refused. */
+	private async answerQuestionnaire(toolCallId: string, id: string, value: unknown): Promise<void> {
+		const requestId = randomId();
+		const payload = answerPayload(toolCallId, requestId, value);
+		const events = this.pi.events;
+		let off = () => {};
+		let timer: NodeJS.Timeout | undefined;
+		const verdict = new Promise<{ ok?: boolean; reason?: string }>((resolve, reject) => {
+			off = events.on(ASK_RESULT_EVENT, (r: any) => {
+				if (r?.requestId === requestId) resolve(r);
+			});
+			timer = setTimeout(() => reject(new Error("pi did not reply to the answer")), 3000);
+		});
+		try {
+			events.emit(ASK_ANSWER_EVENT, payload);
+			const r = await verdict;
+			if (!r.ok) throw new Error(r.reason || "pi did not accept that answer");
+			this.answeredRemotely.add(id);
+		} finally {
+			clearTimeout(timer);
+			off();
+		}
+	}
+
+	/** Opens a phone card for a dialog the terminal is already showing; `reply` answers that dialog. */
+	openMirrored(prompt: Prompt, reply: (value: unknown) => void): void {
+		this.openPrompt(prompt, (value) => {
+			reply(value);
+			this.answeredRemotely.add(prompt.id);
+		});
+	}
+
+	closeMirrored(id: string): void {
+		this.closePrompt(id, this.answeredRemotely.delete(id) ? "remote" : "terminal");
+	}
+
+	private async answer(id: string, value: unknown): Promise<{ ok: true }> {
 		const open = this.prompts.get(id);
 		if (!open) throw new Error("that question was already answered");
 		const p = open.prompt;
@@ -371,7 +453,8 @@ export class Bridge {
 			throw new Error("not one of the options");
 		if (p.kind === "confirm" && typeof value !== "boolean") throw new Error("expected yes or no");
 		if (p.kind === "input" && value !== undefined && typeof value !== "string") throw new Error("expected text");
-		open.answer(value);
+		if (p.kind === "permission") permissionDecision(value); // refuse a malformed choice before touching the dialog
+		await open.answer(value);
 		return { ok: true };
 	}
 
@@ -589,7 +672,7 @@ function patchUI(ctx: ExtensionContext): void {
 	if (!ctx.hasUI) return;
 	const ui = ctx.ui as UI;
 	if (ui[PATCHED]) return;
-	const orig = { select: ui.select, confirm: ui.confirm, input: ui.input, notify: ui.notify };
+	const orig = { select: ui.select, confirm: ui.confirm, input: ui.input, notify: ui.notify, custom: ui.custom };
 	ui[PATCHED] = orig;
 
 	ui.select = (title, options, opts) =>
@@ -598,6 +681,12 @@ function patchUI(ctx: ExtensionContext): void {
 		race({ kind: "confirm", title, message }, (signal) => orig.confirm.call(ui, title, message, { ...opts, signal }), opts);
 	ui.input = (title, placeholder, opts) =>
 		race({ kind: "input", title, placeholder }, (signal) => orig.input.call(ui, title, placeholder, { ...opts, signal }), opts);
+	ui.custom = (<T>(factory: any, options?: any): Promise<T> => {
+		const ask = takeAskedPermission();
+		const bridge = activeBridge();
+		if (!ask || !bridge) return orig.custom.call(ui, factory, options) as Promise<T>;
+		return mirrorPermission<T>(bridge, ask, (f) => orig.custom.call(ui, f, options) as Promise<T>, factory);
+	}) as UI["custom"];
 	ui.notify = (message, type) => {
 		orig.notify.call(ui, message, type);
 		activeBridge()?.mirrorNotice(String(message), type ?? "info");
@@ -629,5 +718,43 @@ async function race<T>(
 	} catch (e) {
 		bridge.closePrompt(id, "terminal");
 		throw e;
+	}
+}
+
+// ── permission dialog bridging ───────────────────────────────────────────────────
+//
+// In the terminal UI, pi-permission-system asks through ctx.ui.custom, an inline dialog no phone can see.
+// It emits `permissions:ui_prompt` synchronously just before opening it, so the next custom() call in
+// the same tick is that dialog. Wrapping the component factory yields the dialog's `done`, which a
+// phone's answer calls: the same race as the select/confirm/input bridge, with the full set of choices.
+
+let askedPermission: Prompt | undefined;
+
+function noteAskedPermission(prompt: Prompt | undefined): void {
+	askedPermission = prompt;
+	// Outside the terminal UI the ask goes through select/input (already bridged) and no custom() follows.
+	if (prompt) queueMicrotask(() => askedPermission === prompt && (askedPermission = undefined));
+}
+
+function takeAskedPermission(): Prompt | undefined {
+	const p = askedPermission;
+	askedPermission = undefined;
+	return p;
+}
+
+async function mirrorPermission<T>(bridge: Bridge, prompt: Prompt, open: (factory: any) => Promise<T>, factory: any): Promise<T> {
+	let done: ((v: unknown) => void) | undefined;
+	bridge.openMirrored(prompt, (value) => {
+		const decision = permissionDecision(value);
+		if (!done) throw new Error("the terminal dialog is not ready yet");
+		done(decision);
+	});
+	try {
+		return await open((tui: unknown, theme: unknown, keys: unknown, d: (v: unknown) => void) => {
+			done = d;
+			return factory(tui, theme, keys, d);
+		});
+	} finally {
+		bridge.closeMirrored(prompt.id);
 	}
 }

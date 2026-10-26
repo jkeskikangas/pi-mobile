@@ -44,7 +44,29 @@ export type Item =
 	| { k: "custom"; id: string; customType: string; text: string; ts: number }
 	| { k: "summary"; id: string; kind: "compaction" | "branch"; text: string; ts: number };
 
-export type PromptKind = "select" | "confirm" | "input";
+/**
+ * select/confirm/input mirror pi's dialogs. "questionnaire" is the ask_user_question tool's form
+ * (answered `{ answers: PromptAnswer[]; globalNote? }`, or undefined to decline); "permission" is
+ * pi-permission-system's inline dialog (answered `{ action: PermissionAction; reason? }`).
+ */
+export type PromptKind = "select" | "confirm" | "input" | "questionnaire" | "permission";
+
+export type PermissionAction = "approve" | "session" | "deny";
+
+export interface PromptQuestion {
+	question: string;
+	header: string;
+	multiSelect: boolean;
+	options: { label: string; description: string }[];
+}
+
+/** One question's answer, as ask_user_question takes it: option indexes and/or typed text. */
+export interface PromptAnswer {
+	questionIndex: number;
+	optionIndexes?: number[];
+	text?: string;
+	notes?: string;
+}
 
 export interface Prompt {
 	id: string;
@@ -54,6 +76,7 @@ export interface Prompt {
 	options?: string[];
 	placeholder?: string;
 	expiresAt?: number;
+	questions?: PromptQuestion[];
 }
 
 /** Events a bridge publishes; the hub stamps them with `agent` and a hub-wide `seq`. */

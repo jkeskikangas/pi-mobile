@@ -1,6 +1,7 @@
 // Drives the extension through a fake pi host and a test phone speaking the real protocol.
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,7 +49,8 @@ function host() {
 		setStatus: (_k: string, v?: string) => statuses.push(v),
 		onTerminalInput: () => () => {},
 		theme: { fg: (_c: string, t: string) => t, bold: (t: string) => t },
-		custom: async () => undefined,
+		// The terminal's inline dialogs: open until their `done` is called.
+		custom: (factory: any) => new Promise((resolve) => factory({}, {}, {}, resolve)),
 		confirm: (title: string, _m: string, opts: any) => dialog(title, false, opts),
 		select: (title: string, _o: string[], opts: any) => dialog(title, undefined, opts),
 		input: (title: string, _p: string, opts: any) => dialog(title, undefined, opts),
@@ -71,7 +73,16 @@ function host() {
 		abort: () => sent.push({ abort: true }),
 		compact: (o: any) => sent.push({ compact: o ?? {} }),
 	};
+	const bus = new EventEmitter();
+	const events = {
+		emit: (c: string, d: unknown) => bus.emit(c, d),
+		on: (c: string, fn: (d: any) => void) => {
+			bus.on(c, fn);
+			return () => bus.off(c, fn);
+		},
+	};
 	const pi: any = {
+		events,
 		on: (name: string, fn: Handler) => handlers.set(name, [...(handlers.get(name) ?? []), fn]),
 		registerFlag: () => {},
 		getFlag: (n: string) => n === "remote",
@@ -92,7 +103,7 @@ function host() {
 		for (const fn of handlers.get(name) ?? []) results.push(await fn({ type: name, ...event }, ctx));
 		return results;
 	};
-	return { fire, ctx, sent, statuses, notes, localDialogs, thinking: () => thinking, setIdle: (v: boolean) => (idle = v) };
+	return { fire, ctx, events, sent, statuses, notes, localDialogs, thinking: () => thinking, setIdle: (v: boolean) => (idle = v) };
 }
 
 let h: ReturnType<typeof host>;
@@ -297,6 +308,114 @@ test("answering in the terminal closes the phone's prompt; selects validate opti
 	h.localDialogs.at(-1)!.resolve("b");
 	assert.equal(await choice, "b");
 	assert.equal((await phone.waitFor((e) => e.type === "prompt_end")).by, "terminal");
+});
+
+test("ask_user_question's form reaches the phone, and the phone's answer goes back on its event channel", async () => {
+	phone.events = [];
+	const answers: any[] = [];
+	let verdict: any = { ok: true };
+	const off = h.events.on("rpiv:ask-user:answer", (a) => {
+		answers.push(a);
+		h.events.emit("rpiv:ask-user:answer-result", { ...verdict, requestId: a.requestId, toolCallId: a.toolCallId });
+	});
+	h.events.emit("rpiv:ask-user:prompt", {
+		toolCallId: "call-1",
+		questions: [
+			{ question: "Which database?", header: "DB", multiSelect: false, options: [{ label: "Postgres", description: "Relational", hasPreview: false }, { label: "SQLite", description: "Embedded", hasPreview: false }] },
+			{ question: "Which extras?", header: "Extras", multiSelect: true, options: [{ label: "Auth", description: "Login", hasPreview: true }] },
+		],
+	});
+	const { prompt } = await phone.waitFor((e) => e.type === "prompt");
+	assert.equal(prompt.kind, "questionnaire");
+	assert.equal(prompt.id, "ask:call-1");
+	assert.equal(prompt.title, "2 questions");
+	assert.deepEqual(prompt.questions[0].options[1], { label: "SQLite", description: "Embedded" });
+	assert.equal(prompt.questions[1].multiSelect, true);
+
+	verdict = { ok: false, code: "invalid_answer", reason: "question 1 is unanswered" };
+	await assert.rejects(call("answer", { id: prompt.id, value: { answers: [{ questionIndex: 0, optionIndexes: [1] }] } }), /question 1 is unanswered/);
+	verdict = { ok: true };
+	await call("answer", { id: prompt.id, value: { answers: [{ questionIndex: 0, optionIndexes: [1], junk: 1 }, { questionIndex: 1, text: "SSO" }] } });
+	assert.deepEqual(answers.at(-1), {
+		toolCallId: "call-1",
+		requestId: answers.at(-1).requestId,
+		answers: [{ questionIndex: 0, optionIndexes: [1] }, { questionIndex: 1, text: "SSO" }],
+	});
+	// The prompt stays open until the extension says the questionnaire is over.
+	assert.equal((await call("snapshot")).prompts.length, 1);
+	h.events.emit("rpiv:ask-user:blocked", { active: false, toolCallId: "call-1" });
+	assert.equal((await phone.waitFor((e) => e.type === "prompt_end")).by, "remote");
+
+	// Declined on the phone, and answered in the terminal.
+	phone.events = [];
+	h.events.emit("rpiv:ask-user:prompt", { toolCallId: "call-2", questions: [{ question: "Go?", header: "Go", multiSelect: false, options: [{ label: "Yes", description: "", hasPreview: false }] }] });
+	const second = (await phone.waitFor((e) => e.type === "prompt")).prompt;
+	assert.equal(second.title, "Go?");
+	await call("answer", { id: second.id });
+	assert.equal(answers.at(-1).cancel, true);
+	h.events.emit("rpiv:ask-user:blocked", { active: false, toolCallId: "call-2" });
+	await phone.waitFor((e) => e.type === "prompt_end");
+
+	phone.events = [];
+	h.events.emit("rpiv:ask-user:prompt", { toolCallId: "call-3", questions: [{ question: "Go?", header: "Go", multiSelect: false, options: [] }] });
+	await phone.waitFor((e) => e.type === "prompt");
+	h.events.emit("rpiv:ask-user:blocked", { active: false, toolCallId: "call-3" });
+	assert.equal((await phone.waitFor((e) => e.type === "prompt_end")).by, "terminal");
+	off();
+});
+
+test("the permission system's inline terminal dialog can be answered from the phone", async () => {
+	const ask = (requestId: string) => {
+		h.events.emit("permissions:ui_prompt", { requestId, source: "tool_call", surface: "bash", value: "rm -rf build", agentName: "worker", request: { surface: "bash", value: "rm -rf build", matchedPattern: "rm *" }, forwarding: null });
+		// The permission system opens its dialog in the same tick it announces it.
+		let done!: (v: unknown) => void;
+		const decision = h.ctx.ui.custom((_t: unknown, _th: unknown, _k: unknown, d: (v: unknown) => void) => {
+			done = d;
+			return {};
+		}, { overlay: false });
+		return { decision, done: (v: unknown) => done(v) };
+	};
+
+	phone.events = [];
+	const first = ask("req-1");
+	const { prompt } = await phone.waitFor((e) => e.type === "prompt");
+	assert.equal(prompt.kind, "permission");
+	assert.equal(prompt.id, "perm:req-1");
+	assert.equal(prompt.title, "Permission required");
+	assert.match(prompt.message, /worker wants to use bash\nrm -rf build\nMatched rule: rm \*/);
+	await assert.rejects(call("answer", { id: prompt.id, value: { action: "sudo" } }), /approve, session or deny/);
+	await call("answer", { id: prompt.id, value: { action: "session" } });
+	assert.deepEqual(await first.decision, { approved: true, state: "approved_for_session" });
+	assert.equal((await phone.waitFor((e) => e.type === "prompt_end")).by, "remote");
+
+	phone.events = [];
+	const refused = ask("req-2");
+	const second = (await phone.waitFor((e) => e.type === "prompt")).prompt;
+	await call("answer", { id: second.id, value: { action: "deny", reason: " too risky " } });
+	assert.deepEqual(await refused.decision, { approved: false, state: "denied_with_reason", denialReason: "too risky" });
+	await phone.waitFor((e) => e.type === "prompt_end");
+
+	phone.events = [];
+	const local = ask("req-3");
+	await phone.waitFor((e) => e.type === "prompt");
+	local.done({ approved: true, state: "approved" });
+	await local.decision;
+	assert.equal((await phone.waitFor((e) => e.type === "prompt_end")).by, "terminal");
+});
+
+test("other custom terminal UI is left alone, with no prompt on the phone", async () => {
+	phone.events = [];
+	let done!: (v: unknown) => void;
+	const panel = h.ctx.ui.custom((_t: unknown, _th: unknown, _k: unknown, d: (v: unknown) => void) => {
+		done = d;
+		return {};
+	});
+	// A permission announcement whose dialog never came (a non-terminal session) must not claim this one.
+	h.events.emit("permissions:ui_prompt", { requestId: "req-x", request: {} });
+	await new Promise((r) => setTimeout(r, 20));
+	done("closed");
+	assert.equal(await panel, "closed");
+	assert.equal(phone.events.some((e) => e.type === "prompt"), false);
 });
 
 test("voice: status by ear, spoken brief, and the agent knows its user is listening", async () => {
