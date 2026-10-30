@@ -22,6 +22,7 @@
     <string name="pairing_paste">Paste link</string>
     <string name="pairing_pairing">Pairing…</string>
     <string name="pairing_not_a_link">That isn’t a pairing link. Run /remote in pi and scan or copy the code it shows.</string>
+    <string name="pairing_address_without_code">That URL has no pairing code, just an address. Run /remote in pi on that computer and copy the whole link it shows — it ends in something like #p=3a2v…. Then paste that here.</string>
     <string name="pairing_expired">That code was already used or has expired. Run /remote again for a new one.</string>
     <string name="pairing_unauthorized">That code isn’t valid. Run /remote again for a new one.</string>
     <string name="pairing_network">Can’t reach your computer. Check that this phone is on the same Wi-Fi or tailnet, and that pi is running.</string>

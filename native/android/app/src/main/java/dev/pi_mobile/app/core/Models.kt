@@ -51,6 +51,7 @@ data class PairingLink(val origin: String, val id: String, val key: ByteArray) {
 
     companion object {
         private val FRAGMENT = Regex("(?:^|&)p=([A-Za-z0-9_-]+)\\.([A-Za-z0-9_-]+)")
+        private val URL = Regex("https?://[^\\s\"'<>]+")
 
         /** null when `text` isn't a pairing link. */
         fun parse(text: String): PairingLink? {
@@ -67,6 +68,23 @@ data class PairingLink(val origin: String, val id: String, val key: ByteArray) {
             if (uri.port != -1) origin += ":${uri.port}"
             origin += (uri.rawPath ?: "").trimEnd('/')
             return PairingLink(origin, m.groupValues[1], key)
+        }
+
+        /** `parse(text)`, and when that fails, the pairing link embedded inside `text` — e.g. a copy of the
+         *  `/remote` line "tailscale https: https://host/#p=…" pasted whole. */
+        fun parseDeep(text: String): PairingLink? {
+            parse(text)?.let { return it }
+            for (m in URL.findAll(text)) parse(m.value)?.let { return it }
+            return null
+        }
+
+        /** True when `text` is (or contains) a bare http(s) address rather than a pairing code — what someone
+         *  pastes from an address bar when they mean "this is my computer's address". */
+        fun addressOnly(text: String): Boolean {
+            if (parse(text) != null) return false
+            val m = URL.find(text) ?: return false
+            val u = try { URI(m.value) } catch (_: Exception) { return false }
+            return u.host != null && u.scheme != null
         }
     }
 }

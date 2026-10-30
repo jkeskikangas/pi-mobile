@@ -109,10 +109,13 @@ fun PairingScreen(pair: suspend (PairingLink) -> Unit, modifier: Modifier = Modi
 
     fun submit(text: String) {
         error = null
-        val link = PairingLink.parse(text)
+        val link = PairingLink.parseDeep(text)
         if (link == null) {
             haptics.performHapticFeedback(HapticFeedbackType.Reject)
-            error = context.getString(R.string.pairing_not_a_link)
+            error = context.getString(
+                if (PairingLink.addressOnly(text)) R.string.pairing_address_without_code
+                else R.string.pairing_not_a_link
+            )
             return
         }
         pairing = true

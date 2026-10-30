@@ -2433,9 +2433,11 @@
 	}
 
 	async function pairLink(text) {
+		// Tolerate a whole /remote line pasted in, e.g. "tailscale https: https://host/#p=…".
+		const found = /https?:\/\/[^\s"'<>]+/.exec(text)?.[0];
 		let url;
 		try {
-			url = new URL(text);
+			url = new URL(found ?? text);
 		} catch {
 			throw new Error("That isn't a pairing link");
 		}
