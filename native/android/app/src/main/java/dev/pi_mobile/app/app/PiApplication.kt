@@ -12,6 +12,7 @@ import dev.pi_mobile.app.core.Prefs
 import dev.pi_mobile.app.dictation.AudioRecorder
 import dev.pi_mobile.app.dictation.Dictation
 import dev.pi_mobile.app.push.FirebaseSetup
+import dev.pi_mobile.app.push.LiveNotifications
 import dev.pi_mobile.app.push.Notifications
 import dev.pi_mobile.app.push.PushController
 import dev.pi_mobile.app.push.SystemNotificationPermission
@@ -70,14 +71,18 @@ class PiApplication : Application(), PushCenter.Host {
         end = { VoiceHost.shared.end() },
     )
 
+    /** Personal build: notifications over an always-on connection ([dev.pi_mobile.app.push.WatchService]), not FCM. */
+    lateinit var live: LiveNotifications
+        private set
+
     /**
-     * The bridge's push: PushCenter, plus the Settings offer when notifications are off and the system won't ask
+     * The bridge's push: [live], plus the Settings offer when notifications are off and the system won't ask
      * again ("Notifications are off for pi. Turn them on in Settings.").
      */
     private val push: PushController = object : PushController {
-        override suspend fun status() = pushCenter.status()
+        override suspend fun status() = live.status()
         override suspend fun enable(on: Boolean): JsonElement = try {
-            pushCenter.enable(on)
+            live.enable(on)
         } catch (e: Exception) {
             if (on && notificationPermission.state() == "denied") settingsOffer?.notifications()
             throw e
@@ -109,6 +114,8 @@ class PiApplication : Application(), PushCenter.Host {
             hubs = { m, method, p -> (model.client(m) ?: HubClient(m)).rpc(method, p) },
         )
         pushCenter.start()
+        live = LiveNotifications(this, notificationPermission, machines = { model.machines.value })
+        live.start()
         VoiceHost.install(
             this,
             consent = { aiConsent.ensure(AIConsent.Purpose.VOICE) },

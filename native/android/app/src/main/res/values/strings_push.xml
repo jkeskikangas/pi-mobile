@@ -5,4 +5,7 @@
     <string name="push_channel_activity">pi finished</string>
     <string name="push_channel_activity_description">A session finished its work.</string>
     <string name="push_answer_by_voice">Answer by voice</string>
+    <string name="watch_channel">Connection to your computers</string>
+    <string name="watch_channel_description">Always on while notifications are on: pi keeps a connection to your computers to notify you. You can silence this channel; pi\'s other notifications still arrive.</string>
+    <string name="watch_ongoing_text">Listening for pi\'s notifications</string>
 </resources>

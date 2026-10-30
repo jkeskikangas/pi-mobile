@@ -105,6 +105,7 @@ class MainActivity : ComponentActivity(), WebShell.Host, SettingsOffer {
         app.inFront = true
         app.settingsOffer = this
         app.pushCenter.refresh()
+        app.live.start()
     }
 
     /**
