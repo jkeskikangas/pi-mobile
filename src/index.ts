@@ -7,6 +7,7 @@
 //   /remote            connect this machine; QR if no phone is paired yet, otherwise status
 //   /remote pair       pair another device
 //   /remote new        start a fresh session in this terminal (the phone follows it)
+//   /remote resume     open another session from this folder
 //   /remote off        stop sharing: this session only, or every session on the machine
 //   /remote devices    paired devices; pick one to revoke
 //   /remote settings   exposure, HTTPS address, port (the hub restarts by itself)
@@ -15,7 +16,7 @@
 
 import { readFileSync, unwatchFile, watchFile } from "node:fs";
 import { homedir } from "node:os";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, type SessionInfo } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { apnsKeyProblem } from "./apns.ts";
 import { Bridge } from "./bridge.ts";
@@ -41,6 +42,7 @@ type G = typeof globalThis & { [HIDDEN]?: boolean; [FLAG_OFF]?: boolean };
 const SUBCOMMANDS = [
 	{ value: "pair", label: "pair", description: "Pair another device" },
 	{ value: "new", label: "new", description: "Start a fresh session in this terminal" },
+	{ value: "resume", label: "resume", description: "Open another session from this folder" },
 	{ value: "off", label: "off", description: "Stop sharing this session or the whole machine" },
 	{ value: "devices", label: "devices", description: "Paired devices; revoke one" },
 	{ value: "settings", label: "settings", description: "Exposure, HTTPS address, port, iPhone push" },
@@ -214,12 +216,48 @@ export default function piMobile(pi: ExtensionAPI): void {
 	pi.on("ui_prompt_start", withBridge((b, e: any) => b.terminalPromptChanged(1, e.kind, e.title)));
 	pi.on("ui_prompt_end", withBridge((b, e: any) => b.terminalPromptChanged(-1, e.kind, e.title)));
 
-	/** A fresh session in this terminal, with the current one as its parent so /resume shows the line. */
+	/** "now", "12m", "3h", "5d": how long ago a session was last written, for /remote resume. */
+function ago(when: Date): string {
+	const mins = Math.round((Date.now() - when.getTime()) / 60_000);
+	return mins < 2 ? "now" : mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.round(mins / 60)}h` : `${Math.round(mins / 1440)}d`;
+}
+
+/** A fresh session in this terminal, with the current one as its parent so /resume shows the line. */
 	const startNew = async (c: ExtensionCommandContext) => {
 		await c.newSession({
 			parentSession: c.sessionManager.getSessionFile(),
 			withSession: async (fresh) => fresh.ui.notify("New session started", "info"),
 		});
+	};
+
+	/**
+	 * pi's `/resume` for the phone and for anyone who does not want the full picker: the sessions written in
+	 * this folder, newest first, as a dialog the phone can answer too. Switching takes the folder of the
+	 * session you pick, exactly as pi's own picker does.
+	 */
+	const resumeSession = async (c: ExtensionCommandContext) => {
+		if (!c.isIdle()) return c.ui.notify("pi is working: stop it before opening another session", "warning");
+		const here = c.sessionManager.getSessionId();
+		let list: SessionInfo[];
+		try {
+			list = await SessionManager.list(c.cwd, c.sessionManager.getSessionDir());
+		} catch (e) {
+			return c.ui.notify(`Could not read the sessions in this folder: ${String(e)}`, "error");
+		}
+		const open = list.filter((s) => s.id !== here).sort((a, b) => +b.modified - +a.modified).slice(0, 12);
+		if (!open.length) return c.ui.notify("No other session in this folder to resume", "info");
+		const seen = new Map<string, number>();
+		const labels = open.map((s) => {
+			const first = (s.name || s.firstMessage.split("\n")[0]).trim().slice(0, 46) || s.path.split("/").pop();
+			const base = `${first} · ${ago(s.modified)} · ${s.messageCount} msg`;
+			const n = (seen.get(base) ?? 0) + 1;
+			seen.set(base, n);
+			return n === 1 ? base : `${base} (${n})`;
+		});
+		const pick = await c.ui.select("Resume which session?", labels);
+		const at = pick === undefined ? -1 : labels.indexOf(pick);
+		if (at < 0) return;
+		await c.switchSession(open[at].path, { withSession: async (fresh) => fresh.ui.notify(`Resumed: ${labels[at]}`, "info") });
 	};
 
 	pi.registerCommand("remote", {
@@ -242,6 +280,8 @@ export default function piMobile(pi: ExtensionAPI): void {
 					return pair(c);
 				case "new":
 					return startNew(c);
+				case "resume":
+					return resumeSession(c);
 				case "off":
 					return off(c);
 				case "devices":
@@ -249,7 +289,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 				case "settings":
 					return settings(c);
 				default:
-					return c.ui.notify("Usage: /remote [pair | new | off | devices | settings | add <ssh-host> | remove <machine>]", "info");
+					return c.ui.notify("Usage: /remote [pair | new | resume | off | devices | settings | add <ssh-host> | remove <machine>]", "info");
 			}
 		},
 	});

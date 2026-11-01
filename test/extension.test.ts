@@ -199,8 +199,13 @@ test("prompts from the phone reach pi, steering or queueing while it works", asy
 	assert.deepEqual(h.sent.at(-1), { content: "/remote new", options: { expandPromptTemplates: true } });
 	await call("send", { text: "/new" });
 	assert.deepEqual(h.sent.at(-1), { content: "/remote new", options: { expandPromptTemplates: true } }, "typing /new is the same action");
+	await call("resume");
+	assert.deepEqual(h.sent.at(-1), { content: "/remote resume", options: { expandPromptTemplates: true } });
+	await call("send", { text: "/resume" });
+	assert.deepEqual(h.sent.at(-1), { content: "/remote resume", options: { expandPromptTemplates: true } }, "typing /resume is the same action");
 	h.setIdle(false);
 	await assert.rejects(call("new"), /working/, "a fresh session waits for pi to stop");
+	await assert.rejects(call("resume"), /working/, "so does opening another session");
 });
 
 test("model, thinking and command lists", async () => {
@@ -215,7 +220,7 @@ test("model, thinking and command lists", async () => {
 	const cmds = await call("commands");
 	assert.deepEqual(
 		cmds.map((c: any) => c.name),
-		["compact", "new", "review"],
+		["compact", "new", "resume", "review"],
 	);
 });
 

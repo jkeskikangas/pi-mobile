@@ -1751,6 +1751,16 @@
 						toast(e.message, "error");
 					}
 				}, "", "terminal", "Same terminal, empty context; the session you leave stays resumable");
+				add("Resume a session", async () => {
+					closeSheet();
+					try {
+						await call("resume", {});
+						// The list arrives as a question card: a big folder takes a second to read.
+						toast("Reading this folder's sessions…");
+					} catch (e) {
+						toast(e.message, "error");
+					}
+				}, "", "file", "The sessions written in this folder, newest first");
 				const stats = statsDetail(info || {});
 				if (stats) body.appendChild(el("p", "note", stats));
 			}

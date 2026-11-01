@@ -190,7 +190,7 @@ test("actions carry an idempotency key: reused when retrying after a lost reply,
 
 	await fleet.call("A", "snapshot", {});
 	assert.equal(laptop.keys[5], undefined, "reads carry no key");
-	for (const m of ["answer", "abort", "setModel", "setThinking", "compact", "new", "spawn"]) await fleet.call("A", m, {});
+	for (const m of ["answer", "abort", "setModel", "setThinking", "compact", "new", "resume", "spawn"]) await fleet.call("A", m, {});
 	assert.ok(laptop.keys.slice(6).every((k) => typeof k === "string"));
 });
 

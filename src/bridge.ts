@@ -7,7 +7,7 @@ import { randomId } from "./crypto.ts";
 import { actionKey, Once } from "./once.ts";
 
 /** Phone requests that change the session: run at most once per idempotency key. */
-const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "new", "spawn"]);
+const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "new", "resume", "spawn"]);
 /**
  * What the phone can run itself. pi's built-in slash commands (`/settings`, `/resume`, `/tree`…) live in the
  * terminal's input handler, are missing from `getCommands()`, and never execute over RPC, so only these show.
@@ -15,6 +15,7 @@ const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "
 const REMOTE_COMMANDS = [
 	{ name: "compact", description: "Compact the conversation context", source: "remote" },
 	{ name: "new", description: "Start a fresh session in this terminal", source: "remote" },
+	{ name: "resume", description: "Open another session from this folder", source: "remote" },
 ];
 import { HubLink, type LinkState } from "./link.ts";
 import {
@@ -436,6 +437,9 @@ export class Bridge {
 			case "new":
 				this.newSession();
 				return { ok: true };
+			case "resume":
+				this.resumeSession();
+				return { ok: true };
 			case "spawn":
 				return spawnPi({ cwd: String(p.cwd ?? ""), prompt: typeof p.prompt === "string" ? p.prompt : undefined, spawnId: String(p.spawnId ?? "") });
 			case "commands":
@@ -595,6 +599,10 @@ export class Bridge {
 			this.newSession();
 			return { ok: true, delivered: "command" };
 		}
+		if (text.trim() === "/resume" && !images.length) {
+			this.resumeSession();
+			return { ok: true, delivered: "command" };
+		}
 		const content = images.length ? [{ type: "text" as const, text }, ...images] : text;
 		const snippet = text.trim().split("\n")[0].slice(0, 60) || `${images.length} image(s)`;
 		originalNotify(this.ctx)?.(`From ${from}: ${snippet}`, "info");
@@ -609,12 +617,21 @@ export class Bridge {
 	}
 
 	/**
-	 * `/new` for this terminal. `newSession()` only exists on a command ctx, which extensions get in a
-	 * command handler: so re-enter `/remote new` as a command and let that handler do it.
+	 * Session surgery (`/new`, `/resume`) needs a command ctx, which extensions only get inside a command
+	 * handler: re-enter `/remote <sub>` as a command and let that handler do it.
 	 */
+	private throughCommand(sub: string, busy: string): void {
+		if (!this.ctx.isIdle()) throw new Error(busy);
+		void this.pi.sendUserMessage(`/remote ${sub}`, { expandPromptTemplates: true });
+	}
+
 	private newSession(): void {
-		if (!this.ctx.isIdle()) throw new Error("pi is working: stop it before starting a new session");
-		void this.pi.sendUserMessage("/remote new", { expandPromptTemplates: true });
+		this.throughCommand("new", "pi is working: stop it before starting a new session");
+	}
+
+	/** The same list pi's `/resume` shows, as a dialog the phone can answer. */
+	private resumeSession(): void {
+		this.throughCommand("resume", "pi is working: stop it before opening another session");
 	}
 
 	private models() {

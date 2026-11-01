@@ -41,6 +41,7 @@ That's the setup. The first time it shows a QR code: scan it, the panel closes b
 ```
 /remote pair          pair another device
 /remote new           start a fresh session in this terminal (the phone follows it)
+/remote resume        open another session from this folder, picked on the phone or in the terminal
 /remote off           stop sharing this session, or every session on the machine
 /remote devices       paired devices; pick one to revoke
 /remote settings      HTTPS address (automatic with Tailscale), port
