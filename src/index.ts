@@ -21,6 +21,7 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works
 import { apnsKeyProblem } from "./apns.ts";
 import { Bridge } from "./bridge.ts";
 import { registerHerdrBlocked } from "./herdr.ts";
+import { rpivToPhone } from "./rpiv.ts";
 import { LOOPBACK_LABEL } from "./expose.ts";
 import { closeProcessHub, type LinkState } from "./link.ts";
 import type { AgentInfo } from "./protocol.ts";
@@ -222,7 +223,7 @@ function ago(when: Date): string {
 	return mins < 2 ? "now" : mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.round(mins / 60)}h` : `${Math.round(mins / 1440)}d`;
 }
 
-/** A fresh session in this terminal, with the current one as its parent so /resume shows the line. */
+	/** A fresh session in this terminal, with the current one as its parent so /resume shows the line. */
 	const startNew = async (c: ExtensionCommandContext) => {
 		await c.newSession({
 			parentSession: c.sessionManager.getSessionFile(),
@@ -259,6 +260,9 @@ function ago(when: Date): string {
 		if (at < 0) return;
 		await c.switchSession(open[at].path, { withSession: async (fresh) => fresh.ui.notify(`Resumed: ${labels[at]}`, "info") });
 	};
+
+	// rpiv's ask_user_question is a terminal overlay the phone cannot mirror; its event contract lets the phone answer.
+	rpivToPhone(pi, () => bridge);
 
 	pi.registerCommand("remote", {
 		description: "Use every pi session on this machine from your phone (end-to-end encrypted)",

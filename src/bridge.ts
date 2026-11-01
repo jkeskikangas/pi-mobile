@@ -361,6 +361,34 @@ export class Bridge {
 
 	// ── remote dialogs ─────────────────────────────────────────────────────────────
 
+	private readonly phones = new Map<string, (value: unknown) => void>();
+
+	/**
+	 * A card for the phone alone, with no dialog of ours in the terminal: for what a tool shows in a form the
+	 * phone cannot mirror (rpiv's questionnaire overlay, see rpiv.ts). `dropPhone` takes it back.
+	 */
+	phone(spec: Omit<Prompt, "id">): { id: string; answer: Promise<unknown> } {
+		const id = randomId();
+		let settle!: (value: unknown) => void;
+		const answer = new Promise<unknown>((resolve) => (settle = resolve));
+		this.phones.set(id, settle);
+		this.openPrompt({ id, ...spec }, (value) => {
+			this.phones.delete(id);
+			this.closePrompt(id, "remote", value);
+			settle(value);
+		});
+		return { id, answer };
+	}
+
+	/** The answer came from the terminal, or the tool moved on: pull the card off the phone's screen. */
+	dropPhone(id: string): void {
+		const settle = this.phones.get(id);
+		if (!settle) return;
+		this.phones.delete(id);
+		this.closePrompt(id, "terminal");
+		settle(undefined);
+	}
+
 	openPrompt(prompt: Prompt, answer: (value: unknown) => void): void {
 		this.prompts.set(prompt.id, { prompt, answer });
 		this.emit({ type: "prompt", prompt });
