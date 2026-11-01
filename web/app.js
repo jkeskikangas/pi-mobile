@@ -1708,7 +1708,7 @@
 						toast(e.message, "error");
 					}
 				}, "", "compact", "Summarise older messages to free context");
-				add("New session", async () => {
+				add("New session here (/new)", async () => {
 					closeSheet();
 					try {
 						await call("new", {});
@@ -1716,7 +1716,7 @@
 					} catch (e) {
 						toast(e.message, "error");
 					}
-				}, "", "plus", "Start this terminal over with an empty context");
+				}, "", "terminal", "Same terminal, empty context; the session you leave stays resumable");
 			}
 			add(
 				"Reload transcript",
