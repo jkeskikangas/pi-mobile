@@ -8,6 +8,14 @@ import { actionKey, Once } from "./once.ts";
 
 /** Phone requests that change the session: run at most once per idempotency key. */
 const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "new", "spawn"]);
+/**
+ * What the phone can run itself. pi's built-in slash commands (`/settings`, `/resume`, `/tree`…) live in the
+ * terminal's input handler, are missing from `getCommands()`, and never execute over RPC, so only these show.
+ */
+const REMOTE_COMMANDS = [
+	{ name: "compact", description: "Compact the conversation context", source: "remote" },
+	{ name: "new", description: "Start a fresh session in this terminal", source: "remote" },
+];
 import { HubLink, type LinkState } from "./link.ts";
 import {
 	type AgentEvent,
@@ -429,13 +437,12 @@ export class Bridge {
 			case "spawn":
 				return spawnPi({ cwd: String(p.cwd ?? ""), prompt: typeof p.prompt === "string" ? p.prompt : undefined, spawnId: String(p.spawnId ?? "") });
 			case "commands":
-				return this.pi
-					.getCommands()
-					.map((c: any) => ({ name: c.name, description: c.description ?? "", source: c.source ?? "" }))
-					.concat([
-						{ name: "compact", description: "Compact the conversation context", source: "remote" },
-						{ name: "new", description: "Start a fresh session in this terminal", source: "remote" },
-					]);
+				// Ours first: the phone lists 30 at most, and 179 skills would push these off the end.
+				return REMOTE_COMMANDS.concat(
+					this.pi
+						.getCommands()
+						.map((c: any) => ({ name: c.name, description: c.description ?? "", source: c.source ?? "" })),
+				);
 			case "voiceStatus":
 				return this.voiceStatus();
 			case "transcribe":

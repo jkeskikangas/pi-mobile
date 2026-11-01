@@ -202,7 +202,7 @@ test("model, thinking and command lists", async () => {
 	const cmds = await call("commands");
 	assert.deepEqual(
 		cmds.map((c: any) => c.name),
-		["review", "compact", "new"],
+		["compact", "new", "review"],
 	);
 });
 

@@ -1415,7 +1415,10 @@
 			} catch {}
 		}
 		const q = m[1].toLowerCase();
-		const hits = S.commands.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 30);
+		// The phone's own actions first, then names that start with what was typed; skills are many and would
+		// otherwise fill the 30 rows before anything useful.
+		const rank = (c) => (c.source === "remote" ? 0 : c.name.toLowerCase().startsWith(q) ? 1 : 2);
+		const hits = S.commands.filter((c) => c.name.toLowerCase().includes(q)).sort((a, b) => rank(a) - rank(b)).slice(0, 30);
 		const box = $("suggest");
 		if (!hits.length) return hideSuggest();
 		box.replaceChildren(
