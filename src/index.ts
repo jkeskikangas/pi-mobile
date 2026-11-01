@@ -6,6 +6,7 @@
 //
 //   /remote            connect this machine; QR if no phone is paired yet, otherwise status
 //   /remote pair       pair another device
+//   /remote new        start a fresh session in this terminal (the phone follows it)
 //   /remote off        stop sharing: this session only, or every session on the machine
 //   /remote devices    paired devices; pick one to revoke
 //   /remote settings   exposure, HTTPS address, port (the hub restarts by itself)
@@ -39,6 +40,7 @@ const FLAG_OFF = Symbol.for("pi-mobile.flag-off");
 type G = typeof globalThis & { [HIDDEN]?: boolean; [FLAG_OFF]?: boolean };
 const SUBCOMMANDS = [
 	{ value: "pair", label: "pair", description: "Pair another device" },
+	{ value: "new", label: "new", description: "Start a fresh session in this terminal" },
 	{ value: "off", label: "off", description: "Stop sharing this session or the whole machine" },
 	{ value: "devices", label: "devices", description: "Paired devices; revoke one" },
 	{ value: "settings", label: "settings", description: "Exposure, HTTPS address, port, iPhone push" },
@@ -152,9 +154,15 @@ export default function piMobile(pi: ExtensionAPI): void {
 		else stop();
 	};
 
-	pi.on("session_start", async (_e, c) => {
+	pi.on("session_start", async (e, c) => {
 		ctx = c;
 		sync();
+		// A replaced session (/new, /resume, /fork): the bridge is the old ctx's, so hand it the new one
+		// and let the phone start over on an empty transcript.
+		if (bridge && e.reason !== "startup" && e.reason !== "reload") {
+			bridge.setContext(c);
+			bridge.reset();
+		}
 		// Keystrokes here mean you are at the computer; the hub holds phone notifications meanwhile.
 		offInput?.();
 		offInput =
@@ -206,6 +214,14 @@ export default function piMobile(pi: ExtensionAPI): void {
 	pi.on("ui_prompt_start", withBridge((b, e: any) => b.terminalPromptChanged(1, e.kind, e.title)));
 	pi.on("ui_prompt_end", withBridge((b, e: any) => b.terminalPromptChanged(-1, e.kind, e.title)));
 
+	/** A fresh session in this terminal, with the current one as its parent so /resume shows the line. */
+	const startNew = async (c: ExtensionCommandContext) => {
+		await c.newSession({
+			parentSession: c.sessionManager.getSessionFile(),
+			withSession: async (fresh) => fresh.ui.notify("New session started", "info"),
+		});
+	};
+
 	pi.registerCommand("remote", {
 		description: "Use every pi session on this machine from your phone (end-to-end encrypted)",
 		getArgumentCompletions: (prefix) => {
@@ -224,6 +240,8 @@ export default function piMobile(pi: ExtensionAPI): void {
 					return connect(c);
 				case "pair":
 					return pair(c);
+				case "new":
+					return startNew(c);
 				case "off":
 					return off(c);
 				case "devices":
@@ -231,7 +249,7 @@ export default function piMobile(pi: ExtensionAPI): void {
 				case "settings":
 					return settings(c);
 				default:
-					return c.ui.notify("Usage: /remote [pair | off | devices | settings | add <ssh-host> | remove <machine>]", "info");
+					return c.ui.notify("Usage: /remote [pair | new | off | devices | settings | add <ssh-host> | remove <machine>]", "info");
 			}
 		},
 	});

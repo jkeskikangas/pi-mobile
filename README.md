@@ -16,7 +16,7 @@ No server to install, no account, no third-party relay, no app store. It all run
 - **Every session, every computer.** `/remote` shares every pi on the machine, running or started later; `/remote add box` puts a cloud box's sessions in the same list, with one tap on the phone. The list puts the session that needs you first, and a bar at the top tells you when another one is waiting.
 - **Talk to it when you can't look.** Voice mode is a spoken conversation about the work: what pi did, why something failed, what's next. It speaks about behaviour and decisions, never file names or diffs, reads pi's questions aloud, and makes you name an irreversible action ("yes, push") before it happens.
 - **Dictate prompts, get what you meant.** Speak in the terminal or on the phone; what lands in the editor is a clean prompt, with your self-corrections applied and spoken names matched to real ones in the repository.
-- **Steer without breaking flow.** Follow streaming output and tool steps live, steer pi mid-run or queue a follow-up, stop it, switch model or thinking level, compact, attach a photo.
+- **Steer without breaking flow.** Follow streaming output and tool steps live, steer pi mid-run or queue a follow-up, stop it, switch model or thinking level, compact, start a fresh session, attach a photo.
 - **Quiet while you're at the desk.** If you've typed in any pi terminal on that machine in the last two minutes, the phone stays silent.
 - **Nothing to run, nothing to trust.** No relay, server or account. A paired phone talks to pi directly over HTTPS on your Tailscale network (or your own HTTPS address), and every request and event is encrypted for that phone alone.
 
@@ -40,6 +40,7 @@ That's the setup. The first time it shows a QR code: scan it, the panel closes b
 
 ```
 /remote pair          pair another device
+/remote new           start a fresh session in this terminal (the phone follows it)
 /remote off           stop sharing this session, or every session on the machine
 /remote devices       paired devices; pick one to revoke
 /remote settings      HTTPS address (automatic with Tailscale), port

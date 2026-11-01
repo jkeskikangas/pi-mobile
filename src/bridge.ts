@@ -7,7 +7,7 @@ import { randomId } from "./crypto.ts";
 import { actionKey, Once } from "./once.ts";
 
 /** Phone requests that change the session: run at most once per idempotency key. */
-const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "spawn"]);
+const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "new", "spawn"]);
 import { HubLink, type LinkState } from "./link.ts";
 import {
 	type AgentEvent,
@@ -423,13 +423,19 @@ export class Bridge {
 			case "compact":
 				this.ctx.compact(p.instructions ? { customInstructions: String(p.instructions) } : undefined);
 				return { ok: true };
+			case "new":
+				this.newSession();
+				return { ok: true };
 			case "spawn":
 				return spawnPi({ cwd: String(p.cwd ?? ""), prompt: typeof p.prompt === "string" ? p.prompt : undefined, spawnId: String(p.spawnId ?? "") });
 			case "commands":
 				return this.pi
 					.getCommands()
 					.map((c: any) => ({ name: c.name, description: c.description ?? "", source: c.source ?? "" }))
-					.concat([{ name: "compact", description: "Compact the conversation context", source: "remote" }]);
+					.concat([
+						{ name: "compact", description: "Compact the conversation context", source: "remote" },
+						{ name: "new", description: "Start a fresh session in this terminal", source: "remote" },
+					]);
 			case "voiceStatus":
 				return this.voiceStatus();
 			case "transcribe":
@@ -538,6 +544,10 @@ export class Bridge {
 			this.ctx.compact(compact[1] ? { customInstructions: compact[1] } : undefined);
 			return { ok: true, delivered: "command" };
 		}
+		if (text.trim() === "/new" && !images.length) {
+			this.newSession();
+			return { ok: true, delivered: "command" };
+		}
 		const content = images.length ? [{ type: "text" as const, text }, ...images] : text;
 		const snippet = text.trim().split("\n")[0].slice(0, 60) || `${images.length} image(s)`;
 		originalNotify(this.ctx)?.(`From ${from}: ${snippet}`, "info");
@@ -549,6 +559,15 @@ export class Bridge {
 		this.pi.sendUserMessage(content, { deliverAs, expandPromptTemplates: true });
 		this.pushInfo();
 		return { ok: true, delivered: deliverAs };
+	}
+
+	/**
+	 * `/new` for this terminal. `newSession()` only exists on a command ctx, which extensions get in a
+	 * command handler: so re-enter `/remote new` as a command and let that handler do it.
+	 */
+	private newSession(): void {
+		if (!this.ctx.isIdle()) throw new Error("pi is working: stop it before starting a new session");
+		void this.pi.sendUserMessage("/remote new", { expandPromptTemplates: true });
 	}
 
 	private models() {
