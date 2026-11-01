@@ -1116,16 +1116,50 @@
 		return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : p || "";
 	}
 
-	/** One line under the session name that says what is going on. */
+	/** One line under the session name that says what is going on, then the footer's numbers. */
 	function statusLine(info) {
 		const ask = [...(S.prompts.get(info.agent)?.values() || [])][0];
-		if (ask) return { text: `Needs you · ${ask.title}`, cls: "waiting" };
-		if (info.status === "waiting") return { text: "Needs you in the terminal", cls: "waiting" };
-		if (info.status === "working") return { text: `Working${info.since ? ` · ${elapsed(Date.now() - info.since)}` : ""}${info.queued ? " · message queued" : ""}`, cls: "working" };
-		const bits = [info.task || shortPath(info.cwd)];
-		if (info.context?.percent != null) bits.push(`${Math.round(info.context.percent)}% context`);
+		if (ask) return { text: `Needs you · ${ask.title}${statsTail(info)}`, cls: "waiting" };
+		if (info.status === "waiting") return { text: `Needs you in the terminal${statsTail(info)}`, cls: "waiting" };
+		if (info.status === "working")
+			return { text: `Working${info.since ? ` · ${elapsed(Date.now() - info.since)}` : ""}${info.queued ? " · message queued" : ""}${statsTail(info)}`, cls: "working" };
+		return { text: [info.task || shortPath(info.cwd), ...statBits(info)].filter(Boolean).join(" · "), cls: "" };
+	}
+
+	/**
+	 * Context, cache and cost, as pi's footer shows them. They stay visible while pi works, because that is
+	 * when you look at them; the full figures sit under ⋯.
+	 */
+	function statBits(info) {
+		const bits = [];
+		if (info.context?.percent != null) bits.push(`${Math.round(info.context.percent)}% ctx`);
+		if (info.usage?.cacheRead) bits.push(`${Math.round(info.usage.hit ?? 0)}% cache`);
 		if (info.cost) bits.push(`$${info.cost.toFixed(2)}`);
-		return { text: bits.filter(Boolean).join(" · "), cls: "" };
+		return bits;
+	}
+
+	function statsTail(info) {
+		const bits = statBits(info);
+		return bits.length ? ` · ${bits.join(" · ")}` : "";
+	}
+
+	const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n || 0)));
+
+	/** The whole line, for the menu: tokens, cache, cost. */
+	function statsDetail(info) {
+		const bits = [];
+		const c = info.context;
+		if (c?.tokens != null) bits.push(`${fmtTok(c.tokens)}/${fmtTok(c.window)}${c.percent != null ? ` (${c.percent.toFixed(1)}%)` : ""} context`);
+		else if (c?.window) bits.push(`${fmtTok(c.window)} context`);
+		const u = info.usage;
+		if (u?.cacheRead || u?.cacheWrite) {
+			const cache = [`cache in ${fmtTok(u.cacheRead)} (${u.hit == null ? "?" : Math.round(u.hit)}%)`];
+			if (u.cacheWrite) cache.push(`out ${fmtTok(u.cacheWrite)}`);
+			bits.push(cache.join(" / "));
+		}
+		if (u?.input || u?.output) bits.push(`↑${fmtTok(u.input)} ↓${fmtTok(u.output)}`);
+		if (info.cost) bits.push(`$${info.cost.toFixed(2)}`);
+		return bits.join(" · ");
 	}
 
 	function workLine(info) {
@@ -1717,6 +1751,8 @@
 						toast(e.message, "error");
 					}
 				}, "", "terminal", "Same terminal, empty context; the session you leave stays resumable");
+				const stats = statsDetail(info || {});
+				if (stats) body.appendChild(el("p", "note", stats));
 			}
 			add(
 				"Reload transcript",

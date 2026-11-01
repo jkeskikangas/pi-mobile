@@ -51,7 +51,7 @@ That's the setup. The first time it shows a QR code: scan it, the panel closes b
 On the phone:
 
 - Sessions are sorted by who needs you: asking a question, then working, then idle, each with its task and latest reply.
-- The header says what the open session is doing ("Working · 0:42", "Needs you · Allow file change?").
+- The header says what the open session is doing ("Working · 0:42", "Needs you · Allow file change?"). Under it, the numbers from pi's footer: context used, cache hit rate, cost.
 - Tool calls are single rows (Read, Ran, Edited…); tap one for its output. Failures open with their error; edits show a diff.
 - Only the session on screen streams its output, so ten busy sessions cost little battery or data.
 - What you send from the phone is echoed in the terminal as `From <device>: …`.

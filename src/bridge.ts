@@ -210,6 +210,7 @@ export class Bridge {
 			status: this.prompts.size || this.terminalPrompt ? "waiting" : this.status,
 			context: usage ? { tokens: usage.tokens, window: usage.contextWindow, percent: usage.percent } : undefined,
 			cost: Math.round(cost * 10000) / 10000,
+			usage: this.usageTotals(),
 			queued: safe(() => ctx.hasPendingMessages()) ?? false,
 			last,
 			herdr: inHerdr() || undefined,
@@ -230,6 +231,7 @@ export class Bridge {
 	reset(): void {
 		this.streamKey = undefined;
 		this.partial = undefined;
+		this.usageMemo = undefined;
 		this.tools.clear();
 		this.emit({ type: "reset" });
 		this.pushInfo();
@@ -482,6 +484,44 @@ export class Bridge {
 			default:
 				throw new Error(`unknown request ${m}`);
 		}
+	}
+
+		private usageMemo: { n: number; u: AgentInfo["usage"] } | undefined;
+
+	/**
+	 * Tokens for the whole session, walked exactly like pi's footer: every entry (usage entries, tool
+	 * results, compaction summaries), not just the live branch, so the phone's number matches the terminal's.
+	 */
+	private usageTotals(): AgentInfo["usage"] {
+		let entries: any[];
+		try {
+			entries = (this.ctx.sessionManager as any).getEntries();
+		} catch {
+			return undefined;
+		}
+		if (this.usageMemo?.n === entries.length) return this.usageMemo.u;
+		const t = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		let hit: number | undefined;
+		for (const e of entries) {
+			const u =
+				e.type === "usage" || e.type === "branch_summary" || e.type === "compaction"
+					? e.usage
+					: e.type === "message" && (e.message.role === "assistant" || e.message.role === "toolResult")
+						? e.message.usage
+						: undefined;
+			if (!u) continue;
+			t.input += u.input ?? 0;
+			t.output += u.output ?? 0;
+			t.cacheRead += u.cacheRead ?? 0;
+			t.cacheWrite += u.cacheWrite ?? 0;
+			if (e.type === "message" && e.message.role === "assistant") {
+				const prompt = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+				hit = prompt > 0 ? ((u.cacheRead ?? 0) / prompt) * 100 : undefined;
+			}
+		}
+		const usage = { ...t, hit: hit === undefined ? undefined : Math.round(hit * 10) / 10 };
+		this.usageMemo = { n: entries.length, u: usage };
+		return usage;
 	}
 
 	/** "What is it doing?" in one spoken sentence, from local state: no model, instant. */

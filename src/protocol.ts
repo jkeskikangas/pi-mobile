@@ -23,6 +23,11 @@ export interface AgentInfo {
 	queued?: boolean;
 	/** First line of the latest assistant text, for the phone's session list. */
 	last?: string;
+	/**
+	 * Cumulative tokens for the whole session, walked the way pi's footer walks it (so it survives
+	 * compaction and matches the number in the terminal). `hit` is the latest cache-hit rate in percent.
+	 */
+	usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; hit?: number };
 	/** This pi runs inside herdr, so it can start new sessions for the phone. */
 	herdr?: boolean;
 	/** Set on a session the phone asked herdr to start, so the phone can open it. */

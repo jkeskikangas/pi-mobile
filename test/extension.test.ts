@@ -29,9 +29,17 @@ function host() {
 			type: "message",
 			id: "e2",
 			timestamp: "2026-10-09T10:00:01Z",
-			message: { role: "assistant", content: [{ type: "text", text: "Done." }], usage: { cost: { total: 0.25 } }, stopReason: "stop", timestamp: 2 },
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "Done." }],
+				usage: { input: 1200, output: 300, cacheRead: 88000, cacheWrite: 4000, cost: { total: 0.25 } },
+				stopReason: "stop",
+				timestamp: 2,
+			},
 		},
 	];
+	// pi's footer totals every entry, not just the live branch: a usage entry off-branch has to count.
+	const entries: any[] = [...branch, { type: "usage", usage: { input: 100, output: 0, cacheRead: 1000, cacheWrite: 0, cost: { total: 0 } } }];
 	const model = { provider: "anthropic", id: "opus", name: "Opus", reasoning: true };
 	// A terminal dialog that stays open until resolved, or dismissed through its signal.
 	const dialog = (title: string, dismissed: unknown, opts?: { signal?: AbortSignal }) =>
@@ -64,7 +72,7 @@ function host() {
 			find: (p: string, id: string) => (p === "anthropic" && id === "sonnet" ? { provider: p, id, name: "Sonnet" } : undefined),
 			getAvailable: () => [model],
 		},
-		sessionManager: { getBranch: () => branch, getSessionId: () => "sess-1" },
+		sessionManager: { getBranch: () => branch, getEntries: () => entries, getSessionId: () => "sess-1" },
 		isIdle: () => idle,
 		hasPendingMessages: () => false,
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 200000, percent: 0.5 }),
@@ -150,6 +158,11 @@ test("the phone sees the session and its transcript", async () => {
 		],
 	);
 	assert.equal(snap.info.model.id, "opus");
+	assert.deepEqual(
+		snap.info.usage,
+		{ input: 1300, output: 300, cacheRead: 89000, cacheWrite: 4000, hit: 94.4 },
+		"tokens add up the way pi's footer does, off-branch entries included",
+	);
 	assert.equal(typeof snap.n, "number");
 });
 
