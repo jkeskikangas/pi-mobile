@@ -7,7 +7,16 @@ import { randomId } from "./crypto.ts";
 import { actionKey, Once } from "./once.ts";
 
 /** Phone requests that change the session: run at most once per idempotency key. */
-const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "spawn"]);
+const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "new", "resume", "spawn"]);
+/**
+ * What the phone can run itself. pi's built-in slash commands (`/settings`, `/resume`, `/tree`…) live in the
+ * terminal's input handler, are missing from `getCommands()`, and never execute over RPC, so only these show.
+ */
+const REMOTE_COMMANDS = [
+	{ name: "compact", description: "Compact the conversation context", source: "remote" },
+	{ name: "new", description: "Start a fresh session in this terminal", source: "remote" },
+	{ name: "resume", description: "Open another session from this folder", source: "remote" },
+];
 import { HubLink, type LinkState } from "./link.ts";
 import {
 	type AgentEvent,
@@ -202,6 +211,7 @@ export class Bridge {
 			status: this.prompts.size || this.terminalPrompt ? "waiting" : this.status,
 			context: usage ? { tokens: usage.tokens, window: usage.contextWindow, percent: usage.percent } : undefined,
 			cost: Math.round(cost * 10000) / 10000,
+			usage: this.usageTotals(),
 			queued: safe(() => ctx.hasPendingMessages()) ?? false,
 			last,
 			herdr: inHerdr() || undefined,
@@ -222,6 +232,7 @@ export class Bridge {
 	reset(): void {
 		this.streamKey = undefined;
 		this.partial = undefined;
+		this.usageMemo = undefined;
 		this.tools.clear();
 		this.emit({ type: "reset" });
 		this.pushInfo();
@@ -350,6 +361,34 @@ export class Bridge {
 
 	// ── remote dialogs ─────────────────────────────────────────────────────────────
 
+	private readonly phones = new Map<string, (value: unknown) => void>();
+
+	/**
+	 * A card for the phone alone, with no dialog of ours in the terminal: for what a tool shows in a form the
+	 * phone cannot mirror (rpiv's questionnaire overlay, see rpiv.ts). `dropPhone` takes it back.
+	 */
+	phone(spec: Omit<Prompt, "id">): { id: string; answer: Promise<unknown> } {
+		const id = randomId();
+		let settle!: (value: unknown) => void;
+		const answer = new Promise<unknown>((resolve) => (settle = resolve));
+		this.phones.set(id, settle);
+		this.openPrompt({ id, ...spec }, (value) => {
+			this.phones.delete(id);
+			this.closePrompt(id, "remote", value);
+			settle(value);
+		});
+		return { id, answer };
+	}
+
+	/** The answer came from the terminal, or the tool moved on: pull the card off the phone's screen. */
+	dropPhone(id: string): void {
+		const settle = this.phones.get(id);
+		if (!settle) return;
+		this.phones.delete(id);
+		this.closePrompt(id, "terminal");
+		settle(undefined);
+	}
+
 	openPrompt(prompt: Prompt, answer: (value: unknown) => void): void {
 		this.prompts.set(prompt.id, { prompt, answer });
 		this.emit({ type: "prompt", prompt });
@@ -423,13 +462,21 @@ export class Bridge {
 			case "compact":
 				this.ctx.compact(p.instructions ? { customInstructions: String(p.instructions) } : undefined);
 				return { ok: true };
+			case "new":
+				this.newSession();
+				return { ok: true };
+			case "resume":
+				this.resumeSession();
+				return { ok: true };
 			case "spawn":
 				return spawnPi({ cwd: String(p.cwd ?? ""), prompt: typeof p.prompt === "string" ? p.prompt : undefined, spawnId: String(p.spawnId ?? "") });
 			case "commands":
-				return this.pi
-					.getCommands()
-					.map((c: any) => ({ name: c.name, description: c.description ?? "", source: c.source ?? "" }))
-					.concat([{ name: "compact", description: "Compact the conversation context", source: "remote" }]);
+				// Ours first: the phone lists 30 at most, and 179 skills would push these off the end.
+				return REMOTE_COMMANDS.concat(
+					this.pi
+						.getCommands()
+						.map((c: any) => ({ name: c.name, description: c.description ?? "", source: c.source ?? "" })),
+				);
 			case "voiceStatus":
 				return this.voiceStatus();
 			case "transcribe":
@@ -469,6 +516,44 @@ export class Bridge {
 			default:
 				throw new Error(`unknown request ${m}`);
 		}
+	}
+
+		private usageMemo: { n: number; u: AgentInfo["usage"] } | undefined;
+
+	/**
+	 * Tokens for the whole session, walked exactly like pi's footer: every entry (usage entries, tool
+	 * results, compaction summaries), not just the live branch, so the phone's number matches the terminal's.
+	 */
+	private usageTotals(): AgentInfo["usage"] {
+		let entries: any[];
+		try {
+			entries = (this.ctx.sessionManager as any).getEntries();
+		} catch {
+			return undefined;
+		}
+		if (this.usageMemo?.n === entries.length) return this.usageMemo.u;
+		const t = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		let hit: number | undefined;
+		for (const e of entries) {
+			const u =
+				e.type === "usage" || e.type === "branch_summary" || e.type === "compaction"
+					? e.usage
+					: e.type === "message" && (e.message.role === "assistant" || e.message.role === "toolResult")
+						? e.message.usage
+						: undefined;
+			if (!u) continue;
+			t.input += u.input ?? 0;
+			t.output += u.output ?? 0;
+			t.cacheRead += u.cacheRead ?? 0;
+			t.cacheWrite += u.cacheWrite ?? 0;
+			if (e.type === "message" && e.message.role === "assistant") {
+				const prompt = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+				hit = prompt > 0 ? ((u.cacheRead ?? 0) / prompt) * 100 : undefined;
+			}
+		}
+		const usage = { ...t, hit: hit === undefined ? undefined : Math.round(hit * 10) / 10 };
+		this.usageMemo = { n: entries.length, u: usage };
+		return usage;
 	}
 
 	/** "What is it doing?" in one spoken sentence, from local state: no model, instant. */
@@ -538,6 +623,14 @@ export class Bridge {
 			this.ctx.compact(compact[1] ? { customInstructions: compact[1] } : undefined);
 			return { ok: true, delivered: "command" };
 		}
+		if (text.trim() === "/new" && !images.length) {
+			this.newSession();
+			return { ok: true, delivered: "command" };
+		}
+		if (text.trim() === "/resume" && !images.length) {
+			this.resumeSession();
+			return { ok: true, delivered: "command" };
+		}
 		const content = images.length ? [{ type: "text" as const, text }, ...images] : text;
 		const snippet = text.trim().split("\n")[0].slice(0, 60) || `${images.length} image(s)`;
 		originalNotify(this.ctx)?.(`From ${from}: ${snippet}`, "info");
@@ -549,6 +642,24 @@ export class Bridge {
 		this.pi.sendUserMessage(content, { deliverAs, expandPromptTemplates: true });
 		this.pushInfo();
 		return { ok: true, delivered: deliverAs };
+	}
+
+	/**
+	 * Session surgery (`/new`, `/resume`) needs a command ctx, which extensions only get inside a command
+	 * handler: re-enter `/remote <sub>` as a command and let that handler do it.
+	 */
+	private throughCommand(sub: string, busy: string): void {
+		if (!this.ctx.isIdle()) throw new Error(busy);
+		void this.pi.sendUserMessage(`/remote ${sub}`, { expandPromptTemplates: true });
+	}
+
+	private newSession(): void {
+		this.throughCommand("new", "pi is working: stop it before starting a new session");
+	}
+
+	/** The same list pi's `/resume` shows, as a dialog the phone can answer. */
+	private resumeSession(): void {
+		this.throughCommand("resume", "pi is working: stop it before opening another session");
 	}
 
 	private models() {

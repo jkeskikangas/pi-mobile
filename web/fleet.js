@@ -324,7 +324,7 @@
 	}
 	const pick = (c) => ({ state: c.state, error: c.error });
 	/** Phone actions that change a session: each carries an idempotency key (issue #1). */
-	const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "spawn"]);
+	const ACTIONS = new Set(["send", "answer", "abort", "setModel", "setThinking", "compact", "new", "resume", "spawn"]);
 	/** Pi remembers a key for 15 minutes; the phone reuses one for 10. */
 	const ACTION_KEY_MS = 10 * 60_000;
 	function actionKey() {

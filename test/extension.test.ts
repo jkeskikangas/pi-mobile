@@ -21,6 +21,9 @@ function host() {
 	const statuses: (string | undefined)[] = [];
 	const notes: string[] = [];
 	const localDialogs: { title: string; resolve: (v: any) => void; aborted: boolean }[] = [];
+	// pi's cross-extension event bus: rpiv's ask_user_question talks on it, so the fake host has to carry it.
+	const bus = new Map<string, ((d: unknown) => void)[]>();
+	const emitted: { channel: string; data: any }[] = [];
 	let idle = true;
 	let thinking = "medium";
 	const branch: any[] = [
@@ -29,9 +32,17 @@ function host() {
 			type: "message",
 			id: "e2",
 			timestamp: "2026-10-09T10:00:01Z",
-			message: { role: "assistant", content: [{ type: "text", text: "Done." }], usage: { cost: { total: 0.25 } }, stopReason: "stop", timestamp: 2 },
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "Done." }],
+				usage: { input: 1200, output: 300, cacheRead: 88000, cacheWrite: 4000, cost: { total: 0.25 } },
+				stopReason: "stop",
+				timestamp: 2,
+			},
 		},
 	];
+	// pi's footer totals every entry, not just the live branch: a usage entry off-branch has to count.
+	const entries: any[] = [...branch, { type: "usage", usage: { input: 100, output: 0, cacheRead: 1000, cacheWrite: 0, cost: { total: 0 } } }];
 	const model = { provider: "anthropic", id: "opus", name: "Opus", reasoning: true };
 	// A terminal dialog that stays open until resolved, or dismissed through its signal.
 	const dialog = (title: string, dismissed: unknown, opts?: { signal?: AbortSignal }) =>
@@ -64,7 +75,7 @@ function host() {
 			find: (p: string, id: string) => (p === "anthropic" && id === "sonnet" ? { provider: p, id, name: "Sonnet" } : undefined),
 			getAvailable: () => [model],
 		},
-		sessionManager: { getBranch: () => branch, getSessionId: () => "sess-1" },
+		sessionManager: { getBranch: () => branch, getEntries: () => entries, getSessionId: () => "sess-1" },
 		isIdle: () => idle,
 		hasPendingMessages: () => false,
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 200000, percent: 0.5 }),
@@ -73,6 +84,16 @@ function host() {
 	};
 	const pi: any = {
 		on: (name: string, fn: Handler) => handlers.set(name, [...(handlers.get(name) ?? []), fn]),
+		events: {
+			on: (c: string, fn: (d: unknown) => void) => {
+				bus.set(c, [...(bus.get(c) ?? []), fn]);
+				return () => {};
+			},
+			emit: (c: string, data: unknown) => {
+				emitted.push({ channel: c, data });
+				for (const fn of bus.get(c) ?? []) fn(data);
+			},
+		},
 		registerFlag: () => {},
 		getFlag: (n: string) => n === "remote",
 		registerCommand: () => {},
@@ -92,7 +113,7 @@ function host() {
 		for (const fn of handlers.get(name) ?? []) results.push(await fn({ type: name, ...event }, ctx));
 		return results;
 	};
-	return { fire, ctx, sent, statuses, notes, localDialogs, thinking: () => thinking, setIdle: (v: boolean) => (idle = v) };
+	return { fire, ctx, sent, statuses, notes, localDialogs, thinking: () => thinking, setIdle: (v: boolean) => (idle = v), fireEvent: (c: string, d: unknown) => void (bus.get(c) ?? []).forEach((fn) => fn(d)), emitted };
 }
 
 let h: ReturnType<typeof host>;
@@ -150,6 +171,11 @@ test("the phone sees the session and its transcript", async () => {
 		],
 	);
 	assert.equal(snap.info.model.id, "opus");
+	assert.deepEqual(
+		snap.info.usage,
+		{ input: 1300, output: 300, cacheRead: 89000, cacheWrite: 4000, hit: 94.4 },
+		"tokens add up the way pi's footer does, off-branch entries included",
+	);
 	assert.equal(typeof snap.n, "number");
 });
 
@@ -182,6 +208,17 @@ test("prompts from the phone reach pi, steering or queueing while it works", asy
 	assert.deepEqual(h.sent.at(-1), { abort: true });
 	h.setIdle(true);
 	await assert.rejects(call("send", { text: "  " }), /empty/);
+	await call("new");
+	assert.deepEqual(h.sent.at(-1), { content: "/remote new", options: { expandPromptTemplates: true } });
+	await call("send", { text: "/new" });
+	assert.deepEqual(h.sent.at(-1), { content: "/remote new", options: { expandPromptTemplates: true } }, "typing /new is the same action");
+	await call("resume");
+	assert.deepEqual(h.sent.at(-1), { content: "/remote resume", options: { expandPromptTemplates: true } });
+	await call("send", { text: "/resume" });
+	assert.deepEqual(h.sent.at(-1), { content: "/remote resume", options: { expandPromptTemplates: true } }, "typing /resume is the same action");
+	h.setIdle(false);
+	await assert.rejects(call("new"), /working/, "a fresh session waits for pi to stop");
+	await assert.rejects(call("resume"), /working/, "so does opening another session");
 });
 
 test("model, thinking and command lists", async () => {
@@ -196,7 +233,7 @@ test("model, thinking and command lists", async () => {
 	const cmds = await call("commands");
 	assert.deepEqual(
 		cmds.map((c: any) => c.name),
-		["review", "compact"],
+		["compact", "new", "resume", "review"],
 	);
 });
 
@@ -297,6 +334,41 @@ test("answering in the terminal closes the phone's prompt; selects validate opti
 	h.localDialogs.at(-1)!.resolve("b");
 	assert.equal(await choice, "b");
 	assert.equal((await phone.waitFor((e) => e.type === "prompt_end")).by, "terminal");
+});
+
+test("rpiv's ask_user_question can be answered from the phone", async () => {
+	phone.events = [];
+	h.fireEvent("rpiv:ask-user:prompt", {
+		toolCallId: "tc1",
+		questions: [
+			{ question: "Which layout?", header: "Layout", multiSelect: false, options: [{ label: "Grid", description: "cards in rows" }, { label: "Stack", description: "one column" }] },
+			{ question: "Which extras?", header: "Extras", multiSelect: true, options: [{ label: "Hero", description: "" }, { label: "Notes", description: "" }] },
+		],
+	});
+	const one = await phone.waitFor((e) => e.type === "prompt");
+	assert.deepEqual(one.prompt.options, ["Grid", "Stack"]);
+	await call("answer", { id: one.prompt.id, value: "Grid" });
+	const two = await phone.waitFor((e) => e.type === "prompt" && e.prompt.kind === "input");
+	assert.match(two.prompt.message, /1\. Hero/, "a multi-select numbers its options");
+	await call("answer", { id: two.prompt.id, value: "1,2" });
+	assert.deepEqual(h.emitted.at(-1), {
+		channel: "rpiv:ask-user:answer",
+		data: { toolCallId: "tc1", answers: [{ questionIndex: 0, optionIndexes: [0] }, { questionIndex: 1, optionIndexes: [0, 1] }] },
+	});
+
+	// Answered at the desk: the phone's card goes back and nothing is sent to the tool.
+	const left = h.emitted.length;
+	h.fireEvent("rpiv:ask-user:prompt", { toolCallId: "tc2", questions: [{ question: "Proceed?", header: "Go", multiSelect: false, options: [{ label: "Yes", description: "" }] }] });
+	const three = await phone.waitFor((e) => e.type === "prompt" && e.prompt.title === "Go");
+	h.fireEvent("rpiv:ask-user:blocked", { active: false, toolCallId: "tc2" });
+	assert.equal((await phone.waitFor((e) => e.type === "prompt_end" && e.id === three.prompt.id)).by, "terminal");
+	assert.equal(h.emitted.length, left, "the phone does not answer what the terminal already answered");
+
+	phone.events = [];
+	h.fireEvent("rpiv:ask-user:prompt", { toolCallId: "tc3", questions: [{ question: "Proceed?", header: "Go", multiSelect: false, options: [{ label: "Yes", description: "" }] }] });
+	const four = await phone.waitFor((e) => e.type === "prompt" && e.prompt.title === "Go");
+	await call("answer", { id: four.prompt.id, value: undefined });
+	assert.deepEqual(h.emitted.at(-1), { channel: "rpiv:ask-user:answer", data: { toolCallId: "tc3", cancel: true } }, "Cancel on the card declines it");
 });
 
 test("voice: status by ear, spoken brief, and the agent knows its user is listening", async () => {

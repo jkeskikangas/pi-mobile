@@ -123,17 +123,17 @@ interface Fake {
 
 const fakes: Fake[] = [
 	{
-		info: { agent: "f-api", pid: 101, sessionId: "s1", name: "api", task: "The totals in the monthly report are wrong", cwd: "/Users/you/work/api", status: "idle", model: { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true }, thinking: "medium", context: { tokens: 41_000, window: 1_000_000, percent: 4.1 }, cost: 0.42, last: "All green. Want me to open a PR?", herdr: true },
+		info: { agent: "f-api", pid: 101, sessionId: "s1", name: "api", task: "The totals in the monthly report are wrong", cwd: "/Users/you/work/api", status: "idle", model: { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true }, thinking: "medium", context: { tokens: 41_000, window: 1_000_000, percent: 4.1 }, usage: { input: 12_400, output: 8_900, cacheRead: 1_940_000, cacheWrite: 46_000, hit: 96.4 }, cost: 0.42, last: "All green. Want me to open a PR?", herdr: true },
 		items,
 		n: 0,
 	},
 	{
-		info: { agent: "f-web", pid: 102, sessionId: "s2", name: "web", task: "Migrate the settings page to the new form components", cwd: "/Users/you/work/web", status: "working", since: now - 72_000, model: { provider: "anthropic", id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", reasoning: true }, thinking: "low", cost: 1.87, last: "Moving the validation into the shared hook next.", herdr: true },
+		info: { agent: "f-web", pid: 102, sessionId: "s2", name: "web", task: "Migrate the settings page to the new form components", cwd: "/Users/you/work/web", status: "working", since: now - 72_000, model: { provider: "anthropic", id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", reasoning: true }, thinking: "low", usage: { input: 41_000, output: 22_500, cacheRead: 6_320_000, cacheWrite: 118_000, hit: 97.5 }, cost: 1.87, last: "Moving the validation into the shared hook next.", herdr: true },
 		items: [{ k: "user", id: "w1", text: "Migrate the settings page to the new form components", images: 0, ts: now - 300_000 }],
 		n: 0,
 	},
 	{
-		info: { agent: "f-infra", pid: 103, sessionId: "s3", name: "infra", task: "Add a staging environment to the OpenTofu stack", cwd: "/Users/you/work/infra", status: "waiting", model: { provider: "openai-codex", id: "gpt-6-luna", name: "GPT-6 Luna", reasoning: true }, thinking: "high", cost: 0.12, herdr: true },
+		info: { agent: "f-infra", pid: 103, sessionId: "s3", name: "infra", task: "Add a staging environment to the OpenTofu stack", cwd: "/Users/you/work/infra", status: "waiting", model: { provider: "openai-codex", id: "gpt-6-luna", name: "GPT-6 Luna", reasoning: true }, thinking: "high", usage: { input: 5_200, output: 1_100, cacheRead: 284_000, cacheWrite: 12_000, hit: 95.5 }, cost: 0.12, herdr: true },
 		items: [],
 		n: 0,
 	},
