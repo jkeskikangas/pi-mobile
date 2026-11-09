@@ -370,6 +370,7 @@ pre.diff .h { color: var(--muted); }
 .empty ol { list-style: none; counter-reset: step; text-align: left; margin: 20px 0 0; padding: 0; max-width: 320px; display: grid; gap: 14px; }
 .empty li { counter-increment: step; display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start; font-size: 15px; }
 .empty li::before { content: counter(step); width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.empty .btn { max-width: 320px; }
 .empty .spinner { margin-bottom: 14px; }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--fill-2); border-top-color: var(--busy); animation: spin .8s linear infinite; flex: none; }
 

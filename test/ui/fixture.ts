@@ -5,6 +5,7 @@
 //
 // Control it on stdin: `work` starts a streaming turn with a running tool, `ask` opens a confirm
 // dialog, `pick` a select, `done` finishes the turn, `quiet` empties the second session.
+// `pair` prints a fresh single-use pairing link, including for an unpaired Home Screen app.
 // Composer dictation longer than a chunk becomes a draft through the real drafting engine with a
 // scripted recogniser and models (set `window.PiDraftDebug = { minMs: 1500, maxMs: 2500 }` in the
 // page for short chunks). `lose` makes the computer lose every open draft (as when pi restarts).

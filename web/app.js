@@ -154,7 +154,7 @@
 				toast(`Pairing failed: ${e.message}`, "error");
 				return true;
 			}
-			showEmpty(`<h2>Pairing failed</h2><p>${esc(e.message)}</p><p>Run <code>/remote</code> in pi again and scan the new code.</p>`);
+			unpaired(`Pairing failed: ${e.message}`);
 			return "failed";
 		}
 	}
@@ -185,8 +185,18 @@
 		$("olderBtn").hidden = true;
 		setHeader();
 		showEmpty(
-			`<img class="logo" src="icon.svg" alt=""><h2>Connect to pi</h2>${reason ? `<p>${esc(reason)}.</p>` : "<p>Use your pi sessions from this phone.</p>"}<ol><li><span>In pi on your computer, run <code>/remote</code></span></li><li><span>Scan the QR code with this phone's camera</span></li><li><span>Add this page to your Home Screen</span></li></ol>`,
+			`<img class="logo" src="icon.svg" alt=""><h2>Connect to pi</h2>${reason ? `<p>${esc(reason)}.</p>` : "<p>Use your pi sessions from this phone.</p>"}<ol><li><span>On iPhone, add this page to your Home Screen and open it</span></li><li><span>In pi on your computer, run <code>/remote pair</code></span></li><li><span>Connect here with its QR code or pairing link</span></li></ol>`,
 		);
+		const connect = el("button", "btn primary", "Connect to pi");
+		connect.onclick = () => addComputerSheet();
+		$("empty").appendChild(connect);
+	}
+
+	function connect() {
+		showEmpty(`<span class="spinner" aria-hidden="true"></span><p>Connecting to ${esc(several() ? "your computers" : S.device.host || "your computer")}…</p>`);
+		S.current = store.get(AGENT_KEY);
+		setHeader();
+		fleet.start();
 	}
 
 	function showEmpty(html) {
@@ -2212,13 +2222,16 @@
 	}
 
 	/**
-	 * Adds a computer by its pairing link (from `/remote pair` there), when no computer of yours can add it.
+	 * Pairs this app, or adds another computer, by its link from `/remote pair`.
 	 * `link` comes from a scan: it is filled in and added at once, exactly as if pasted.
 	 */
 	function addComputerSheet(link) {
+		const first = !S.device;
 		openSheet(
 			(body) => {
-				body.appendChild(el("p", "note", "Easiest: in pi on a computer this phone already uses, run /remote add <host>. Otherwise run /remote pair on the new computer and scan its code or paste its link here."));
+				body.appendChild(el("p", "note", first
+					? "Run /remote pair on your computer, then scan its QR code here or paste its pairing link. Safari and the Home Screen app pair separately; use a fresh code here."
+					: "Easiest: in pi on a computer this phone already uses, run /remote add <host>. Otherwise run /remote pair on the new computer and scan its code or paste its link here."));
 				if (canScan()) {
 					const scan = el("button", "btn");
 					scan.append(icon("qr"), "Scan QR code");
@@ -2231,13 +2244,16 @@
 				input.autocomplete = "off";
 				const f = el("label", "field");
 				f.append(el("span", "", "Pairing link"), input);
-				const go = el("button", "btn primary", "Add computer");
+				input.spellcheck = false;
+				input.autocapitalize = "none";
+				const go = el("button", "btn primary", first ? "Connect" : "Add computer");
 				go.onclick = async () => {
 					go.disabled = true;
 					try {
 						const name = await pairLink(input.value.trim());
 						closeSheet();
-						toast(`${name} added`);
+						if (first) connect();
+						toast(first ? `Paired with ${name}` : `${name} added`);
 					} catch (e) {
 						toast(e.message, "error");
 					} finally {
@@ -2260,7 +2276,7 @@
 					go.click();
 				}
 			},
-			{ title: "Add a computer" },
+			{ title: first ? "Connect to pi" : "Add a computer" },
 		);
 	}
 
@@ -2285,7 +2301,7 @@
 		none: { icon: "alert", title: "No camera found", text: "Paste the link that /remote pair shows instead." },
 		failed: { icon: "alert", title: "The camera didn't start", text: "Another app may be using it. Try again, or paste the link instead." },
 	};
-	const SCAN_HINT = "Point the camera at the QR code that /remote pair shows on the new computer.";
+	const SCAN_HINT = "Point the camera at the QR code that /remote pair shows on your computer.";
 
 	function scanSheet() {
 		let stream = null;
@@ -2441,8 +2457,10 @@
 		}
 		const m = /[#&]p=([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)/.exec(url.hash);
 		if (!m) throw new Error("That link has no pairing code; run /remote pair on the computer");
-		if (url.origin === location.origin) throw new Error("That's the computer this app runs on");
-		if (url.protocol !== "https:") throw new Error("Only HTTPS addresses work here (for example its Tailscale address)");
+		const primary = url.origin === location.origin;
+		if (primary && S.device) throw new Error("That's the computer this app runs on");
+		if (!primary && !S.device) throw new Error("Use a pairing link from the computer that serves this app");
+		if (!primary && url.protocol !== "https:") throw new Error("Only HTTPS addresses work here (for example its Tailscale address)");
 		const key = unb64u(m[2]);
 		let res;
 		try {
@@ -2457,7 +2475,7 @@
 		const body = await res.json();
 		if (!res.ok || !body.b) throw new Error(body.error || `HTTP ${res.status}`);
 		const out = open(key, body.b);
-		fleet.add({ machine: out.machine?.id, name: out.host, origin: url.origin, d: out.d, k: out.k });
+		fleet.add({ machine: out.machine?.id, name: out.host, origin: url.origin, d: out.d, k: out.k, primary });
 		return out.host;
 	}
 
@@ -2671,10 +2689,7 @@
 		const paired = await pairFromHash();
 		if (paired === "failed") return;
 		if (!S.device) return unpaired();
-		showEmpty(`<span class="spinner" aria-hidden="true"></span><p>Connecting to ${esc(several() ? "your computers" : S.device.host || "your computer")}…</p>`);
-		S.current = store.get(AGENT_KEY);
-		setHeader();
-		fleet.start();
+		connect();
 	}
 
 	// What voice.js needs from the app.

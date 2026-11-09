@@ -28,6 +28,19 @@ pi install npm:pi-mobile
 
 From a checkout: `pi install /path/to/pi-mobile` (after `npm install`), or try it once with `pi -e ./src/index.ts --remote`.
 
+### Activate an update
+
+If you update pi-mobile while pi is running, `/reload` alone doesn't replace the running hub or its in-memory copy of the phone app. Another pi process can also take over with an older version.
+
+Save any work in embedded editors and let active tasks finish before restarting. To load the update in all sharing sessions:
+
+1. In each sharing pi session, run `/quit`. Quit all of them before restarting any.
+2. In each session's working directory, run `pi --resume` to select its saved conversation. Keep any `--remote` or `-e` options you normally use.
+3. Fully close the Home Screen app on your phone.
+4. Reopen it to load the updated interface. A paired app shows your sessions; an unpaired app offers **Connect to pi**.
+
+Paired devices and saved conversations are kept. You don't need to remove the Home Screen app or clear its data.
+
 ## Use
 
 In any pi session on your computer:
@@ -54,6 +67,19 @@ On the phone:
 - Tool calls are single rows (Read, Ran, Edited…); tap one for its output. Failures open with their error; edits show a diff.
 - Only the session on screen streams its output, so ten busy sessions cost little battery or data.
 - What you send from the phone is echoed in the terminal as `From <device>: …`.
+
+### Pair the iPhone Home Screen app
+
+If the Home Screen app shows **Connect to pi** while Safari is already paired, pair it separately. Safari's pairing key isn't shared with the Home Screen app.
+
+1. Open pi-mobile from its Home Screen icon.
+2. In pi on your computer, run `/remote pair` to get a fresh QR code and pairing link.
+3. In the Home Screen app, tap **Connect to pi**.
+4. Tap **Scan QR code** to scan the code inside the app.
+
+If you can't use the camera, enter the pairing link in **Pairing link**, then tap **Connect**. Don't open the link in Safari: that pairs Safari instead. Each code works once and expires after 10 minutes; use a fresh code if you already scanned it in Safari.
+
+Your sessions appear after pairing. Close and reopen the Home Screen app to confirm that it stays paired.
 
 ### HTTPS and lock-screen notifications
 

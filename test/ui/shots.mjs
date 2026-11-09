@@ -14,7 +14,8 @@
 // picker (the voice picker from the menu and voice mode),
 // machines (a second computer offered, added, listed, offline and back), scan (Add a computer's QR scan
 // sheet: a live camera reading a code that isn't pi's, through BarcodeDetector and through the vendored
-// jsQR, then camera access off and no camera).
+// jsQR, then camera access off and no camera). Pairing uses separate browser contexts for Safari and
+// a Home Screen app: paste or scan a fresh link, recover from used links, and stay paired after reload.
 // Needs Chrome or Chromium: CHROME=/path/to/chrome when it isn't in the usual place. Exits 1 on any axe
 // violation, page error or failed step; report.json in the output folder lists them.
 
@@ -32,7 +33,7 @@ const { values: opt } = parseArgs({
 		out: { type: "string", default: "shots" },
 		width: { type: "string", default: "390,320" },
 		theme: { type: "string", default: "light,dark" },
-		only: { type: "string", default: "app,voice,draft,picker,machines,scan" },
+		only: { type: "string", default: "app,voice,draft,picker,machines,scan,pairing" },
 		port: { type: "string", default: "7979" },
 		forced: { type: "boolean", default: false },
 		reduced: { type: "boolean", default: false },
@@ -90,7 +91,7 @@ async function session(theme, width, flow) {
 			"--use-fake-ui-for-media-stream",
 			"--use-fake-device-for-media-stream",
 			`--use-file-for-fake-audio-capture=${silence}`,
-			...(flow === "scan" ? [`--use-file-for-fake-video-capture=${camera}`] : []),
+			...(["scan", "pairing"].includes(flow) ? [`--use-file-for-fake-video-capture=${camera}`] : []),
 			"--autoplay-policy=no-user-gesture-required",
 			// Earcons and speech must never reach the speakers or headphones of whoever runs this.
 			"--mute-audio",
@@ -113,8 +114,11 @@ async function session(theme, width, flow) {
 	await media();
 	const tag = `${theme}-${width}${opt.forced ? "-forced" : ""}${opt.reduced ? "-reduced" : ""}`;
 	page.on("pageerror", (e) => report.errors.push(`${tag} ${flow}: ${e.message}`));
-	// The machines flow switches a computer off on purpose; its refused connections are expected.
-	page.on("console", (m) => m.type() === "error" && !(flow === "machines" && /ERR_CONNECTION_REFUSED/.test(m.text())) && report.errors.push(`${tag} ${flow} console: ${m.text()}`));
+	// These flows deliberately exercise an offline computer and already-used pairing links.
+	page.on("console", (m) => m.type() === "error"
+		&& !(flow === "machines" && /ERR_CONNECTION_REFUSED/.test(m.text()))
+		&& !(flow === "pairing" && /status of 410/.test(m.text()))
+		&& report.errors.push(`${tag} ${flow} console: ${m.text()}`));
 
 	const say = async (cmd) => {
 		fx.stdin.write(`${cmd}\n`);
@@ -199,6 +203,70 @@ async function session(theme, width, flow) {
 	};
 
 	try {
+		if (flow === "pairing") {
+			// Safari's pairing must not be needed by an independently stored Home Screen app.
+			const safari = await browser.createBrowserContext();
+			const safariPage = await safari.newPage();
+			await safariPage.evaluateOnNewDocument(NO_SOUND);
+			await safariPage.goto(link);
+			await safariPage.waitForFunction(() => !document.querySelector("#composer").hidden);
+			await page.goto(link.split("#")[0]);
+			await shot("h1-unpaired-home-screen");
+			// The entry point also works without touch or a mouse.
+			await page.focus("#empty .btn");
+			await page.keyboard.press("Enter");
+			await shot("h2-connect");
+			const freshLink = async () => {
+				const before = buf.length;
+				await say("pair");
+				const fresh = /http:\/\/127\.0\.0\.1:\d+\/#p=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.exec(buf.slice(before))?.[0];
+				if (!fresh) throw new Error("fixture didn't issue a fresh pairing link");
+				return fresh;
+			};
+			const submit = async (text) => {
+				await page.locator(".sheet-panel input").fill(text);
+				await tap(".sheet-panel .btn.primary", "Connect");
+			};
+			await submit(link);
+			await page.waitForFunction(() => document.querySelector(".toast.error")?.textContent.includes("expired or already used"));
+			if (!(await page.evaluate(() => !document.querySelector("#sheet").hidden && document.querySelector("#composer").hidden))) throw new Error("a used link didn't leave a way to retry");
+			await page.evaluate(() => document.querySelector("#toasts").replaceChildren());
+			await submit("not a pairing link");
+			await page.waitForFunction(() => document.querySelector(".toast.error")?.textContent.includes("isn't a pairing link"));
+			await page.evaluate(() => document.querySelector("#toasts").replaceChildren());
+			await submit(link.replace(new URL(link).origin, "https://other.ts.net"));
+			await page.waitForFunction(() => document.querySelector(".toast.error")?.textContent.includes("computer that serves this app"));
+			await page.evaluate(() => document.querySelector("#toasts").replaceChildren());
+			await submit(await freshLink());
+			await page.waitForFunction(() => !document.querySelector("#composer").hidden);
+			await page.reload();
+			await page.waitForFunction(() => !document.querySelector("#composer").hidden);
+			if (!(await safariPage.evaluate(() => !document.querySelector("#composer").hidden))) throw new Error("pairing the Home Screen app disconnected Safari");
+			report.checks[`${tag} Home Screen pairs independently and stays paired after reload`] = true;
+			await shot("h3-paired-after-reload");
+
+			// An expired URL must also offer recovery, not strand the app on an error screen.
+			await page.evaluate(() => localStorage.clear());
+			await page.goto("about:blank");
+			await page.goto(link);
+			await page.waitForSelector("#empty .btn");
+			if (!(await page.evaluate(() => document.querySelector("#empty").textContent.includes("expired or already used")))) throw new Error("expired URL didn't explain the failure");
+			await shot("h4-expired-link-recovery");
+			await tap("#empty .btn", "Connect to pi");
+			const scanLink = await freshLink();
+			await page.evaluate((text) => {
+				window.BarcodeDetector = class {
+					static async getSupportedFormats() { return ["qr_code"]; }
+					async detect() { return [{ rawValue: text }]; }
+				};
+			}, scanLink);
+			await tap(".sheet-panel .btn", "Scan QR code");
+			await page.waitForFunction(() => !document.querySelector("#composer").hidden);
+			await page.reload();
+			await page.waitForFunction(() => !document.querySelector("#composer").hidden);
+			report.checks[`${tag} initial QR pairing and expired-link recovery`] = true;
+			await safari.close();
+		}
 		if (flow === "app") {
 			await page.goto(link.split("#")[0]);
 			await assertNoSound(page);
