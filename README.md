@@ -28,6 +28,19 @@ pi install npm:pi-mobile
 
 From a checkout: `pi install /path/to/pi-mobile` (after `npm install`), or try it once with `pi -e ./src/index.ts --remote`.
 
+### Activate an update
+
+If you update pi-mobile while pi is running, `/reload` alone doesn't replace the running hub or its in-memory copy of the phone app. Another pi process can also take over with an older version.
+
+Save any work in embedded editors and let active tasks finish before restarting. To load the update in all sharing sessions:
+
+1. In each sharing pi session, run `/quit`. Quit all of them before restarting any.
+2. In each session's working directory, run `pi --resume` to select its saved conversation. Keep any `--remote` or `-e` options you normally use.
+3. Fully close the Home Screen app on your phone.
+4. Reopen it to load the updated interface. A paired app shows your sessions; an unpaired app offers **Connect to pi**.
+
+Paired devices and saved conversations are kept. You don't need to remove the Home Screen app or clear its data.
+
 ## Use
 
 In any pi session on your computer:
