@@ -55,6 +55,19 @@ On the phone:
 - Only the session on screen streams its output, so ten busy sessions cost little battery or data.
 - What you send from the phone is echoed in the terminal as `From <device>: …`.
 
+### Pair the iPhone Home Screen app
+
+If the Home Screen app shows **Connect to pi** while Safari is already paired, pair it separately. Safari's pairing key isn't shared with the Home Screen app.
+
+1. Open pi-mobile from its Home Screen icon.
+2. In pi on your computer, run `/remote pair` to get a fresh QR code and pairing link.
+3. In the Home Screen app, tap **Connect to pi**.
+4. Tap **Scan QR code** to scan the code inside the app.
+
+If you can't use the camera, enter the pairing link in **Pairing link**, then tap **Connect**. Don't open the link in Safari: that pairs Safari instead. Each code works once and expires after 10 minutes; use a fresh code if you already scanned it in Safari.
+
+Your sessions appear after pairing. Close and reopen the Home Screen app to confirm that it stays paired.
+
 ### HTTPS and lock-screen notifications
 
 Phones reach pi-mobile only over HTTPS: the hub listens on this computer's loopback address alone, never on Wi-Fi or a tailnet IP, and the QR code never carries a plain-HTTP address. Install [Tailscale](https://tailscale.com) on the computer and the phone, and `/remote` does the rest: it puts pi-mobile behind `tailscale serve` (private to your tailnet, with a real certificate) and puts that address in the QR code. It reuses a serve you already have for the port, never changes other serve settings, and skips port 443 when another program holds it (then the address ends in `:8443`). If your tailnet hasn't enabled HTTPS yet, `/remote` shows Tailscale's one-click link instead of a QR code and finishes by itself once you click it; without Tailscale it says to install it.
